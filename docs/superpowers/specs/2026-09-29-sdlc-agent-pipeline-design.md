@@ -48,24 +48,24 @@ Measurable success criteria:
 
 ```
 START → fetch_issue (fn) → provision_sandbox (fn)
-      → planner (LLM, read-only tools)
-          ├─ not_actionable → report_failure (fn)
+      → planner (LLM, read-only tools) → route_plan (fn)
+          ├─ declined → report_failure (fn)
           └─ actionable → coder (LLM, read/edit/bash tools)
                 → collect_diff (fn) → run_tests (fn)
-                     ├─ fail, test_attempts < 3 → coder
+                     ├─ fail (incl. empty diff / protected-file edit), attempts ≤ 3 → coder
                      ├─ fail, attempts exhausted → report_failure
-                     └─ pass → reviewer (LLM, read-only tools)
-                                 ├─ request_changes, review_rounds < 2 → coder
-                                 ├─ request_changes, rounds exhausted → report_failure
-                                 └─ approve → human_gate (RequestInput; skipped in bench mode)
-                                                ├─ approved → open_pr (fn) → teardown (fn)
-                                                └─ rejected → report_failure
-report_failure → teardown
+                     └─ pass → reviewer (LLM, read-only tools) → route_review (fn)
+                                 ├─ changes, rounds ≤ 2 → coder
+                                 ├─ changes, rounds exhausted → report_failure
+                                 └─ approve → bench: deliver_patch (fn)
+                                              live (week 2): human_gate (RequestInput) → open_pr (fn)
 ```
 
+Sandbox teardown runs in the run driver's `finally` block (plus the TTL), not as a graph node, so it also runs when the workflow raises.
+
 - Deterministic steps are function nodes; judgment steps are `LlmAgent` nodes. No node trusts what a model says about the world: reviewers see the real `git diff`, and routing uses real test exit codes.
-- The budget plugin (§6.3) can end any LLM step early. The run then routes to `report_failure` with reason `budget_exceeded`.
-- `teardown` always runs and releases the sandbox.
+- LLM nodes cannot emit routes, so a function router follows the planner and the reviewer.
+- The budget plugin (§6.3) can abort any LLM step; the driver records the run as `failed` with `failure_kind=budget`.
 
 ### 5.2 Components
 
@@ -75,7 +75,7 @@ app/
 ├── schemas.py          IssueTask, Plan, PatchResult, Diff, TestReport, Review, RunLedger
 ├── agents/             planner.py, coder.py, reviewer.py
 ├── nodes/              fetch_issue, provision_sandbox, collect_diff, run_tests,
-│                       human_gate, open_pr, report_failure, teardown
+│                       route_plan, route_review, deliver_patch, human_gate, open_pr, report_failure
 ├── tools/              read_file, list_dir, grep, edit_file, write_file, bash
 ├── environment/        Environment protocol, DockerEnvironment, AgentRuntimeSandbox
 ├── guardrails.py       before_tool_callback chain
@@ -126,7 +126,7 @@ All tools call the active `Environment`. None touches the host filesystem or spa
 - A runner-wide `BasePlugin` accumulates `usage_metadata` from every model response and prices it with `pricing.py`.
 - **Per-run caps, shared by both systems:** `RUN_BUDGET_USD` (default `1.00`) and `MAX_TOOL_CALLS_PER_RUN` (default `75`).
 - **Per-turn sub-limit, multi-agent only:** `MAX_TOOL_CALLS_PER_TURN` (default `25`), applied to multi-agent coder turns. The baseline does all its work in one turn, so only the per-run caps apply to it.
-- When a cap is hit, the plugin sets a halt flag. The next model call short-circuits and the run routes to `report_failure` with `failure_kind=budget`.
+- When a cap is hit, the plugin raises `BudgetExceeded`, which aborts the run. Workflow edges cannot route exceptions, and ADK wraps plugin exceptions in `RuntimeError`, so the driver walks `__cause__` and records `failure_kind=budget`. The ledger lives on the plugin, because state changes from a failing callback are not persisted.
 - Because the plugin is runner-wide, both systems face identical per-run caps, which keeps the comparison fair.
 
 ### 6.4 Failure handling
@@ -160,14 +160,14 @@ Every function node yields a short user-visible `Event(content=...)` (for exampl
 |---|---|---|
 | Network | `--network none` | template `egress_control_config.internet_access=false` |
 | Limits | `--cpus 2 --memory 2g --pids-limit 256 --cap-drop ALL --security-opt no-new-privileges`, read-only root filesystem except `/workspace` and `/tmp` | CPU and memory set in the sandbox template |
-| Lifetime | container removed in `teardown` | 30-min TTL, `teardown`, and a `make sweep-sandboxes` orphan sweeper |
+| Lifetime | container removed by the driver's `finally` | 30-min TTL, the driver's `finally`, and a `make sweep-sandboxes` orphan sweeper |
 | Per command | 120 s timeout, output capped at 10k chars | same, enforced by the `Environment` interface |
 
 The `Environment` protocol follows the harness recipe's contract: tools dispatch by method or capability flag and never check the concrete backend class. Backend selection: `ENVIRONMENT_BACKEND=docker|agent_runtime`.
 
 ### 7.4 Repo flow
 
-1. `provision_sandbox` downloads the repo archive at `base_ref` via the GitHub API (live mode) or from `bench/repos` plus `plant.patch` (bench mode), then uploads it as a zip.
+1. `provision_sandbox` downloads the repo archive at `base_ref` via the GitHub API (live mode), or copies `bench/repos/<repo>` with the task's `plant/` overlay (bench mode). It uploads the copy and commits a git baseline inside the sandbox.
 2. `collect_diff` runs `git diff` inside the sandbox. This needs no network.
 3. `open_pr` applies the diff in an orchestrator-side temporary clone, pushes a branch, and opens the PR using the token.
 
@@ -212,8 +212,8 @@ Issue text is untrusted input. There are four layers of defence:
 - **Tasks (20):** 8 bug fixes, 6 small features, 3 behaviour-preserving refactors, 3 traps (ambiguous or impossible issues). Each task is tagged easy, medium or hard. The held-out split (5) is stratified so it includes at least one task of each category.
 - **Task format:** `bench/tasks/<id>/` contains:
   - `task.yaml`: `repo` (a directory under `bench/repos`), issue title and body, category, difficulty, and `split` (`dev` | `heldout`).
-  - `plant.patch`: introduces the bug, or is empty.
-  - `solution.patch`: a reference fix; empty for traps.
+  - `plant/`: overlay files that introduce the bug; absent if not needed.
+  - `solution/`: overlay files with the reference fix; absent for traps.
   - `hidden_tests/`: never present in the sandbox during the run.
 - **`bench validate`** must pass before any scored run, and after any change to a repo. For each non-trap task it checks that:
   - visible tests pass at base + plant;
@@ -222,7 +222,7 @@ Issue text is untrusted input. There are four layers of defence:
 - **Tempting tasks:** two dev tasks are built so that a shortcut passes the visible tests but fails the hidden ones. They are used for `review_catch_rate`.
 - **Runner:** `bench run --system multi|single --preset flash|pro|mixed --repeats 3 [--split dev|heldout] [--concurrency 4]`. It runs in bench mode against Docker sandboxes: no GitHub writes, no human gate, and `open_pr` writes a patch file instead.
 - **Scoring:**
-  - Normal tasks: apply the patch to a clean checkout (base + plant), then run visible and hidden tests. Resolved means all pass.
+  - Normal tasks: apply the patch to a clean checkout (base + plant), then run visible and hidden tests. Resolved means all pass. (Clean checkout = base with `plant/` overlaid.)
   - Trap tasks: resolved means the outcome is `declined`.
   - `infra` failures are rerun up to 2 times and never scored as agent failures.
 - **Split discipline:** prompts are tuned only against `dev`. `heldout` runs once, at the end. Both numbers are published.
@@ -296,12 +296,12 @@ Controls: the per-run budget cap, sandbox TTL plus sweeper, no always-on instanc
   - (S1) custom-image Agent Runtime Sandbox: provision, zip upload, `pytest` exec, teardown, and provisioning latency.
   - (S2) `agents-cli eval run` accepts a Workflow whose function nodes emit content events.
   - (S3) an `LlmAgent` node with both tools and `output_schema` under `LiteLlm`. If unsupported, the coder returns `PatchResult` through a `finish` tool.
-- Days 2–3: schemas, `DockerEnvironment`, tools, guardrails, and the graph with the fake model plus unit tests.
+- Days 2–3: schemas, `DockerEnvironment`, tools, guardrails, the budget plugin (pulled forward from week 2), and the graph with the fake model plus unit tests.
 - Days 4–5: real agents on Flash; demo repo #1 with 5 tasks end-to-end in bench mode.
 
 **Week 2: measure**
 
-- Repos #2–3 and all 20 tasks with hidden tests; bench runner, scorer and report; baseline; budget plugin.
+- Repos #2–3 and the remaining tasks (including all 5 held-out tasks) with hidden tests; parallel runner with presets and repeats; report; baseline.
 - Prompt iteration on the dev split only; quality evals.
 - GitHub integration (`fetch_issue`, `open_pr`, `report_failure`) and `human_gate`.
 
@@ -343,3 +343,15 @@ Controls: the per-run budget cap, sandbox TTL plus sweeper, no always-on instanc
 5. Hidden-test benchmark with held-out split and trap tasks.
 6. Runner-wide budget plugin for fair baseline comparison.
 7. Replay-first public demo.
+
+## 19. Amendments
+
+**2026-09-29, from Week 1 planning.** Based on reading the ADK 2.8.0 source and running API probes against it:
+
+1. Budget caps abort the run through `BudgetExceeded` (§6.3). Sandbox teardown moved into the driver's `finally` block (§5.1).
+2. Router function nodes follow LLM nodes (§5.1). Routed edges use the dict form `(node, {"route": target})`.
+3. `run_tests` fails an attempt deterministically on an empty diff or an edit to a protected file.
+4. Bench tasks use `plant/` and `solution/` overlay directories instead of patch files (§9.1).
+5. The budget plugin moved into Week 1 (§15).
+6. S3 is answered by source: `Gemini` on Vertex and `LiteLlm` support `output_schema` together with tools, and other models get ADK's `set_model_response` tool automatically. The Week 1 spike confirms it live.
+7. All Week-1 tasks are in the `dev` split. Held-out tasks are written in Week 2.
