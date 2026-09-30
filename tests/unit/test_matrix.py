@@ -7,6 +7,7 @@ import pytest
 from google.adk.events import Event
 from google.genai import types
 
+from app.environment.base import InfraError
 from app.models import RoleModels
 from app.nodes import intake
 from app.nodes.verify import TEST_CMD
@@ -268,3 +269,154 @@ async def test_progress_lines_and_status_are_prefixed_with_the_label(tmp_path, c
     out = capsys.readouterr().out
     assert "a/multi/flash/r1     coder → read_file a.py" in out
     assert "a/multi/flash/r1: patch_written" in out
+
+
+# --- A3: a crash keeps the money it spent ---
+
+
+async def test_a_pipeline_crash_after_spending_shows_the_spend(bench, monkeypatch):  # noqa: F811
+    use_env(
+        monkeypatch, FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
+    )
+
+    def crashing_workflow(system: str, preset: str):
+        # The reviewer's script is empty: it raises an AssertionError (a bug)
+        # after the planner and coder have spent tokens.
+        return build_workflow(
+            RoleModels(
+                planner=FakeLlm([json_out(PLAN)]),
+                coder=FakeLlm([json_out(PATCH)]),
+                reviewer=FakeLlm([]),
+            )
+        )
+
+    result = await run_spec(
+        RunSpec(load_task("t-1"), "multi", "flash", 1, "s"),
+        workflow_factory=crashing_workflow,
+    )
+    assert result["crashed"] and not result["resolved"]
+    assert result["reason"].startswith("unhandled AssertionError: ")
+    assert (result["outcome"], result["failure_kind"]) == ("failed", "infra")
+    assert result["cost_usd"] > 0 and result["tokens_in"] > 0
+
+
+# --- A4: scoring retries infra errors ---
+
+
+def _score_with(bench, monkeypatch, behaviour):  # noqa: F811
+    """Run one spec whose scoring calls `behaviour`; returns (row, call count)."""
+    monkeypatch.setattr(matrix, "SCORE_RETRY_PAUSE_S", 0)
+    calls: list[int] = []
+
+    async def is_resolved(task, record):
+        calls.append(1)
+        return behaviour(len(calls))
+
+    monkeypatch.setattr(matrix, "is_resolved", is_resolved)
+    use_env(
+        monkeypatch, FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
+    )
+    return calls, run_spec(
+        RunSpec(load_task("t-1"), "multi", "flash", 1, "s"),
+        workflow_factory=fake_workflow,
+    )
+
+
+async def test_scoring_infra_error_is_retried_then_succeeds(bench, monkeypatch):  # noqa: F811
+    def behaviour(n):
+        if n == 1:
+            raise InfraError("docker run failed")
+        return True
+
+    calls, pending = _score_with(bench, monkeypatch, behaviour)
+    result = await pending
+    assert len(calls) == 2
+    assert result["resolved"] is True and result["crashed"] is False
+
+
+async def test_scoring_infra_error_three_times_is_a_crashed_row(bench, monkeypatch):  # noqa: F811
+    def behaviour(n):
+        raise InfraError("docker run failed")
+
+    calls, pending = _score_with(bench, monkeypatch, behaviour)
+    result = await pending
+    assert len(calls) == 3
+    assert result["crashed"] and result["cost_usd"] > 0
+    assert result["reason"] == "unhandled InfraError: docker run failed"
+
+
+async def test_other_scoring_errors_are_not_retried(bench, monkeypatch):  # noqa: F811
+    def behaviour(n):
+        raise OSError("disk")
+
+    calls, pending = _score_with(bench, monkeypatch, behaviour)
+    result = await pending
+    assert len(calls) == 1 and result["crashed"]
+
+
+# --- A5: one failing write or print must not cancel paid runs ---
+
+
+async def test_a_failed_results_write_does_not_stop_the_other_runs(
+    tmp_path, monkeypatch
+):
+    real_write = Path.write_text
+    writes = 0
+
+    def flaky_write(self, *args, **kwargs):
+        nonlocal writes
+        writes += 1
+        if writes == 1:
+            raise OSError("disk full")
+        return real_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", flaky_write)
+    finished: list[str] = []
+
+    async def run_one(s: RunSpec) -> dict:
+        await asyncio.sleep(0 if s.task.task_id == "a" else 0.05)
+        finished.append(s.task.task_id)
+        return row()
+
+    path = tmp_path / "r.json"
+    with pytest.raises(OSError, match="disk full"):
+        await run_matrix(specs_for("a", "b", "c"), path, concurrency=3, run_one=run_one)
+    assert sorted(finished) == ["a", "b", "c"]
+    assert len(json.loads(path.read_text())) == 3
+
+
+async def test_a_broken_status_print_loses_nothing(tmp_path, monkeypatch):
+    def broken_print(*args, **kwargs):
+        raise BrokenPipeError
+
+    monkeypatch.setattr("builtins.print", broken_print)
+
+    async def run_one(s: RunSpec) -> dict:
+        return row()
+
+    path = tmp_path / "r.json"
+    rows = await run_matrix(specs_for("a", "b"), path, run_one=run_one)
+    assert len(rows) == 2 and json.loads(path.read_text()) == rows
+
+
+# --- A6: the status line says whether the run resolved ---
+
+
+def test_status_line_says_resolved_or_unresolved():
+    base = {
+        "task_id": "tc-001",
+        "system": "multi",
+        "preset": "flash",
+        "repeat": 1,
+        "outcome": "patch_written",
+        "failure_kind": "none",
+        "cost_usd": 0.16,
+        "duration_s": 95.0,
+        "crashed": False,
+        "reason": "",
+    }
+    assert (
+        matrix._status_line({**base, "resolved": True})
+        == "tc-001/multi/flash/r1: patch_written resolved (none) $0.160 95s"
+    )
+    assert "unresolved (none)" in matrix._status_line({**base, "resolved": False})

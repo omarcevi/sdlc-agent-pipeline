@@ -33,7 +33,9 @@ async def test_baseline_edits_in_a_real_sandbox_and_writes_a_patch(bench):
             call("read_file", path="mini.py"),
             FIX,
             call("bash", command="python -m pytest -q"),
-            json_out(SoloResult(summary="fix add", files_changed=["mini.py"])),
+            json_out(
+                SoloResult(declined=False, summary="fix add", files_changed=["mini.py"])
+            ),
         ]
     )
     record = await run_pipeline(

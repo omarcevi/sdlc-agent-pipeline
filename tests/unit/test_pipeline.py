@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from app.budget import BudgetExceeded, BudgetPlugin
 from app.driver import (
+    RunCrashed,
     _ActiveAgentTracker,
     build_plugins,
     classify_failure,
@@ -28,6 +29,7 @@ from tests.fakes import (
     FakeEnvironment,
     FakeLlm,
     call,
+    empty_response,
     json_out,
     make_bench_task,
     malformed_call,
@@ -314,15 +316,25 @@ async def test_bad_task_data_is_reraised_not_blamed_on_agent(bench, monkeypatch)
     use_env(monkeypatch, FakeEnvironment())
     for task_yaml in (bench / "tasks").rglob("task.yaml"):
         task_yaml.write_text("repo: mini\n")
-    with pytest.raises(ValidationError):
+    with pytest.raises(RunCrashed) as crashed:
         await run(FakeLlm([]), FakeLlm([]), FakeLlm([]))
+    assert isinstance(crashed.value.__cause__, ValidationError)
+    assert crashed.value.record.failure_kind == "infra"
 
 
-async def test_unclassified_bug_reraises_and_releases_sandbox(bench, monkeypatch):
+async def test_unclassified_bug_raises_run_crashed_keeps_spend_and_releases_sandbox(
+    bench, monkeypatch
+):
     env = FakeEnvironment()
     use_env(monkeypatch, env)
-    with pytest.raises(AssertionError):
+    with pytest.raises(RunCrashed) as crashed:
         await run(FakeLlm([json_out(PLAN)]), FakeLlm([]), FakeLlm([]))
+    assert isinstance(crashed.value.__cause__, AssertionError)
+    record = crashed.value.record
+    assert (record.outcome, record.failure_kind) == ("failed", "infra")
+    assert record.reason.startswith("unhandled AssertionError: ")
+    assert record.tokens_in > 0 and record.cost_usd > 0
+    assert _record_on_disk(bench)["cost_usd"] == record.cost_usd
     assert env.closed
 
 
@@ -497,3 +509,36 @@ def test_classify_client_error_by_http_code(code, kind):
     assert got_kind == kind
     if kind == "agent":
         assert reason.startswith(f"model rejected the request: {code} ")
+
+
+async def test_empty_planner_answer_is_an_agent_failure(bench, monkeypatch):
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    record = await run(FakeLlm([empty_response()]), FakeLlm([]), FakeLlm([]))
+    assert (record.outcome, record.failure_kind) == ("failed", "agent")
+    assert record.reason == "model returned no structured answer (planner)"
+    assert record.tokens_in > 0 and record.cost_usd > 0 and env.closed
+
+
+async def test_empty_reviewer_answer_is_an_agent_failure(bench, monkeypatch):
+    env = FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
+    use_env(monkeypatch, env)
+    record = await run(
+        FakeLlm([json_out(PLAN)]),
+        FakeLlm([json_out(PATCH)]),
+        FakeLlm([empty_response()]),
+    )
+    assert (record.outcome, record.failure_kind) == ("failed", "agent")
+    assert record.reason == "model returned no structured answer (reviewer)"
+    assert record.tokens_in > 0 and env.closed
+
+
+async def test_empty_coder_answer_is_still_tolerated(bench, monkeypatch):
+    env = FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
+    use_env(monkeypatch, env)
+    record = await run(
+        FakeLlm([json_out(PLAN)]),
+        FakeLlm([empty_response()]),
+        FakeLlm([json_out(APPROVE)]),
+    )
+    assert record.outcome == "patch_written", record.reason

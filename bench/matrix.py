@@ -8,7 +8,8 @@ from pathlib import Path
 
 from google.adk.events import Event
 
-from app.driver import run_pipeline
+from app.driver import RunCrashed, run_pipeline
+from app.environment.base import InfraError
 from app.schemas import RunRecord, RunRequest
 from app.task_store import TaskSpec
 from bench.audit import audit_patch
@@ -19,6 +20,8 @@ from bench.score import is_resolved
 OnEvent = Callable[[Event], None]
 # With progress on, run_one is also given an `on_event` keyword argument.
 RunOne = Callable[..., Awaitable[dict]]
+SCORE_ATTEMPTS = 3
+SCORE_RETRY_PAUSE_S = 2.0
 
 
 @dataclass(frozen=True)
@@ -114,6 +117,18 @@ def _crash_row(spec: RunSpec, exc: Exception, record: RunRecord | None = None) -
     )
 
 
+async def _score(spec: RunSpec, record: RunRecord) -> bool:
+    """Scoring is free, so an infra error (one failed `docker run`) is retried."""
+    for attempt in range(SCORE_ATTEMPTS):
+        try:
+            return await is_resolved(spec.task, record)
+        except InfraError:
+            if attempt == SCORE_ATTEMPTS - 1:
+                raise
+            await asyncio.sleep(SCORE_RETRY_PAUSE_S)
+    raise AssertionError("unreachable")
+
+
 async def run_spec(
     spec: RunSpec,
     *,
@@ -128,7 +143,10 @@ async def run_spec(
             workflow=workflow_factory(spec.system, spec.preset),
             on_event=on_event,
         )
-        resolved = await is_resolved(spec.task, record)
+        resolved = await _score(spec, record)
+    except RunCrashed as crashed:
+        original = crashed.__cause__ or crashed
+        return _crash_row(spec, original, crashed.record)
     except Exception as exc:
         return _crash_row(spec, exc, record)
     return _complete(
@@ -148,8 +166,9 @@ def _status_line(row: dict) -> str:
     label = f"{row['task_id']}/{row['system']}/{row['preset']}/r{row['repeat']}"
     if row["crashed"]:
         return f"{label}: crashed ({row['reason']})"
+    verdict = "resolved" if row["resolved"] else "unresolved"
     return (
-        f"{label}: {row['outcome']} ({row['failure_kind']}) "
+        f"{label}: {row['outcome']} {verdict} ({row['failure_kind']}) "
         f"${row['cost_usd']:.3f} {row['duration_s']:.0f}s"
     )
 
@@ -203,8 +222,19 @@ async def run_matrix(
         async with lock:
             rows.append(row)
             rows.sort(key=lambda r: (r["repeat"], r["task_id"]))
-            results_path.write_text(json.dumps(rows, indent=2))
-            print(_status_line(row), flush=True)
+            try:
+                results_path.write_text(json.dumps(rows, indent=2))
+            finally:
+                # A status line is display only; a closed pipe must not abort runs.
+                try:
+                    print(_status_line(row), flush=True)
+                except OSError:
+                    pass
 
-    await asyncio.gather(*(worker(s) for s in specs))
+    # A failing worker (for example an unwritable results file) must not cancel
+    # the runs still in flight: wait for all of them, then raise the first error.
+    results = await asyncio.gather(*(worker(s) for s in specs), return_exceptions=True)
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
     return rows

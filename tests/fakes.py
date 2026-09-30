@@ -40,6 +40,11 @@ def malformed_call() -> dict:
     return {"malformed": True}
 
 
+def empty_response() -> dict:
+    """A model response with no content parts at all."""
+    return {"empty": True}
+
+
 def json_out(value: BaseModel | dict) -> dict:
     data = value.model_dump() if isinstance(value, BaseModel) else value
     return text(json.dumps(data))
@@ -82,6 +87,14 @@ class FakeLlm(BaseLlm):
                 finish_reason=types.FinishReason.MALFORMED_FUNCTION_CALL,
                 usage_metadata=types.GenerateContentResponseUsageMetadata(
                     prompt_token_count=1000, candidates_token_count=100
+                ),
+            )
+            return
+        if "empty" in step:
+            yield LlmResponse(
+                content=types.Content(role="model", parts=[]),
+                usage_metadata=types.GenerateContentResponseUsageMetadata(
+                    prompt_token_count=1000, candidates_token_count=0
                 ),
             )
             return

@@ -30,6 +30,17 @@ from app.tracing import ROOT_SPAN_NAME, TRACER_NAME
 
 USER_ID = "bench"
 logger = logging.getLogger(__name__)
+
+
+class RunCrashed(Exception):
+    """The pipeline hit a bug the driver cannot classify. `record` holds the run's
+    tokens, cost and tool calls; the original exception is the `__cause__`."""
+
+    def __init__(self, record: RunRecord) -> None:
+        super().__init__(record.reason)
+        self.record = record
+
+
 # The native Gemini client raises APIError for HTTP error statuses and lets
 # transport failures through from whichever HTTP library it is using.
 _MODEL_API_ERRORS = (genai_errors.APIError, httpx.HTTPError, aiohttp.ClientError)
@@ -51,15 +62,21 @@ class _ActiveAgentTracker(BasePlugin):
     def __init__(self) -> None:
         super().__init__(name="active_agent_tracker")
         self._active: dict[str, str] = {}
+        self._last_finished: dict[str, str] = {}
 
     def active_agent(self, session_id: str) -> str | None:
         return self._active.get(session_id)
+
+    def last_finished_agent(self, session_id: str) -> str | None:
+        return self._last_finished.get(session_id)
 
     async def before_agent_callback(self, *, agent: Any, callback_context: Any) -> None:
         self._active[callback_context.session.id] = agent.name
 
     async def after_agent_callback(self, *, agent: Any, callback_context: Any) -> None:
-        self._active.pop(callback_context.session.id, None)
+        session_id = callback_context.session.id
+        self._active.pop(session_id, None)
+        self._last_finished[session_id] = agent.name
 
 
 def build_plugins(budget: BudgetPlugin, tracker: BasePlugin) -> list[BasePlugin]:
@@ -94,8 +111,36 @@ def _is_model_api_error(error: BaseException) -> bool:
     )
 
 
+# Router nodes that consume an LLM agent's structured answer. An LLM node that
+# gets an empty response completes with no output, its after_agent callback runs,
+# and the router's input validation fails: that ValidationError is titled
+# "dynamic node '<router>'".
+_ANSWER_CONSUMERS = {
+    "route_plan": "planner",
+    "route_review": "reviewer",
+    "route_solo": "solo",
+}
+
+
+def missing_answer_agent(exc: BaseException, last_finished: str | None) -> str | None:
+    """The LLM agent whose answer is missing: `exc` is the input validation of the
+    router that consumes that agent's output, and that agent finished last."""
+    if last_finished is None:
+        return None
+    for error in _chain(exc):
+        if not isinstance(error, ValidationError):
+            continue
+        for router, agent in _ANSWER_CONSUMERS.items():
+            if agent == last_finished and error.title == f"dynamic node '{router}'":
+                return agent
+    return None
+
+
 def classify_failure(
-    exc: BaseException, *, llm_agent_active: bool
+    exc: BaseException,
+    *,
+    llm_agent_active: bool,
+    missing_answer_from: str | None = None,
 ) -> tuple[FailureKind, str]:
     """Map an exception escaping the workflow to a failure kind; re-raise bugs."""
     for error in _chain(exc):
@@ -112,6 +157,8 @@ def classify_failure(
             return "agent", "malformed function calls: retry limit exceeded"
         if llm_agent_active and isinstance(error, ValidationError):
             return "agent", f"malformed model output: {error.errors()[0]['msg']}"
+    if missing_answer_from is not None:
+        return "agent", f"model returned no structured answer ({missing_answer_from})"
     raise exc
 
 
@@ -132,20 +179,28 @@ async def run_pipeline(
         ROOT_SPAN_NAME,
         attributes={"task_id": request.task_id, "run_id": request.run_id},
     ) as span:
-        record = await _run(request, workflow, on_event)
-        span.set_attributes(
-            {
-                "outcome": record.outcome,
-                "failure_kind": record.failure_kind,
-                "cost_usd": record.cost_usd,
-                "tool_calls": record.tool_calls,
-                "tokens_in": record.tokens_in,
-                "tokens_out": record.tokens_out,
-                "test_attempts": record.test_attempts,
-                "review_rounds": record.review_rounds,
-            }
-        )
+        try:
+            record = await _run(request, workflow, on_event)
+        except RunCrashed as crashed:
+            _set_record_attributes(span, crashed.record)
+            raise
+        _set_record_attributes(span, record)
     return record
+
+
+def _set_record_attributes(span: trace.Span, record: RunRecord) -> None:
+    span.set_attributes(
+        {
+            "outcome": record.outcome,
+            "failure_kind": record.failure_kind,
+            "cost_usd": record.cost_usd,
+            "tool_calls": record.tool_calls,
+            "tokens_in": record.tokens_in,
+            "tokens_out": record.tokens_out,
+            "test_attempts": record.test_attempts,
+            "review_rounds": record.review_rounds,
+        }
+    )
 
 
 async def _run(
@@ -172,6 +227,7 @@ async def _run(
 
     started = time.monotonic()
     failure: tuple[FailureKind, str] | None = None
+    crash: Exception | None = None
     on_event_warned = False
     try:
         with (run_dir / "events.jsonl").open("w") as log:
@@ -193,9 +249,19 @@ async def _run(
                                 exc,
                             )
     except Exception as exc:
-        failure = classify_failure(
-            exc, llm_agent_active=tracker.active_agent(session.id) is not None
-        )
+        try:
+            failure = classify_failure(
+                exc,
+                llm_agent_active=tracker.active_agent(session.id) is not None,
+                missing_answer_from=missing_answer_agent(
+                    exc, tracker.last_finished_agent(session.id)
+                ),
+            )
+        except Exception:
+            # A bug, not a run failure. Keep the run's numbers and raise after
+            # record.json is written.
+            crash = exc
+            failure = ("infra", f"unhandled {type(exc).__name__}: {exc}")
     finally:
         final = await runner.session_service.get_session(
             app_name="app", user_id=USER_ID, session_id=session.id
@@ -247,4 +313,6 @@ async def _run(
         duration_s=round(time.monotonic() - started, 2),
     )
     (run_dir / "record.json").write_text(record.model_dump_json(indent=2))
+    if crash is not None:
+        raise RunCrashed(record) from crash
     return record

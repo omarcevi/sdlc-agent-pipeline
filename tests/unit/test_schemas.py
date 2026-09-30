@@ -1,4 +1,12 @@
-from app.schemas import Diff, Plan, RunRecord, TestReport
+import pytest
+from pydantic import ValidationError
+
+from app.schemas import Diff, Plan, RunRecord, SoloResult, TestReport
+
+
+def test_solo_result_requires_declined():
+    with pytest.raises(ValidationError):
+        SoloResult.model_validate({"summary": "nothing to do"})
 
 
 def test_testreport_is_not_collected_by_pytest():

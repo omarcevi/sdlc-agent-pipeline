@@ -20,7 +20,7 @@ Rules:
    fix, feature or refactor you can implement and prove with pytest, without network
    access, credentials, external services or a product decision nobody has made.
 2. If it is not actionable, change nothing. Set declined to true, explain why in
-   decline_reason, and finish.
+   decline_reason, and finish. Otherwise set declined to false.
 3. Otherwise make the smallest change that resolves the issue and follow the existing
    code style.
 4. Existing test files are read-only. Put new tests in NEW test files under tests/.

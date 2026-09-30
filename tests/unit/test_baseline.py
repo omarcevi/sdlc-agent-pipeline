@@ -10,10 +10,17 @@ from app.nodes.routing import route_solo
 from app.nodes.verify import TEST_CMD
 from app.schemas import RunRequest, SoloResult
 from app.tools import CODER_TOOLS
-from tests.fakes import FakeEnvironment, FakeLlm, call, json_out, make_bench_task
+from tests.fakes import (
+    FakeEnvironment,
+    FakeLlm,
+    call,
+    empty_response,
+    json_out,
+    make_bench_task,
+)
 from tests.unit.test_pipeline import DIFF, FAIL, PASS, diff_responses, use_env
 
-SOLO = SoloResult(summary="fixed add", files_changed=["mini.py"])
+SOLO = SoloResult(declined=False, summary="fixed add", files_changed=["mini.py"])
 
 
 @pytest.fixture
@@ -128,3 +135,12 @@ def test_route_solo(declined):
             "kind": "declined",
             "reason": "why",
         }
+
+
+async def test_empty_solo_answer_is_an_agent_failure(bench, monkeypatch):
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    record = await run(FakeLlm([empty_response()]))
+    assert (record.outcome, record.failure_kind) == ("failed", "agent")
+    assert record.reason == "model returned no structured answer (solo)"
+    assert record.tokens_in > 0 and record.cost_usd > 0 and env.closed

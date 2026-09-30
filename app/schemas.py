@@ -53,9 +53,7 @@ class PatchResult(BaseModel):
 
 
 class SoloResult(BaseModel):
-    declined: bool = Field(
-        default=False, description="True if the issue is not actionable."
-    )
+    declined: bool = Field(description="True if the issue is not actionable.")
     decline_reason: str | None = None
     summary: str = Field(description="What was changed, or why nothing was.")
     files_changed: list[str] = Field(default_factory=list)

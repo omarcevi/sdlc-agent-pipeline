@@ -7,7 +7,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import StatusCode
 
 from app import tracing
-from app.driver import run_pipeline
+from app.driver import RunCrashed, run_pipeline
 from app.environment.base import ExecResult
 from app.models import RoleModels
 from app.nodes import intake
@@ -164,12 +164,14 @@ async def test_unclassified_error_marks_the_root_span_as_error(tmp_path, monkeyp
     # classified failure.
     models = RoleModels(planner=FakeLlm([]), coder=FakeLlm([]), reviewer=FakeLlm([]))
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(RunCrashed) as crashed:
         await run_pipeline(
             RunRequest(task_id="t-1", run_id="r-bug"),
             workflow=build_workflow(models),
             tracer=provider.get_tracer("test"),
         )
+    assert isinstance(crashed.value.__cause__, AssertionError)
 
     (root,) = [s for s in exporter.get_finished_spans() if s.name == "issue_to_pr.run"]
     assert root.status.status_code == StatusCode.ERROR
+    assert root.attributes["failure_kind"] == "infra"
