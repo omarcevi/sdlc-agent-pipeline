@@ -22,6 +22,21 @@ class ExecResult(BaseModel):
 
 
 class Environment(Protocol):
+    """One sandbox.
+
+    Error contract, so that an agent's mistake never looks like a broken sandbox:
+
+    - `InfraError`: the sandbox or its backend failed (daemon down, container
+      gone). Any method may raise it. Runs are retried, never blamed on the agent.
+    - `read_file` raises `FileNotFoundError` when the file does not exist.
+    - `read_file` and `write_file` raise `OSError`, carrying the sandbox's error
+      text, for every other failure caused by the path itself: it is a directory,
+      its parent is a file, permission is denied. Tools report these to the model
+      as tool errors.
+    - `exec` does not raise for a failing command. It returns the exit code, with
+      `timed_out` set when the command was stopped at its timeout.
+    """
+
     env_id: str
 
     async def exec(

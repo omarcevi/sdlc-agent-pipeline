@@ -80,17 +80,22 @@ class FakeLlm(BaseLlm):
 class FakeEnvironment:
     """In-memory sandbox. `responses` maps a command prefix to one result or a
     queue of results (the last one repeats). Unless overridden, the baseline
-    commit id query answers BASELINE_SHA."""
+    commit id query answers BASELINE_SHA. `read_errors` / `write_errors` map a
+    path to the OSError that reading or writing it raises."""
 
     def __init__(
         self,
         responses: dict[str, ExecResult | list[ExecResult]] | None = None,
         files: dict[str, str] | None = None,
+        read_errors: dict[str, OSError] | None = None,
+        write_errors: dict[str, OSError] | None = None,
     ):
         self.env_id = f"fake-{uuid.uuid4().hex[:8]}"
         self.files: dict[str, str] = dict(files or {})
         self.commands: list[str] = []
         self.closed = False
+        self._read_errors = dict(read_errors or {})
+        self._write_errors = dict(write_errors or {})
         self._responses = {
             prefix: list(v) if isinstance(v, list) else [v]
             for prefix, v in (responses or {}).items()
@@ -113,11 +118,15 @@ class FakeEnvironment:
         return ExecResult(exit_code=0, stdout="", stderr="")
 
     async def read_file(self, path: str) -> str:
+        if path in self._read_errors:
+            raise self._read_errors[path]
         if path not in self.files:
             raise FileNotFoundError(path)
         return self.files[path]
 
     async def write_file(self, path: str, content: str) -> None:
+        if path in self._write_errors:
+            raise self._write_errors[path]
         self.files[path] = content
 
     async def upload_dir(self, local_dir: Path, dest: str = WORKDIR) -> None:

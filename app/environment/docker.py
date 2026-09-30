@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import math
 import os
 import tarfile
 import uuid
@@ -10,7 +11,26 @@ from pathlib import Path
 from app.environment.base import DEFAULT_TIMEOUT_S, WORKDIR, ExecResult, InfraError
 
 DEFAULT_IMAGE = "issue-to-pr-sandbox:dev"
-_DAEMON_ERRORS = ("Error response from daemon", "No such container", "is not running")
+DEFAULT_TTL_S = "1800"
+# What the docker CLI itself prints when the daemon or the container is the problem.
+# Matched only at the start of stderr: a command run by the agent may print
+# anything, and its output must never be mistaken for a sandbox failure.
+_DAEMON_ERROR_PREFIXES = ("Error response from daemon", "Error: No such container")
+# timeout(1) exits 124 after SIGTERM, or 137 when it had to follow up with SIGKILL.
+_TIMEOUT_EXIT_CODES = (124, 137)
+
+
+def _is_daemon_error(code: int, stderr: str) -> bool:
+    return code != 0 and stderr.startswith(_DAEMON_ERROR_PREFIXES)
+
+
+def _ttl_seconds() -> str:
+    raw = os.environ.get("SANDBOX_TTL_S", DEFAULT_TTL_S)
+    if not (raw.isascii() and raw.isdigit() and int(raw) > 0):
+        raise InfraError(
+            f"SANDBOX_TTL_S must be a positive whole number of seconds, got {raw!r}"
+        )
+    return str(int(raw))
 
 
 async def _run(
@@ -43,6 +63,9 @@ class DockerEnvironment:
 
     @classmethod
     async def start(cls, image: str | None = None) -> "DockerEnvironment":
+        """Start a sandbox that removes itself after SANDBOX_TTL_S seconds, so a
+        run that never reaches close() cannot leave a container behind for long."""
+        ttl = _ttl_seconds()
         image = image or os.environ.get("SANDBOX_IMAGE", DEFAULT_IMAGE)
         name = f"itp-{uuid.uuid4().hex[:12]}"
         args = [
@@ -73,7 +96,7 @@ class DockerEnvironment:
             "1000:1000",
             image,
             "sleep",
-            "infinity",
+            ttl,
         ]
         code, _, err = await _run(args, timeout=90)
         if code != 0:
@@ -94,24 +117,35 @@ class DockerEnvironment:
             "timeout",
             "-k",
             "5",
-            str(int(timeout)),
+            str(max(1, math.ceil(timeout))),
             "sh",
             "-c",
             command,
         ]
         code, out, err = await _run(args, timeout=timeout + 30)
-        if any(marker in err for marker in _DAEMON_ERRORS):
+        if _is_daemon_error(code, err):
             raise InfraError(f"sandbox {self.env_id} unavailable: {err.strip()}")
-        return ExecResult(exit_code=code, stdout=out, stderr=err, timed_out=code == 124)
+        return ExecResult(
+            exit_code=code,
+            stdout=out,
+            stderr=err,
+            timed_out=code in _TIMEOUT_EXIT_CODES,
+        )
+
+    def _file_error(self, action: str, path: str, code: int, err: str) -> Exception:
+        """InfraError when docker failed; otherwise the OSError the path earned."""
+        if _is_daemon_error(code, err):
+            return InfraError(f"sandbox {self.env_id} unavailable: {err.strip()}")
+        if "No such file or directory" in err:
+            return FileNotFoundError(path)
+        return OSError(err.strip() or f"{action} failed for {path} (exit {code})")
 
     async def read_file(self, path: str) -> str:
         code, out, err = await _run(
             ["docker", "exec", self.env_id, "cat", "--", path], timeout=30
         )
         if code != 0:
-            if "No such file" in err:
-                raise FileNotFoundError(path)
-            raise InfraError(f"read_file failed: {err.strip()}")
+            raise self._file_error("read_file", path, code, err)
         return out
 
     async def write_file(self, path: str, content: str) -> None:
@@ -122,7 +156,7 @@ class DockerEnvironment:
             timeout=30,
         )
         if code != 0:
-            raise InfraError(f"write_file failed: {err.strip()}")
+            raise self._file_error("write_file", path, code, err)
 
     async def upload_dir(self, local_dir: Path, dest: str = WORKDIR) -> None:
         buf = io.BytesIO()

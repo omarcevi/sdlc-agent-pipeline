@@ -7,6 +7,9 @@ from google.adk.tools import ToolContext
 from app.environment.base import WORKDIR, truncate
 from app.tools._common import PathError, env_for, resolve_repo_path
 
+LIST_LIMIT = 200
+_NOT_A_DIRECTORY = 3
+
 
 async def read_file(path: str, tool_context: ToolContext) -> dict:
     """Read a text file from the repository.
@@ -14,6 +17,7 @@ async def read_file(path: str, tool_context: ToolContext) -> dict:
     Args:
       path: Repo-relative path, for example "taskcli/cli.py".
     """
+    path = path or "."
     try:
         target = resolve_repo_path(path)
     except PathError as exc:
@@ -22,26 +26,46 @@ async def read_file(path: str, tool_context: ToolContext) -> dict:
         content = await env_for(tool_context).read_file(target)
     except FileNotFoundError:
         return {"error": f"file not found: {path}"}
+    except OSError as exc:
+        return {"error": f"cannot read {path}: {exc}"}
     return {"path": path, "content": truncate(content)}
 
 
 async def list_dir(path: str, tool_context: ToolContext) -> dict:
     """List files under a directory, recursively (max 200 entries, .git ignored).
+    The result has "truncated": true when there were more entries than the limit.
 
     Args:
       path: Repo-relative directory; use "." for the whole repository.
     """
+    path = path or "."
     try:
         target = resolve_repo_path(path)
     except PathError as exc:
         return {"error": str(exc)}
+    quoted = shlex.quote(target)
+    # One entry more than the limit is requested, to tell "exactly at the limit"
+    # from "cut off".
     command = (
-        f"find {shlex.quote(target)} -path '*/.git' -prune -o -type f -print "
-        f"| sort | head -n 200"
+        f"test -d {quoted} || exit {_NOT_A_DIRECTORY}; "
+        f"find {quoted} -path '*/.git' -prune -o -type f -print "
+        f"| sort | head -n {LIST_LIMIT + 1}"
     )
     result = await env_for(tool_context).exec(command)
-    entries = [line.removeprefix(WORKDIR + "/") for line in result.stdout.splitlines()]
-    return {"entries": entries}
+    if result.exit_code == _NOT_A_DIRECTORY:
+        return {"error": f"{path} does not exist or is not a directory"}
+    if result.exit_code != 0:
+        return {
+            "error": truncate(result.stderr)
+            or f"listing {path} failed (exit {result.exit_code})"
+        }
+    lines = result.stdout.splitlines()
+    listing: dict = {
+        "entries": [line.removeprefix(WORKDIR + "/") for line in lines[:LIST_LIMIT]]
+    }
+    if len(lines) > LIST_LIMIT:
+        listing["truncated"] = True
+    return listing
 
 
 async def grep(pattern: str, path: str, tool_context: ToolContext) -> dict:
@@ -51,6 +75,7 @@ async def grep(pattern: str, path: str, tool_context: ToolContext) -> dict:
       pattern: Regular expression to search for.
       path: Repo-relative file or directory; use "." for the whole repository.
     """
+    path = path or "."
     try:
         target = resolve_repo_path(path)
     except PathError as exc:
@@ -79,6 +104,7 @@ async def edit_file(
     """
     if not old_string:
         return {"error": "old_string must not be empty; use write_file to create files"}
+    path = path or "."
     try:
         target = resolve_repo_path(path)
     except PathError as exc:
@@ -88,6 +114,8 @@ async def edit_file(
         content = await env.read_file(target)
     except FileNotFoundError:
         return {"error": f"file not found: {path}"}
+    except OSError as exc:
+        return {"error": f"cannot read {path}: {exc}"}
     count = content.count(old_string)
     if count == 0:
         return {
@@ -97,7 +125,10 @@ async def edit_file(
         return {
             "error": f"old_string matches {count} times; include more surrounding context"
         }
-    await env.write_file(target, content.replace(old_string, new_string, 1))
+    try:
+        await env.write_file(target, content.replace(old_string, new_string, 1))
+    except OSError as exc:
+        return {"error": f"cannot write {path}: {exc}"}
     return {"ok": True, "path": path}
 
 
@@ -108,6 +139,7 @@ async def write_file(path: str, content: str, tool_context: ToolContext) -> dict
       path: Repo-relative path of the new file.
       content: Full file content.
     """
+    path = path or "."
     try:
         target = resolve_repo_path(path)
     except PathError as exc:
@@ -115,5 +147,8 @@ async def write_file(path: str, content: str, tool_context: ToolContext) -> dict
     env = env_for(tool_context)
     if (await env.exec(f"test -e {shlex.quote(target)}")).exit_code == 0:
         return {"error": f"{path} already exists; use edit_file"}
-    await env.write_file(target, content)
+    try:
+        await env.write_file(target, content)
+    except OSError as exc:
+        return {"error": f"cannot write {path}: {exc}"}
     return {"ok": True, "path": path}
