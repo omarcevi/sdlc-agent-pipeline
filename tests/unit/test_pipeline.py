@@ -1,6 +1,11 @@
+import json
+import logging
 from pathlib import Path
 
+import aiohttp
+import httpx
 import pytest
+from google.genai import errors as genai_errors
 from pydantic import ValidationError
 
 from app.budget import BudgetExceeded
@@ -11,7 +16,15 @@ from app.nodes import intake
 from app.nodes.verify import DIFF_CMD, NUMSTAT_CMD, TEST_CMD
 from app.pipeline import build_workflow
 from app.schemas import PatchResult, Plan, Review, RunRequest
-from tests.fakes import FakeEnvironment, FakeLlm, call, json_out, make_bench_task, text
+from tests.fakes import (
+    FakeEnvironment,
+    FakeLlm,
+    call,
+    json_out,
+    make_bench_task,
+    raises,
+    text,
+)
 
 DIFF = "diff --git a/mini.py b/mini.py\n--- a/mini.py\n+++ b/mini.py\n@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return a + b\n"
 PLAN = Plan(actionable=True, summary="fix add", files_to_inspect=["mini.py"])
@@ -143,6 +156,55 @@ async def test_infra_failure_is_classified(bench, monkeypatch):
     assert "docker daemon down" in record.reason
 
 
+def _server_error() -> genai_errors.ServerError:
+    body = {"error": {"code": 503, "message": "overloaded", "status": "UNAVAILABLE"}}
+    return genai_errors.ServerError(503, body)
+
+
+def _record_on_disk(bench) -> dict:
+    return json.loads((bench / "runs" / "r-1" / "record.json").read_text())
+
+
+async def test_model_api_error_is_an_infra_failure_with_a_record(bench, monkeypatch):
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    record = await run(FakeLlm([raises(_server_error())]), FakeLlm([]), FakeLlm([]))
+    assert (record.outcome, record.failure_kind) == ("failed", "infra")
+    assert "ServerError" in record.reason and "overloaded" in record.reason
+    assert env.closed
+    assert _record_on_disk(bench)["failure_kind"] == "infra"
+
+
+class UnclosableEnvironment(FakeEnvironment):
+    async def close(self) -> None:
+        raise RuntimeError("docker rm timed out")
+
+
+async def test_failing_sandbox_release_keeps_a_successful_outcome(
+    bench, monkeypatch, caplog
+):
+    env = UnclosableEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
+    use_env(monkeypatch, env)
+    with caplog.at_level(logging.WARNING, logger="app.driver"):
+        record = await run(
+            FakeLlm([json_out(PLAN)]),
+            FakeLlm([json_out(PATCH)]),
+            FakeLlm([json_out(APPROVE)]),
+        )
+    assert (record.outcome, record.failure_kind) == ("patch_written", "none")
+    assert _record_on_disk(bench)["outcome"] == "patch_written"
+    assert "docker rm timed out" in caplog.text and env.env_id in caplog.text
+
+
+async def test_failing_sandbox_release_keeps_the_classified_failure(bench, monkeypatch):
+    monkeypatch.setenv("RUN_BUDGET_USD", "0.001")
+    use_env(monkeypatch, UnclosableEnvironment())
+    planner = FakeLlm([call("list_dir", path="."), json_out(PLAN)])
+    record = await run(planner, FakeLlm([]), FakeLlm([]))
+    assert (record.outcome, record.failure_kind) == ("failed", "budget")
+    assert _record_on_disk(bench)["failure_kind"] == "budget"
+
+
 async def test_malformed_model_output_is_an_agent_failure(bench, monkeypatch):
     env = FakeEnvironment()
     use_env(monkeypatch, env)
@@ -202,3 +264,52 @@ def test_classify_validation_error_with_active_agent_is_agent_failure():
 def test_classify_validation_error_without_active_agent_reraises():
     with pytest.raises(ValidationError):
         classify_failure(_validation_error(), llm_agent_active=False)
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (_server_error(), "ServerError: 503 UNAVAILABLE"),
+        (
+            genai_errors.ClientError(429, {"error": {"message": "quota exceeded"}}),
+            "ClientError: 429",
+        ),
+        (httpx.ConnectError("connection refused"), "ConnectError: connection refused"),
+        (httpx.ReadTimeout("read timed out"), "ReadTimeout: read timed out"),
+        (
+            aiohttp.ServerDisconnectedError("server hung up"),
+            "ServerDisconnectedError: server hung up",
+        ),
+    ],
+)
+def test_classify_model_api_and_transport_errors_as_infra(error, expected):
+    kind, reason = classify_failure(error, llm_agent_active=True)
+    assert kind == "infra" and expected in reason
+
+
+def test_classify_wrapped_model_api_error_as_infra():
+    try:
+        try:
+            raise _server_error()
+        except genai_errors.ServerError as inner:
+            raise RuntimeError("node failed") from inner
+    except RuntimeError as exc:
+        kind, reason = classify_failure(exc, llm_agent_active=True)
+    assert kind == "infra" and "ServerError" in reason
+
+
+def test_classify_litellm_errors_as_infra_without_importing_litellm():
+    # LiteLLM's errors subclass the OpenAI SDK's. Stand-ins with the same module
+    # names keep this test from importing litellm, which takes seconds.
+    openai_error = type("OpenAIError", (Exception,), {"__module__": "openai"})
+    rate_limit = type(
+        "RateLimitError", (openai_error,), {"__module__": "litellm.exceptions"}
+    )
+    kind, reason = classify_failure(rate_limit("slow down"), llm_agent_active=True)
+    assert (kind, reason) == ("infra", "RateLimitError: slow down")
+
+
+def test_classify_does_not_treat_lookalike_errors_as_model_api_errors():
+    lookalike = type("OpenAIError", (Exception,), {"__module__": "myapp.errors"})
+    with pytest.raises(lookalike):
+        classify_failure(lookalike("x"), llm_agent_active=False)

@@ -30,6 +30,11 @@ def text(value: str) -> dict:
     return {"text": value}
 
 
+def raises(error: Exception) -> dict:
+    """A model call that fails with `error`, as an API or transport error would."""
+    return {"raise": error}
+
+
 def json_out(value: BaseModel | dict) -> dict:
     data = value.model_dump() if isinstance(value, BaseModel) else value
     return text(json.dumps(data))
@@ -63,6 +68,8 @@ class FakeLlm(BaseLlm):
                 f"{self.model}: script exhausted at call {self._calls}"
             )
         step = self._steps.pop(0)
+        if "raise" in step:
+            raise step["raise"]
         if "call" in step:
             part = types.Part(
                 function_call=types.FunctionCall(name=step["call"], args=step["args"])

@@ -1,13 +1,17 @@
 """Runs one pipeline instance end to end and always releases its sandbox."""
 
+import logging
 import time
 from collections.abc import Iterator
 from typing import Any
 
+import aiohttp
+import httpx
 from google.adk.apps import App
 from google.adk.plugins.base_plugin import BasePlugin
 from google.adk.runners import InMemoryRunner
 from google.adk.workflow import Workflow
+from google.genai import errors as genai_errors
 from google.genai import types
 from pydantic import ValidationError
 
@@ -21,6 +25,10 @@ from app.pipeline import build_workflow
 from app.schemas import FailureKind, RunRecord, RunRequest
 
 USER_ID = "bench"
+logger = logging.getLogger(__name__)
+# The native Gemini client raises APIError for HTTP error statuses and lets
+# transport failures through from whichever HTTP library it is using.
+_MODEL_API_ERRORS = (genai_errors.APIError, httpx.HTTPError, aiohttp.ClientError)
 
 
 class _ActiveAgentTracker(BasePlugin):
@@ -55,6 +63,18 @@ def _chain(exc: BaseException) -> Iterator[BaseException]:
         current = current.__cause__ or current.__context__
 
 
+def _is_model_api_error(error: BaseException) -> bool:
+    """True for a failed call to a model provider: an API error or a transport error."""
+    if isinstance(error, _MODEL_API_ERRORS):
+        return True
+    # LiteLLM's errors subclass openai.OpenAIError. Matching the class by name
+    # avoids importing litellm here, which takes several seconds.
+    return any(
+        cls.__name__ == "OpenAIError" and cls.__module__.partition(".")[0] == "openai"
+        for cls in type(error).__mro__
+    )
+
+
 def classify_failure(
     exc: BaseException, *, llm_agent_active: bool
 ) -> tuple[FailureKind, str]:
@@ -64,6 +84,8 @@ def classify_failure(
             return "budget", str(error)
         if isinstance(error, InfraError):
             return "infra", str(error)
+        if _is_model_api_error(error):
+            return "infra", f"{type(error).__name__}: {error}"
         if llm_agent_active and isinstance(error, ValidationError):
             return "agent", f"malformed model output: {error.errors()[0]['msg']}"
     raise exc
@@ -107,7 +129,17 @@ async def run_pipeline(
         )
         state = dict(final.state) if final else {}
         if sandbox_id := state.get("sandbox_id"):
-            await registry.release(sandbox_id)
+            # A failed release must not replace the run's real outcome or stop
+            # record.json from being written. The sandbox removes itself at its TTL.
+            try:
+                await registry.release(sandbox_id)
+            except Exception as exc:
+                logger.warning(
+                    "could not release sandbox %s: %s: %s",
+                    sandbox_id,
+                    type(exc).__name__,
+                    exc,
+                )
 
     outcome = state.get("outcome") or {}
     if failure is not None:
