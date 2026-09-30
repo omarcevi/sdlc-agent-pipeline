@@ -1,0 +1,4 @@
+sandbox_image/runtime/{protocol.py,server.py,entrypoint.sh} are copied unmodified from
+google/adk-samples (core/python/long-horizon-harness/horizon/sandbox/runtime/) at commit
+2f902cb4e22e022f0dec2deddef31b71ea32a136, licensed under the Apache License, Version 2.0.
+Copyright 2026 Google LLC.

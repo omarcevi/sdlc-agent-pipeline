@@ -45,7 +45,8 @@ lint = [
 [tool.ruff]
 line-length = 88
 target-version = "py311"
-extend-exclude = ["docs"]  # plans and specs contain illustrative code blocks
+# docs: illustrative code blocks in plans/specs. sandbox_image/runtime: vendored unmodified (see NOTICE).
+extend-exclude = ["docs", "sandbox_image/runtime"]
 
 [tool.ruff.lint]
 select = [
@@ -71,7 +72,7 @@ known-first-party = ["app", "frontend"]
 python-version = "3.10"
 
 [tool.ty.src]
-exclude = [".venv/**"]
+exclude = [".venv/**", "sandbox_image/runtime/**"]
 
 [tool.ty.rules]
 # Ignore common issues with third-party libraries and dynamic code patterns
