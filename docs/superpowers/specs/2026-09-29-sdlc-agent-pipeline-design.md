@@ -375,3 +375,10 @@ Controls: the per-run budget cap, sandbox TTL plus sweeper, no always-on instanc
 3. A test pins that the visible run ignores pytest config files shipped in a patch.
 4. `bench/audit.py::audit_patch` flags patches that touch `pytest.py`, `conftest.py`, `sitecustomize.py`, `usercustomize.py`, `pytest.ini`, `tox.ini`, `setup.cfg`, `*.pth` or `pyproject.toml`, or add `os._exit`, `atexit`, `sys.exit(`, `pytest_collection_modifyitems`, `pytest_runtest_makereport` or `collect_ignore`. Result rows carry `audit: list[str]`; the audit never changes `resolved`.
 5. Hidden tests run in a second fresh sandbox, so code run during the visible phase cannot reach them.
+
+**2026-09-30, from Week 2A, Tasks 2 to 5.**
+
+1. The single-agent baseline (`app/baseline.py`) is one `solo` agent with the same tools, sandbox, guardrails, budget and 3-return test-fix loop as the coder. It drops only the planner and the reviewer, so the comparison measures what those two roles add. The per-turn tool-call cap names the `coder` agent, so `solo` is bound by the per-run caps only (§9).
+2. Bench runs take their models from a preset (`flash`, `pro`, `mixed`) instead of the role env vars; `mixed` has no single-agent form.
+3. A model API `400` or `413` is recorded as an agent failure ("model rejected the request"); other model API and transport errors stay infra (amends item 6 of the Week 1 review block).
+4. `bench.run` runs a matrix: `--system multi|single`, `--preset`, `--repeats`, `--concurrency`. An infra failure is rerun up to twice with its cost summed; a crashed run is recorded and not rerun. Tasks are validated before any run starts, and held-out tasks need `--confirm-heldout`.
