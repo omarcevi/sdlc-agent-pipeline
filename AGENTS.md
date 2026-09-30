@@ -22,12 +22,13 @@ Read the spec before making architectural changes. If the code and the spec disa
    - Never edit `hidden_tests/` to make a run pass.
    - Run `bench validate` after changing anything under `bench/repos/`.
 6. **Keep the cost guards.** The budget plugin, sandbox TTLs and loop bounds stay on. Changing their defaults needs the owner's approval.
-7. **Don't change model names unless asked.** Models are configured through env vars (`PLANNER_MODEL`, `CODER_MODEL`, `REVIEWER_MODEL`, `BASELINE_MODEL`).
+7. **Don't change model names unless asked.** Models are configured through env vars (`PLANNER_MODEL`, `CODER_MODEL`, `REVIEWER_MODEL`). Bench runs take their models from `--preset`; the three role variables configure `app/agent.py`.
 8. **Never deploy, create cloud resources, or push to GitHub without explicit approval** from the owner, given in the current session.
 
 ## Runtime wiring
 
 - `app/pipeline.py` builds the graph; `app/agent.py` exposes it to agents-cli as `root_agent` / `app`; `app/driver.py` (`run_pipeline`) is the entry point for bench runs and the only place that releases the sandbox.
+- `app/baseline.py` builds the single-agent baseline graph (`build_baseline_workflow`): fetch, provision, one `solo` agent (same tools, sandbox, guardrails and budget as the coder), `route_solo`, diff, tests, deliver, with the same 3-return test-fix loop. It drops only the planner and the reviewer. The per-turn tool-call cap applies to `coder` only, so `solo` is exempt; the per-run caps still apply.
 - Runner-wide plugins, in order: `BudgetPlugin` (cost and tool-call caps), ADK's `ReflectAndRetryModelPlugin(max_retries=2)` (retries malformed function calls), `GuardrailPlugin` (shell and protected-path checks), then the BigQuery analytics plugin when it is enabled. The driver inserts an internal tracker, used for failure classification, right after the budget plugin. The order matters: a plugin that returns a value stops the ones after it.
 - Scoring (`bench/score.py`) runs inside a sandbox; model-written code never runs on the host.
 - Tracing (`app/tracing.py`) is opt-in. With `TRACE_TO_CLOUD=1`, `bench.run` exports to Cloud Trace: the driver's root span `issue_to_pr.run` (task, run ID, outcome, cost, tool calls) with ADK's workflow, agent, model-call and tool-call spans under it.

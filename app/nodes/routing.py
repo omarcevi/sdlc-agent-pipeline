@@ -2,7 +2,7 @@
 
 from google.adk.events.event import Event
 
-from app.schemas import Plan, Review
+from app.schemas import Plan, Review, SoloResult
 
 MAX_REVIEW_RETURNS = 2
 
@@ -11,6 +11,17 @@ def route_plan(node_input: Plan) -> Event:
     if node_input.actionable:
         return Event(output=node_input, route="actionable")
     reason = node_input.decline_reason or "planner declined without giving a reason"
+    return Event(
+        output=node_input,
+        route="declined",
+        state={"failure": {"kind": "declined", "reason": reason}},
+    )
+
+
+def route_solo(node_input: SoloResult) -> Event:
+    if not node_input.declined:
+        return Event(output=node_input, route="done")
+    reason = node_input.decline_reason or "agent declined without giving a reason"
     return Event(
         output=node_input,
         route="declined",
