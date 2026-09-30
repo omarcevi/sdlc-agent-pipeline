@@ -1,6 +1,10 @@
 """Model presets for benchmark runs."""
 
-from app.models import RoleModels
+from google.adk.workflow import Workflow
+
+from app.baseline import build_baseline_workflow
+from app.models import RoleModels, make_model
+from app.pipeline import build_workflow
 
 FLASH = "gemini-3.8-flash"
 PRO = "gemini-3.1-pro-preview"
@@ -31,3 +35,12 @@ def solo_model_name(preset: str) -> str:
             "the mixed preset needs roles; use flash or pro with --system single"
         )
     return _preset(preset)["coder"]
+
+
+def workflow_for(system: str, preset: str) -> Workflow:
+    """A fresh workflow (own agents, own models) for one run of `system`."""
+    if system == "multi":
+        return build_workflow(role_models(preset))
+    if system == "single":
+        return build_baseline_workflow(make_model(solo_model_name(preset)))
+    raise ValueError(f"unknown system {system!r}; valid systems: multi, single")

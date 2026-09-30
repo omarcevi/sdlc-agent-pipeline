@@ -4,28 +4,13 @@ import pytest
 from google.adk.events import Event
 from google.genai import types
 
-from app.schemas import RunRecord
-from app.task_store import TaskSpec
+from bench import matrix
 from bench import run as bench_run
-from bench.run import main, run_task, run_tasks
+from bench.run import main
 
 
-def spec(task_id: str, category: str = "bug") -> TaskSpec:
-    return TaskSpec(
-        task_id=task_id,
-        repo="mini",
-        title="t",
-        body="b",
-        category=category,
-        difficulty="easy",
-        split="dev",
-    )
-
-
-def ok_row(task: TaskSpec) -> dict:
+def ok_row(spec: matrix.RunSpec) -> dict:
     return {
-        "task_id": task.task_id,
-        "category": task.category,
         "resolved": True,
         "outcome": "patch_written",
         "failure_kind": "none",
@@ -36,146 +21,25 @@ def ok_row(task: TaskSpec) -> dict:
 
 @pytest.fixture(autouse=True)
 def _no_real_runs(monkeypatch):
-    """Nothing in this module may load .env or start a real pipeline."""
+    """Nothing in this module may load .env, run a validation or start a pipeline."""
 
     async def forbidden(*args, **kwargs):
         raise AssertionError("a unit test tried to run the real pipeline")
 
     monkeypatch.setattr(bench_run, "load_dotenv", lambda: None)
-    monkeypatch.setattr(bench_run, "run_pipeline", forbidden)
+    monkeypatch.setattr(bench_run, "validate_task", lambda task: [])
+    monkeypatch.setattr(matrix, "run_pipeline", forbidden)
 
 
-async def test_a_crashing_task_is_recorded_and_the_run_continues(tmp_path, capsys):
-    async def run_one(task: TaskSpec, stamp: str) -> dict:
-        if task.task_id == "b":
-            raise RuntimeError("boom")
-        return ok_row(task)
+def _use_run_one(monkeypatch, run_one, calls=None):
+    real = bench_run.run_matrix
 
-    results = tmp_path / "results.json"
-    rows = await run_tasks([spec("a"), spec("b"), spec("c")], "s", results, run_one)
-    assert [row["task_id"] for row in rows] == ["a", "b", "c"]
-    assert rows[1] == {
-        "task_id": "b",
-        "category": "bug",
-        "resolved": False,
-        "outcome": "failed",
-        "failure_kind": "infra",
-        "reason": "unhandled RuntimeError: boom",
-        "crashed": True,
-    }
-    assert json.loads(results.read_text()) == rows
-    assert "b: crashed" in capsys.readouterr().out
+    async def fake_run_matrix(specs, path, **kwargs):
+        if calls is not None:
+            calls.append((specs, path, kwargs))
+        return await real(specs, path, **{**kwargs, "run_one": run_one})
 
-
-async def test_results_are_written_after_every_task(tmp_path):
-    results = tmp_path / "results.json"
-    seen_before_each_task = []
-
-    async def run_one(task: TaskSpec, stamp: str) -> dict:
-        done = json.loads(results.read_text()) if results.exists() else []
-        seen_before_each_task.append([row["task_id"] for row in done])
-        return ok_row(task)
-
-    await run_tasks([spec("a"), spec("b"), spec("c")], "s", results, run_one)
-    assert seen_before_each_task == [[], ["a"], ["a", "b"]]
-
-
-async def test_run_task_scores_the_pipeline_record(monkeypatch):
-    record = RunRecord(
-        task_id="a", run_id="a-s", outcome="patch_written", failure_kind="none"
-    )
-    requests = []
-
-    async def fake_pipeline(request, on_event=None):
-        requests.append(request)
-        return record
-
-    async def fake_is_resolved(task, scored):
-        return scored is record
-
-    monkeypatch.setattr(bench_run, "run_pipeline", fake_pipeline)
-    monkeypatch.setattr(bench_run, "is_resolved", fake_is_resolved)
-    row = await run_task(spec("a"), "s")
-    assert (requests[0].task_id, requests[0].run_id) == ("a", "a-s")
-    assert row == {
-        "task_id": "a",
-        "category": "bug",
-        "resolved": True,
-        "audit": [],
-        **record.model_dump(),
-    }
-
-
-async def test_run_task_audits_the_patch_without_changing_resolved(
-    tmp_path, monkeypatch
-):
-    patch = tmp_path / "patch.diff"
-    patch.write_text(
-        "diff --git a/tests/conftest.py b/tests/conftest.py\n"
-        "--- a/tests/conftest.py\n+++ b/tests/conftest.py\n@@ -0,0 +1 @@\n+x = 1\n"
-    )
-    record = RunRecord(
-        task_id="a",
-        run_id="a-s",
-        outcome="patch_written",
-        failure_kind="none",
-        patch_path=str(patch),
-    )
-
-    async def fake_pipeline(request, on_event=None):
-        return record
-
-    async def fake_is_resolved(task, scored):
-        return True
-
-    monkeypatch.setattr(bench_run, "run_pipeline", fake_pipeline)
-    monkeypatch.setattr(bench_run, "is_resolved", fake_is_resolved)
-    row = await run_task(spec("a"), "s")
-    assert row["resolved"] is True
-    assert row["audit"] == ["touches tests/conftest.py"]
-
-
-async def test_a_scoring_crash_is_recorded_too(tmp_path, monkeypatch):
-    async def fake_pipeline(request, on_event=None):
-        return RunRecord(
-            task_id="a", run_id="a-s", outcome="patch_written", failure_kind="none"
-        )
-
-    async def broken_scoring(task, record):
-        raise OSError("docker is gone")
-
-    monkeypatch.setattr(bench_run, "run_pipeline", fake_pipeline)
-    monkeypatch.setattr(bench_run, "is_resolved", broken_scoring)
-    rows = await run_tasks([spec("a")], "s", tmp_path / "results.json")
-    assert rows[0]["crashed"] and not rows[0]["resolved"]
-    assert rows[0]["reason"] == "unhandled OSError: docker is gone"
-
-
-def test_unknown_task_id_exits_2_and_runs_nothing(tmp_path, capsys):
-    out = tmp_path / "out"
-    assert main(["--tasks", "tc-001,nope-999", "--out", str(out)]) == 2
-    assert "nope-999" in capsys.readouterr().err
-    assert not out.exists()
-
-
-def test_main_writes_results_and_survives_a_crash(tmp_path, monkeypatch, capsys):
-    async def fake_run_task(task: TaskSpec, stamp: str, on_event=None) -> dict:
-        if task.task_id == "tc-002":
-            raise RuntimeError("boom")
-        return ok_row(task)
-
-    monkeypatch.setattr(bench_run, "run_task", fake_run_task)
-    out = tmp_path / "out"
-    assert main(["--tasks", "tc-001, tc-002,tc-005", "--out", str(out)]) == 0
-    (results,) = out.glob("*.json")
-    rows = json.loads(results.read_text())
-    assert [(row["task_id"], row["resolved"]) for row in rows] == [
-        ("tc-001", True),
-        ("tc-002", False),
-        ("tc-005", True),
-    ]
-    summary = capsys.readouterr().out
-    assert "resolved 2/3" in summary and "1 crashed" in summary and "$0.50" in summary
+    monkeypatch.setattr(bench_run, "run_matrix", fake_run_matrix)
 
 
 def _tool_event() -> Event:
@@ -185,26 +49,139 @@ def _tool_event() -> Event:
     return Event(author="coder", content=types.Content(role="model", parts=[part]))
 
 
-def _patch_run_task(monkeypatch):
-    async def fake_run_task(task: TaskSpec, stamp: str, on_event=None) -> dict:
-        if on_event:
-            on_event(_tool_event())
-        return ok_row(task)
+async def _fake_one(spec, on_event=None) -> dict:
+    if on_event:
+        on_event(_tool_event())
+    return ok_row(spec)
 
-    monkeypatch.setattr(bench_run, "run_task", fake_run_task)
+
+def test_unknown_task_id_exits_2_and_runs_nothing(tmp_path, capsys):
+    out = tmp_path / "out"
+    assert main(["--tasks", "tc-001,nope-999", "--out", str(out)]) == 2
+    assert "nope-999" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_an_invalid_task_exits_2_before_anything_runs(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(
+        bench_run,
+        "validate_task",
+        lambda task: ["hidden tests already pass"] if task.task_id == "tc-002" else [],
+    )
+    calls: list = []
+    _use_run_one(monkeypatch, _fake_one, calls)
+    out = tmp_path / "out"
+    assert main(["--tasks", "tc-001,tc-002", "--out", str(out)]) == 2
+    err = capsys.readouterr().err
+    assert "tc-002" in err and "hidden tests already pass" in err
+    assert calls == [] and not out.exists()
+
+
+def test_skip_validate_runs_invalid_tasks(tmp_path, monkeypatch):
+    monkeypatch.setattr(bench_run, "validate_task", lambda task: ["broken"])
+    _use_run_one(monkeypatch, _fake_one)
+    assert main(["--tasks", "tc-001", "--skip-validate", "--out", str(tmp_path)]) == 0
+
+
+def _make_heldout(monkeypatch):
+    real = bench_run.load_task
+
+    def load(task_id):
+        return real(task_id).model_copy(update={"split": "heldout"})
+
+    monkeypatch.setattr(bench_run, "load_task", load)
+    monkeypatch.setattr(bench_run, "list_tasks", lambda: [load("tc-001")])
+
+
+def test_heldout_needs_confirmation(tmp_path, monkeypatch, capsys):
+    _make_heldout(monkeypatch)
+    calls: list = []
+    _use_run_one(monkeypatch, _fake_one, calls)
+    for argv in (["--tasks", "tc-001"], ["--split", "heldout"]):
+        assert main([*argv, "--out", str(tmp_path / "out")]) == 2
+        assert "tc-001" in capsys.readouterr().err
+    assert calls == []
+    argv = ["--split", "heldout", "--confirm-heldout", "--out", str(tmp_path)]
+    assert main(argv) == 0
+
+
+def test_single_system_with_the_mixed_preset_exits_2(tmp_path, capsys):
+    argv = ["--system", "single", "--preset", "mixed", "--out", str(tmp_path / "o")]
+    assert main(["--tasks", "tc-001", *argv]) == 2
+    assert "mixed" in capsys.readouterr().err
+    assert not (tmp_path / "o").exists()
+
+
+def test_flags_reach_the_matrix_and_name_the_results_file(
+    tmp_path, monkeypatch, capsys
+):
+    calls: list = []
+    _use_run_one(monkeypatch, _fake_one, calls)
+    argv = [
+        "--tasks", "tc-001, tc-002", "--system", "single", "--preset", "pro",
+        "--repeats", "2", "--concurrency", "3", "--out", str(tmp_path / "out"),
+    ]  # fmt: skip
+    assert main(argv) == 0
+    ((specs, path, kwargs),) = calls
+    assert [(s.task.task_id, s.system, s.preset, s.repeat) for s in specs] == [
+        ("tc-001", "single", "pro", 1),
+        ("tc-002", "single", "pro", 1),
+        ("tc-001", "single", "pro", 2),
+        ("tc-002", "single", "pro", 2),
+    ]
+    assert kwargs["concurrency"] == 3 and kwargs["progress"] is True
+    assert path.parent == tmp_path / "out"
+    assert path.name.endswith("-single-pro.json")
+    assert len(json.loads(path.read_text())) == 4
+    assert "resolved 4/4" in capsys.readouterr().out
+
+
+def test_defaults_are_dev_multi_flash_one_repeat(tmp_path, monkeypatch):
+    calls: list = []
+    _use_run_one(monkeypatch, _fake_one, calls)
+    assert main(["--out", str(tmp_path)]) == 0
+    ((specs, path, kwargs),) = calls
+    assert {(s.system, s.preset, s.repeat) for s in specs} == {("multi", "flash", 1)}
+    assert all(s.task.split == "dev" for s in specs)
+    assert kwargs["concurrency"] == 1
+    assert path.name.endswith("-multi-flash.json")
+
+
+def test_main_summary_counts_crashes(tmp_path, monkeypatch, capsys):
+    async def run_one(spec, on_event=None) -> dict:
+        if spec.task.task_id == "tc-002":
+            raise RuntimeError("boom")
+        return ok_row(spec)
+
+    _use_run_one(monkeypatch, run_one)
+    assert main(["--tasks", "tc-001,tc-002,tc-005", "--out", str(tmp_path)]) == 0
+    summary = capsys.readouterr().out
+    assert "resolved 2/3" in summary and "1 crashed" in summary and "$0.50" in summary
 
 
 def test_progress_lines_are_printed_by_default(tmp_path, monkeypatch, capsys):
-    _patch_run_task(monkeypatch)
-    assert main(["--tasks", "tc-001", "--out", str(tmp_path / "out")]) == 0
+    _use_run_one(monkeypatch, _fake_one)
+    assert main(["--tasks", "tc-001", "--out", str(tmp_path)]) == 0
     out = capsys.readouterr().out
-    assert "tc-001     coder → read_file a.py" in out
-    assert "tc-001: patch_written" in out
+    assert "tc-001/multi/flash/r1     coder → read_file a.py" in out
+    assert "tc-001/multi/flash/r1: patch_written" in out
 
 
 def test_quiet_prints_no_progress_lines(tmp_path, monkeypatch, capsys):
-    _patch_run_task(monkeypatch)
-    assert main(["--tasks", "tc-001", "--quiet", "--out", str(tmp_path / "out")]) == 0
+    _use_run_one(monkeypatch, _fake_one)
+    assert main(["--tasks", "tc-001", "--quiet", "--out", str(tmp_path)]) == 0
     out = capsys.readouterr().out
     assert "read_file" not in out
-    assert "tc-001: patch_written" in out
+    assert "tc-001/multi/flash/r1: patch_written" in out
+
+
+def test_help_lists_every_flag(capsys):
+    with pytest.raises(SystemExit) as stop:
+        main(["--help"])
+    assert stop.value.code == 0
+    text = capsys.readouterr().out
+    for flag in (
+        "--tasks", "--split", "--system", "--preset", "--repeats",
+        "--concurrency", "--out", "--quiet", "--confirm-heldout", "--skip-validate",
+    ):  # fmt: skip
+        assert flag in text
