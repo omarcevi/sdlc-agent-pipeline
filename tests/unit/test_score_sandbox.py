@@ -23,53 +23,87 @@ def patch_file(tmp_path, monkeypatch):
     return path
 
 
-def use_env(monkeypatch, env):
+def use_env(monkeypatch, *envs):
+    """start_environment hands out `envs` in order; a single env is reused."""
+    queue = list(envs)
+    started = []
+
     async def fake_start():
+        env = queue.pop(0) if len(queue) > 1 else queue[0]
+        started.append(env)
         return env
 
     monkeypatch.setattr(score, "start_environment", fake_start)
+    return started
 
 
-async def test_scoring_steps_run_in_order_with_hidden_tests_outside_repo(
+async def test_visible_and_hidden_phases_use_two_fresh_sandboxes(
     patch_file, monkeypatch
 ):
-    env = FakeEnvironment()
-    use_env(monkeypatch, env)
+    first, second = FakeEnvironment(), FakeEnvironment()
+    started = use_env(monkeypatch, first, second)
     assert await score_patch(load_task("t-1"), patch_file)
-    assert env.commands == [APPLY_CMD, VISIBLE_CMD, HIDDEN_CMD]
-    assert f"{HIDDEN_DIR}/test_hidden_mini.py" in env.files
+    assert started == [first, second]
+    assert first.commands == [APPLY_CMD, VISIBLE_CMD]
+    assert second.commands == [APPLY_CMD, HIDDEN_CMD]
+    assert not any(HIDDEN_DIR in p for p in first.files)
+    assert f"{HIDDEN_DIR}/test_hidden_mini.py" in second.files
     assert not HIDDEN_DIR.startswith(WORKDIR)
-    assert not any("hidden" in p for p in env.files if p.startswith(f"{WORKDIR}/"))
-    assert env.closed
+    assert not any("hidden" in p for p in second.files if p.startswith(f"{WORKDIR}/"))
+    assert first.closed and second.closed
 
 
-async def test_hidden_tests_are_uploaded_only_after_the_visible_run_passes(
+async def test_the_hidden_sandbox_runs_nothing_but_apply_before_the_hidden_tests(
     patch_file, monkeypatch
 ):
     class Recording(FakeEnvironment):
         async def exec(self, command, **kwargs):
-            self.commands.append(
-                f"{command} [hidden on disk: {any(HIDDEN_DIR in p for p in self.files)}]"
-            )
+            on_disk = any(HIDDEN_DIR in p for p in self.files)
+            self.commands.append(f"{command} [hidden on disk: {on_disk}]")
             return ExecResult(exit_code=0, stdout="", stderr="")
 
-    env = Recording()
-    use_env(monkeypatch, env)
+    first, second = Recording(), Recording()
+    use_env(monkeypatch, first, second)
     assert await score_patch(load_task("t-1"), patch_file)
-    assert env.commands[1].endswith("[hidden on disk: False]")
-    assert env.commands[2].endswith("[hidden on disk: True]")
+    assert second.commands == [
+        f"{APPLY_CMD} [hidden on disk: False]",
+        f"{HIDDEN_CMD} [hidden on disk: True]",
+    ]
 
 
-async def test_a_failing_visible_run_never_uploads_hidden_tests(
+async def test_the_visible_sandbox_is_closed_before_the_hidden_run(
     patch_file, monkeypatch
 ):
-    env = FakeEnvironment(
+    events = []
+
+    class Ordered(FakeEnvironment):
+        def __init__(self, name):
+            super().__init__()
+            self.name = name
+
+        async def exec(self, command, **kwargs):
+            events.append(f"{self.name}:{command}")
+            return await super().exec(command, **kwargs)
+
+        async def close(self):
+            events.append(f"{self.name}:close")
+            await super().close()
+
+    use_env(monkeypatch, Ordered("A"), Ordered("B"))
+    assert await score_patch(load_task("t-1"), patch_file)
+    assert events.index("A:close") < events.index(f"B:{HIDDEN_CMD}")
+
+
+async def test_a_failing_visible_run_starts_no_second_sandbox(patch_file, monkeypatch):
+    first = FakeEnvironment(
         responses={VISIBLE_CMD: ExecResult(exit_code=1, stdout="", stderr="")}
     )
-    use_env(monkeypatch, env)
+    started = use_env(monkeypatch, first, FakeEnvironment())
     assert not await score_patch(load_task("t-1"), patch_file)
-    assert not any(HIDDEN_DIR in p for p in env.files)
-    assert HIDDEN_CMD not in env.commands
+    assert started == [first]
+    assert not any(HIDDEN_DIR in p for p in first.files)
+    assert HIDDEN_CMD not in first.commands
+    assert first.closed
 
 
 @pytest.mark.parametrize("command", [VISIBLE_CMD, HIDDEN_CMD])

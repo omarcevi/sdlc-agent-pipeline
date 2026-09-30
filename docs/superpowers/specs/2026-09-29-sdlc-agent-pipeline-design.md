@@ -225,7 +225,7 @@ Issue text is untrusted input. There are four layers of defence:
   - Normal tasks: apply the patch to a clean checkout (base + plant), then run visible and hidden tests. Resolved means all pass. (Clean checkout = base with `plant/` overlaid.)
   - Trap tasks: resolved means the outcome is `declined`.
   - `infra` failures are rerun up to 2 times and never scored as agent failures.
-- **Threat model:** scoring runs the patch's code, so a patch that attacks the test process (a shadowing `pytest.py`, an exit hook in package code) can fake a pass. Results are valid for patches that do not do that. Every patch is audited for these patterns (`bench/audit.py`) and flagged rows are reported separately; the audit never changes `resolved`. Scoring uploads the hidden tests only after the visible run passes, so a patch's `conftest.py` never runs while they are on disk.
+- **Threat model:** scoring runs the patch's code, so a patch that attacks the test process (a shadowing `pytest.py`, an exit hook in package code) can fake a pass. Results are valid for patches that do not do that. Every patch is audited for these patterns (`bench/audit.py`) and flagged rows are reported separately; the audit never changes `resolved`. Scoring runs the visible tests in one fresh sandbox and, only if they pass, the hidden tests in a second fresh one, where nothing but `git apply` and file writes happens before the hidden tests are in place. Code the patch runs during the visible phase therefore cannot reach them; what remains possible is patch code attacking the test process during the hidden run itself, which the audit flags when it uses the listed patterns.
 - **Split discipline:** prompts are tuned only against `dev`. `heldout` runs once, at the end. Both numbers are published.
 - **Output:** `results/<timestamp>.json`, from which a generated Markdown table and charts are committed to `docs/results/`.
 
@@ -374,3 +374,4 @@ Controls: the per-run budget cap, sandbox TTL plus sweeper, no always-on instanc
 2. Scoring order is: apply patch, restore protected files, run the visible tests, and only if they pass upload and run the hidden tests (§9.1).
 3. A test pins that the visible run ignores pytest config files shipped in a patch.
 4. `bench/audit.py::audit_patch` flags patches that touch `pytest.py`, `conftest.py`, `sitecustomize.py`, `usercustomize.py`, `pytest.ini`, `tox.ini`, `setup.cfg`, `*.pth` or `pyproject.toml`, or add `os._exit`, `atexit`, `sys.exit(`, `pytest_collection_modifyitems`, `pytest_runtest_makereport` or `collect_ignore`. Result rows carry `audit: list[str]`; the audit never changes `resolved`.
+5. Hidden tests run in a second fresh sandbox, so code run during the visible phase cannot reach them.

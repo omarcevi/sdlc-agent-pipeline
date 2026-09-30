@@ -1,18 +1,21 @@
-"""Score a run inside a fresh sandbox: apply its patch to a clean base+plant copy,
-then run the visible and the hidden tests.
+"""Score a run in fresh sandboxes: apply its patch to a clean base+plant copy, run
+the visible tests, and only if they pass run the hidden tests.
 
-Model-written code never runs on the host. The patch cannot influence what is
-scored: existing test files are restored after it is applied, pytest ignores any
-config file in the repo, the hidden tests live outside the repo, cut off from its
-conftest files, and they are uploaded only after the visible run has passed, so a
-patch's conftest never runs while they are on disk.
+Model-written code never runs on the host. The visible and the hidden tests run in
+separate fresh sandboxes, and no patch code runs in the hidden sandbox before the
+hidden tests are in place (only `git apply` and file writes). Existing test files
+are restored after the patch is applied, pytest ignores any config file in the
+repo, and the hidden tests live outside the repo, cut off from its conftest files.
+What remains possible is patch code attacking the test process during the hidden
+run itself (the spec's threat model); `bench.audit` flags patches that use the
+listed patterns.
 """
 
 import logging
 import tempfile
 from pathlib import Path
 
-from app.environment.base import WORKDIR
+from app.environment.base import WORKDIR, Environment
 from app.environment.factory import start_environment
 from app.schemas import RunRecord
 from app.task_store import TaskSpec, materialize, task_dir, test_files
@@ -32,6 +35,48 @@ HIDDEN_CMD = (
 )
 
 
+async def _prepare(env: Environment, task: TaskSpec, patch: str) -> bool:
+    """Clean base+plant copy, then the patch, then the original test files put back.
+
+    Only `git apply` and file writes: no repo code runs. False if the patch is
+    unusable."""
+    with tempfile.TemporaryDirectory() as tmp:
+        clean = materialize(task, Path(tmp) / "repo")
+        protected = {
+            relative: (clean / relative).read_text() for relative in test_files(clean)
+        }
+        await env.upload_dir(clean, WORKDIR)
+    await env.write_file(PATCH_PATH, patch)
+    if (await env.exec(APPLY_CMD)).exit_code != 0:
+        return False
+    try:
+        for relative, content in protected.items():
+            await env.write_file(f"{WORKDIR}/{relative}", content)
+    except OSError:
+        # The patch put something unwritable where a test file belongs.
+        return False
+    return True
+
+
+async def _release(env: Environment) -> None:
+    # A failed release must not turn a finished score into a crash. The sandbox
+    # removes itself at its TTL.
+    try:
+        await env.close()
+    except Exception as exc:
+        logger.warning(
+            "could not release scoring sandbox %s: %s: %s",
+            env.env_id,
+            type(exc).__name__,
+            exc,
+        )
+
+
+async def _passes(env: Environment, command: str) -> bool:
+    result = await env.exec(command, timeout=TEST_TIMEOUT_S)
+    return result.exit_code == 0 and not result.timed_out
+
+
 async def score_patch(task: TaskSpec, patch_path: Path) -> bool:
     try:
         patch = Path(patch_path).read_text()
@@ -39,44 +84,25 @@ async def score_patch(task: TaskSpec, patch_path: Path) -> bool:
         return False
     if not patch.strip():
         return False
-    env = await start_environment()
+    # Sandbox A runs the visible tests, and with them whatever code the patch has.
+    # The hidden tests only ever exist in sandbox B, so nothing the patch did in A
+    # can reach them.
+    visible_env = await start_environment()
     try:
-        with tempfile.TemporaryDirectory() as tmp:
-            clean = materialize(task, Path(tmp) / "repo")
-            protected = {
-                relative: (clean / relative).read_text()
-                for relative in test_files(clean)
-            }
-            await env.upload_dir(clean, WORKDIR)
-        await env.write_file(PATCH_PATH, patch)
-        if (await env.exec(APPLY_CMD)).exit_code != 0:
+        if not await _prepare(visible_env, task, patch):
             return False
-        try:
-            for relative, content in protected.items():
-                await env.write_file(f"{WORKDIR}/{relative}", content)
-        except OSError:
-            # The patch put something unwritable where a test file belongs.
+        if not await _passes(visible_env, VISIBLE_CMD):
             return False
-        # The patch's code (a conftest.py, say) runs during the visible tests, so the
-        # hidden tests reach the sandbox only after that run has passed.
-        visible = await env.exec(VISIBLE_CMD, timeout=TEST_TIMEOUT_S)
-        if visible.exit_code != 0 or visible.timed_out:
-            return False
-        await env.upload_dir(task_dir(task.task_id) / "hidden_tests", HIDDEN_DIR)
-        hidden = await env.exec(HIDDEN_CMD, timeout=TEST_TIMEOUT_S)
-        return hidden.exit_code == 0 and not hidden.timed_out
     finally:
-        # A failed release must not turn a finished score into a crash. The
-        # sandbox removes itself at its TTL.
-        try:
-            await env.close()
-        except Exception as exc:
-            logger.warning(
-                "could not release scoring sandbox %s: %s: %s",
-                env.env_id,
-                type(exc).__name__,
-                exc,
-            )
+        await _release(visible_env)
+    hidden_env = await start_environment()
+    try:
+        if not await _prepare(hidden_env, task, patch):
+            return False
+        await hidden_env.upload_dir(task_dir(task.task_id) / "hidden_tests", HIDDEN_DIR)
+        return await _passes(hidden_env, HIDDEN_CMD)
+    finally:
+        await _release(hidden_env)
 
 
 async def is_resolved(task: TaskSpec, record: RunRecord) -> bool:

@@ -232,3 +232,49 @@ async def test_audit_flags_but_does_not_change_the_score(tmp_path):
     )
     assert await score_patch(load_task("tc-001"), patch)
     assert audit_patch(patch.read_text()) == ["touches tests/conftest.py"]
+
+
+HIDDEN_CONFTEST = (
+    "import os\n"
+    "HIDDEN = '/workspace/hidden/hidden_tests'\n"
+    "if not os.path.exists(HIDDEN):\n"
+    "    os.makedirs(HIDDEN)\n"
+    "    with open(HIDDEN + '/conftest.py', 'w') as f:\n"
+    "        f.write('def pytest_pyfunc_call(pyfuncitem):\\n    return True\\n')\n"
+)
+
+
+async def test_visible_phase_cannot_plant_a_conftest_for_the_hidden_run(tmp_path):
+    patch = make_patch(
+        "tc-001", tmp_path / "p.diff", add_file("tests/conftest.py", HIDDEN_CONFTEST)
+    )
+    assert not await score_patch(load_task("tc-001"), patch)
+
+
+async def test_package_code_cannot_plant_files_for_the_hidden_run(tmp_path):
+    def append_to_package_init(repo: Path) -> None:
+        init = repo / "taskcli" / "__init__.py"
+        init.write_text(init.read_text() + "\n" + HIDDEN_CONFTEST)
+
+    patch = make_patch("tc-001", tmp_path / "p.diff", append_to_package_init)
+    assert "taskcli/__init__.py" in patch.read_text()
+    assert not await score_patch(load_task("tc-001"), patch)
+
+
+async def test_background_process_cannot_rewrite_hidden_tests(tmp_path):
+    watcher = (
+        "import subprocess, sys\n"
+        "if '/workspace/hidden' not in ''.join(sys.argv):\n"
+        "    subprocess.Popen(\n"
+        "        ['sh', '-c', 'for i in $(seq 1 600); do "
+        "for f in /workspace/hidden/hidden_tests/*.py; do "
+        '[ -e "$f" ] && printf "def test_ok():\\\\n    assert True\\\\n" > "$f"; '
+        "done; sleep 0.1; done'],\n"
+        "        start_new_session=True,\n"
+        "        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,\n"
+        "    )\n"
+    )
+    patch = make_patch(
+        "tc-001", tmp_path / "p.diff", add_file("tests/conftest.py", watcher)
+    )
+    assert not await score_patch(load_task("tc-001"), patch)
