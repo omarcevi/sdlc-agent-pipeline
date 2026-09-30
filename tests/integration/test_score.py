@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 import tempfile
@@ -44,6 +45,9 @@ def make_patch(task_id: str, out: Path, *changes: Callable[[Path], None]) -> Pat
         baseline = _git(repo, "write-tree").strip()
         for change in changes:
             change(repo)
+        # Re-hash every file: git's stat cache trusts an unchanged size and mtime, and
+        # copytree keeps mtimes, so an overlay file can look untouched.
+        _git(repo, "read-tree", "--empty")
         _git(repo, "add", "-A")
         out.write_text(
             _git(repo, "diff", "--cached", "--no-renames", "--binary", baseline)
@@ -63,6 +67,27 @@ def add_file(relative: str, content: str) -> Callable[[Path], None]:
         (repo / relative).write_text(content)
 
     return apply
+
+
+def test_make_patch_sees_change_with_same_size_and_mtime(tmp_path, monkeypatch):
+    tasks, repos = tmp_path / "tasks", tmp_path / "repos"
+    (repos / "r").mkdir(parents=True)
+    (repos / "r" / "base.txt").write_text("base\n")
+    (tasks / "t-1" / "plant").mkdir(parents=True)
+    (tasks / "t-1" / "solution").mkdir()
+    (tasks / "t-1" / "task.yaml").write_text(
+        "repo: r\ntitle: t\nbody: b\ncategory: bug\ndifficulty: easy\nsplit: dev\n"
+    )
+    planted = tasks / "t-1" / "plant" / "f.py"
+    fixed = tasks / "t-1" / "solution" / "f.py"
+    planted.write_text("x = 1\n")
+    fixed.write_text("x = 2\n")
+    for path in (planted, fixed):
+        os.utime(path, (1_700_000_000, 1_700_000_000))
+    monkeypatch.setenv("BENCH_TASKS_DIR", str(tasks))
+    monkeypatch.setenv("BENCH_REPOS_DIR", str(repos))
+    patch = make_patch("t-1", tmp_path / "p.diff", solution("t-1"))
+    assert "+x = 2" in patch.read_text()
 
 
 def reference_patch(task_id: str, out: Path) -> Path:
