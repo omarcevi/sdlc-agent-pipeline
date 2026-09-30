@@ -1,0 +1,19 @@
+repo: stockroom
+title: "Let us discontinue a product"
+body: |
+  We are dropping some products from our range. Please add `store.discontinue(sku)`.
+
+  Once a product is discontinued, nobody can get a new quote or place a new order
+  that includes it: both must fail with an error, and no order is recorded.
+
+  Everything already in flight has to carry on as before. Orders created before the
+  product was discontinued can still be reserved, fulfilled, cancelled and billed.
+  We also keep tracking and reporting its stock, because we still ship the leftover
+  units back to the supplier and correct the count after a stocktake.
+
+  Discontinuing a SKU we don't have should fail the way other lookups of an unknown
+  SKU do.
+category: feature
+difficulty: hard
+split: dev
+levers: [multi_file, regression_risk]

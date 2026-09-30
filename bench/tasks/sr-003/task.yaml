@@ -1,0 +1,31 @@
+repo: stockroom
+title: "Load a stocktake count from a CSV file"
+body: |
+  Once a month we count every shelf. The count ends up in a CSV file like this:
+
+      sku,counted
+      PEN-1,97
+      BOOK-1,24
+
+  Today I record an adjustment by hand for every line and work out each difference
+  myself. Please add `store.import_stocktake(path)` that does it for the whole file:
+
+  - Afterwards, every product listed in the file has exactly the counted number of
+    units on hand. Products that are not in the file are left alone.
+  - Each change shows up in the ledger as one adjustment with the reason
+    `stocktake`. If a count already matches, nothing is recorded for that product.
+  - The file follows the products file's conventions: UTF-8, a header row with
+    exactly the columns `sku` and `counted` in any order, SKUs in any case. A file
+    that is empty, not UTF-8 or has other columns is refused as a whole with
+    `CsvFormatError`, and nothing changes.
+  - A bad row is skipped and reported with its line number in the file (the header
+    is line 1), and the other rows still apply. A row is bad if its SKU is not in
+    the catalog, if its SKU was already counted on an earlier line, if the count is
+    not a whole number of 0 or more, or if the count is lower than the units already
+    reserved for orders.
+  - It returns the rejected rows as `RowError` records (the type the products import
+    reports), in file order. An empty result means every row was applied.
+category: feature
+difficulty: medium
+split: dev
+levers: [multi_file]

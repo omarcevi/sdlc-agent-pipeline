@@ -1,0 +1,27 @@
+repo: stockroom
+title: "Stock export undervalues products that have orders waiting"
+body: |
+  Our month-end stock valuation comes from the stock export. When an order has
+  reserved units that have not shipped yet, that product's `stock_value` drops as if
+  the units were already gone, although they are still on our shelves (and are still
+  counted in `on_hand`).
+
+  Reproduction:
+
+      from decimal import Decimal
+      from stockroom import Product, Store, Unit
+
+      store = Store()
+      store.add_product(Product("PEN-1", "Pen", Unit.EACH, Decimal("1.50")))
+      store.receive("PEN-1", 100)
+      order = store.create_order([("PEN-1", 40)])
+      store.reserve_order(order.id)
+      store.export_stock("stock.csv")
+
+  The pen row reads `PEN-1,Pen,each,100,40,60,90.00`.
+
+  Expected: `PEN-1,Pen,each,100,40,60,150.00`, the value of the 100 units we hold.
+  The value should only go down when units actually leave the stockroom.
+category: bug
+difficulty: easy
+split: dev

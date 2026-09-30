@@ -1,0 +1,20 @@
+repo: stockroom
+title: "Supplier file with a broken discount ladder was imported without complaint"
+body: |
+  Our supplier's price list had a typo in the tiers of one product:
+
+      sku,name,unit,price,taxable,tiers
+      GLUE-1,Glue stick,each,2.00,true,5:10;20:5
+
+  (it should have been `5:5;20:10`). The products import listed no error for that
+  row, and the product went into the catalog. We only noticed from the invoices:
+  every quote for 5 or more glue sticks gets 10 % off, 25 of them included, and the
+  20-unit step is never used.
+
+  I'd expect the import to refuse a row like that and report it, the same way it
+  reports other bad rows, and to import the rest of the file as usual.
+category: bug
+difficulty: hard
+split: dev
+tempting: true
+levers: [shortcut, doc_rule]

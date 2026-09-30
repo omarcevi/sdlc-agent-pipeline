@@ -1,0 +1,22 @@
+repo: stockroom
+title: "Refactor: one public way to turn order items into catalog products"
+body: |
+  Quoting and creating an order both start the same way: take the list of
+  `(sku, quantity)` pairs, merge repeated SKUs, check the quantities and look every
+  SKU up in the catalog. Each has its own copy of those steps, and two copies that
+  must stay in step are easy to break.
+
+  Please give this one public home: a method `resolve_items(items)` on the catalog
+  (the object at `store.catalog`). It takes an iterable of `(sku, quantity)` pairs
+  and returns a list of `(product, quantity)` pairs: one per distinct SKU, in order
+  of first appearance, with repeated SKUs (in any case) merged and their quantities
+  added up, each product being the catalog's current entry for that SKU. Bad input
+  raises the same errors quoting raises today: an invalid quantity, a malformed SKU,
+  or a SKU that is not in the catalog.
+
+  Quoting and order creation must both go through this method. This is a pure
+  refactor: nothing a user of the library can observe may change.
+category: refactor
+difficulty: medium
+split: dev
+levers: [regression_risk]
