@@ -36,7 +36,7 @@ Execution: Tasks 1–4 inline by controller (approval-gated / interactive); Task
 | T5 | tests vs schemas | OK (`__test__ = False` on TestReport). |
 | T6 | tests vs docker.py | OK. |
 | T7 | tests vs tools | OK. |
-| T8 | tests vs check_command | DEFECT: regex split on `|` ignores quoting, so `rg "a|b" src` is refused as unparseable. Ruling below. |
+| T8 | tests vs check_command | DEFECT: regex split on `|` ignores quoting, so `rg "a|b" src` is refused as unparsable. Ruling below. |
 | T9 | tests vs pricing/budget math | OK (0.015 at 10k in / 2k out Flash). |
 | T10 | placeholder test vs instructions | OK. |
 | T11 | tests vs nodes | OK (`test_files.__test__ = False` honoured by pytest for functions). |
