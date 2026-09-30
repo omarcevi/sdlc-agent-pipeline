@@ -399,7 +399,8 @@ def _pair_emphasis(nodes: list[_Node]) -> list[_Node]:
         assert isinstance(opener, _Delimiter) and isinstance(closer, _Delimiter)
         inner = _finish(nodes[opener_at + 1 : i])
         if _emphasis_depth(inner) >= MAX_EMPHASIS_DEPTH:
-            i += 1  # nested too deeply: this closer stays text
+            closer.can_open = False  # nested too deeply: it stays text for good
+            i += 1
             continue
         used = 2 if opener.count >= 2 and closer.count >= 2 else 1
         wrapper = (Strong if used == 2 else Emphasis)(inner)

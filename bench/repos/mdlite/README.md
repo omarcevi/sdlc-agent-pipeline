@@ -37,7 +37,7 @@ Everything the library does is specified here. "Line" means a line after rule R1
 the block rules (R1 to R9) "whitespace" and "blank" mean spaces and tabs only; other
 characters such as a no-break space are ordinary text there. Elsewhere "space" and
 "whitespace" mean any Unicode whitespace character (Python's `str.isspace`), unless a
-rule says otherwise.
+rule says otherwise (R5, R12, R13 and R15 name the exact characters they mean).
 
 **R1. Input normalisation.** `\r\n` and `\r` become `\n`. Tabs in the leading
 whitespace of a line are expanded to 4-column tab stops; tabs elsewhere are left
@@ -67,7 +67,7 @@ closing fence are indented by at most 3 spaces. The fence closes at the first li
 the same character, at least as long, with nothing after it but spaces or tabs; an
 unclosed fence runs to the end of the document. Content lines are taken literally
 (nothing is parsed), minus up to as many leading spaces as the opening fence was
-indented. The first word of the info string becomes `class="language-WORD"`.
+indented. The first word of the info string (words are separated by spaces and tabs only) becomes `class="language-WORD"`.
 Output: `<pre><code ...>` followed by every content line (empty ones too) plus a
 newline, then `</code></pre>`; a fence with no content lines has an empty `<code>`.
 
@@ -113,15 +113,15 @@ delimiter). A backslash before anything else is a literal backslash. Backslash e
 are not processed inside code spans, code blocks, info strings or autolinks (R17).
 
 **R12. Line breaks.** A newline inside a paragraph, list item or quote is kept as
-`\n` (a soft break), after removing spaces before it. Two or more spaces, or a
-backslash, at the end of a line that is followed by another line of the same block
+`\n` (a soft break), after removing U+0020 spaces before it. Two or more U+0020 spaces,
+or a backslash, at the end of a line that is followed by another line of the same block
 make a hard break, `<br>` followed by `\n`. At the very end of a block, trailing
-spaces are removed and a final backslash stays a literal backslash.
+spaces and tabs are removed (R3) and a final backslash stays a literal backslash.
 
 **R13. Code spans.** A run of N backticks opens a code span that closes at the next
 run of exactly N backticks; with no such run the backticks are literal. Newlines in the
-content become spaces, and if the content both starts and ends with a space (and is not
-only spaces) one space is removed from each end. The content is escaped (R10) and
+content become spaces, and if the content both starts and ends with a U+0020 space (and is not
+only spaces) one space is removed from each end; tabs and other whitespace are kept. The content is escaped (R10) and
 nothing inside is parsed: `*`, `_`, `[` and backslashes are literal. A code span
 binds tighter than emphasis and links, so delimiters inside it never pair with
 delimiters outside it.
@@ -138,8 +138,10 @@ Unpaired delimiters are literal text. Emphasis and strong nest at most 20 levels
 
 **R15. Links and images.** `[text](url)` and `[text](url "title")` (title in `"` or
 `'`) make links; `![alt](url)` makes an image. The url is either `<...>` (may contain
-spaces; `\>` is a literal `>` and any other `>` ends it) or a run without whitespace
-and with balanced parentheses; backslash escapes are resolved in url and title. The text may contain emphasis, code spans and images but not
+spaces; `\>` is a literal `>`, any other `>` ends it, and an unescaped `<` or a line
+break inside makes the link literal text) or a run without whitespace (any Unicode
+whitespace) and with balanced parentheses. A space, tab or newline (and nothing else)
+may separate the url from the title. Backslash escapes are resolved in url and title. The text may contain emphasis, code spans and images but not
 another link or autolink (an inner `[` or `<` is literal). An image's `alt` is the plain text of its
 label. Without a `(` right after the closing `]`, the brackets are literal text. Image
 labels nest at most 10 levels deep (R22).
@@ -178,7 +180,7 @@ undecodable file prints `mdlite: ...` to standard error and exits 1. Wrong argum
 exit 2.
 
 **R22. Nesting limits.** Every input renders; none raises. Block quotes nest at most 20
-levels: a `>` line that would open a 21st level is paragraph text (and is escaped as
-`&gt;`). Image labels nest at most 10 levels: a deeper `![` is literal text. Emphasis and
-strong nest at most 20 levels: a closing run that would pair at a deeper level stays
-literal text.
+levels: a `>` line at that depth is ordinary text. It starts no block and interrupts no
+paragraph or list item, so it continues them (and is escaped as `&gt;`). Image labels nest at most 10 levels: a deeper `![` is literal text. Emphasis and
+strong nest at most 20 levels: a closing run that would pair at a deeper level becomes
+literal text for good (it cannot open a later pair either).

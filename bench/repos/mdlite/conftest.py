@@ -1,5 +1,6 @@
 """Makes `import mdlite` work when pytest runs from outside this directory.
 
-pytest's default import mode puts the directory of the top-most conftest.py on
-sys.path; without this file the tests could only import `mdlite` from here.
+In its default "prepend" import mode pytest inserts the directory of each conftest.py
+that has no `__init__.py` next to it into sys.path. This file's directory holds the
+`mdlite` package, so `import mdlite` works wherever pytest is started.
 """

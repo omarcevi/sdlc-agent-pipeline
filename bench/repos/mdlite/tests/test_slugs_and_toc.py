@@ -128,3 +128,11 @@ def test_safe_url_decision():
             "localhost:1",
         )
     )
+
+
+def test_scheme_detection_deletes_only_ascii_whitespace_and_controls():
+    """R16: a non-ASCII space inside the scheme is not deleted, so none is found."""
+    assert url_scheme("java\u2000script:x") is None
+    assert url_scheme("java\u00a0script:x") is None
+    assert url_scheme("java\x00\x7fscript:x") == "javascript"
+    assert not is_safe_url("java\x1fscript:x")

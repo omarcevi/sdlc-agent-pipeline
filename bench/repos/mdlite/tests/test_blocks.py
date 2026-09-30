@@ -317,3 +317,18 @@ def test_quotes_nest_to_a_fixed_depth():
     assert html.count("<blockquote>") == 20
     assert "<p>&gt;&gt; x</p>" in html
     assert to_html(">" * 100_000).count("<blockquote>") == 20
+
+
+def test_info_word_splits_on_spaces_and_tabs_only():
+    """R5: the language word ends at a space or tab, not at a no-break space."""
+    assert to_html("```py\tx\n```") == '<pre><code class="language-py"></code></pre>\n'
+    assert to_html("```py\u00a0x\n```") == (
+        '<pre><code class="language-py\u00a0x"></code></pre>\n'
+    )
+
+
+def test_quote_marker_past_the_depth_limit_is_plain_text():
+    """R22: past 20 levels a `>` line starts no block and interrupts nothing."""
+    html = to_html(">" * 20 + " - a\n" + ">" * 21 + " b")
+    assert html.count("<blockquote>") == 20
+    assert "<li>a\n&gt; b</li>" in html

@@ -5,6 +5,8 @@ with `mdlite.inline.parse_inline` here, at render time. All escaping and url che
 are delegated to `mdlite.escape`; heading ids come from `mdlite.slug.Slugger`.
 """
 
+import re
+
 from mdlite.escape import escape_attr, escape_text, is_safe_url
 from mdlite.inline import parse_inline, plain_text
 from mdlite.nodes import (
@@ -113,7 +115,7 @@ class _Renderer:
         )
 
     def code_block(self, info: str, code: str) -> str:
-        words = info.split()
+        words = re.split(r"[ \t]+", info) if info else []
         css_class = f' class="language-{escape_attr(words[0])}"' if words else ""
         body = escape_text(code)
         return f"<pre><code{css_class}>{body}</code></pre>\n"

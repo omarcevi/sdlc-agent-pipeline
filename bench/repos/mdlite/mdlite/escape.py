@@ -12,8 +12,9 @@ _ATTR_TABLE = str.maketrans(
     {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}
 )
 
-# Browsers ignore whitespace and control characters inside a url scheme
-# ("java\tscript:"), so they are deleted before the scheme is read.
+# Browsers ignore ASCII whitespace and control characters inside a url scheme
+# ("java\tscript:"), so U+0000 to U+0020 and U+007F are deleted before the scheme is
+# read. Other characters, such as U+00A0, are kept and end the scheme.
 _IGNORED_IN_SCHEME = re.compile(r"[\x00-\x20\x7f]")
 _SCHEME = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*):")
 
@@ -33,8 +34,8 @@ def escape_attr(text: str) -> str:
 def url_scheme(url: str) -> str | None:
     """The lowercase scheme of `url`, or None when it has no scheme.
 
-    Whitespace and control characters are ignored first, so `" JaVa\\nScript:x"`
-    has the scheme `javascript`.
+    The characters U+0000 to U+0020 and U+007F are deleted first, so
+    `" JaVa\\nScript:x"` has the scheme `javascript`.
     """
     match = _SCHEME.match(_IGNORED_IN_SCHEME.sub("", url))
     return match.group(1).lower() if match else None

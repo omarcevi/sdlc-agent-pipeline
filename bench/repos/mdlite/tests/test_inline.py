@@ -263,3 +263,34 @@ def test_emphasis_nesting_never_raises():
     assert html.count("<strong>") == 20
     assert html.startswith("<p>" + "*" * 3_960 + "<strong>")
     assert isinstance(to_html("*_" * 2_000 + "a" + "_*" * 2_000), str)
+
+
+def test_spaces_in_breaks_and_code_spans_are_u0020():
+    """R12, R13: "space" there is U+0020; tabs and no-break spaces are kept."""
+    assert p("a\t\nb") == "a\t\nb"
+    assert p("a\t\t\nb") == "a\t\t\nb"
+    assert p("a\u00a0\u00a0\nb") == "a\u00a0\u00a0\nb"
+    assert to_html("a\t") == "<p>a</p>\n" and p("a\u00a0") == "a\u00a0"  # block end
+    assert parse_inline("`\ta\t`") == [Code("\ta\t")]
+    assert parse_inline("`\u00a0a\u00a0`") == [Code("\u00a0a\u00a0")]
+
+
+def test_angle_destination_rejects_unescaped_angle_and_newline():
+    """R15: inside `<...>` an unescaped `<` or a line break makes it literal text."""
+    assert p("[a](<b<c>)") == "[a](&lt;b&lt;c&gt;)"
+    assert p("[a](<b\nc>)") == "[a](&lt;b\nc&gt;)"
+    assert parse_inline("[a](<b\\<c>)") == [Link([Text("a")], "b<c")]
+
+
+def test_title_separator_is_space_tab_or_newline():
+    """R15: only a space, tab or newline separates the url from the title."""
+    assert parse_inline('[a](/u\t"t")') == [Link([Text("a")], "/u", "t")]
+    assert parse_inline('[a](/u\n"t")') == [Link([Text("a")], "/u", "t")]
+    assert p('[a](/u\u00a0"t")') == '[a](/u\u00a0"t")'
+
+
+def test_emphasis_closer_skipped_by_the_depth_limit_stays_text():
+    """R22: a run that would pair too deep is text and cannot open later either."""
+    html = to_html("*" * 42 + "a" + "*" * 42 + "b*")
+    assert html.endswith("</strong>**b*</p>\n")
+    assert html.count("<strong>") == 20 and "<em>" not in html
