@@ -36,7 +36,7 @@ The fixes were reviewed again by a separate reviewer. The first pass was a no-go
 
 | Time | Step | Result |
 |---|---|---|
-| 13:30 | Merged state at `5d86208` (the commit the run uses) | `uv run pytest -q`: 379 passed. `bench.validate`: ok for all 5 tasks. `agents-cli lint`: clean |
+| 13:31 | Merged state at `5d86208` (the commit the run uses) | `uv run pytest -q`: 379 passed. `bench.validate`: ok for all 5 tasks. `agents-cli lint`: clean |
 
 ## Settings in force
 
@@ -68,17 +68,17 @@ Each was run as `TRACE_TO_CLOUD=1 uv run python -m bench.run --split dev --syste
 | # | Time | System, preset, repeats | Resolved | Cost | Running total | Results file |
 |---|---|---|---|---|---|---|
 | 1 | 13:37–13:59 | multi, flash, 3 | 12 of 15 | $2.01 | $2.15 | `results/20260930T133710Z-multi-flash.json` |
-| 2 | 13:59–14:13 | single, flash, 3 | 15 of 15 | $2.27 | $4.42 | `results/20260930T135946Z-single-flash.json` |
+| 2 | 13:59–14:13 | single, flash, 3 | 15 of 15 | $2.27 | $4.41 | `results/20260930T135946Z-single-flash.json` |
 | 3 | 14:14–14:43 | multi, pro, 1 (concurrency 3) | aborted | about $0.55 | about $4.96 | `results/aborted/20260930T141410Z-multi-pro.json` (4 rows, not reported) |
 | 3b | 14:44–15:08 | multi, pro, 1 (concurrency 1) | aborted | about $0.20 | about $5.16 | none (no run finished) |
 | 4 | not run | single, pro, 1 | | | | |
 
 ### Notes taken while it ran
 
-- **Invocation 1.** All three `tc-001` runs failed on the same cap: `coder exceeded 25 tool calls in one turn`. In each, the coder had already edited `taskcli/dates.py`, written a new test file and run the tests; the 26th call was a last `git diff`, `git status` or `pytest`. Before editing, it spent 13 to 18 calls probing `datetime.fromisoformat` in the shell, one input at a time. No patch is saved for a run that ends on a cap, so these cannot be scored after the fact. Nothing else failed: no review or test-fix loop was entered in any run, no infra failures, no reruns, no crashed rows, no audit flags.
+- **Invocation 1.** All three `tc-001` runs failed on the same cap: `coder exceeded 25 tool calls in one turn`. In each, the coder had already edited `taskcli/dates.py`, written a new test file and run the tests; the 26th call was a last `git diff`, `git status` or `pytest`. Before its first edit it made 20 to 22 calls; 13 to 17 were shell commands, and 11 to 15 of those tried inputs on `datetime.fromisoformat`, mostly one input per call. No patch is saved for a run that ends on a cap, so these cannot be scored after the fact. Nothing else failed: no review or test-fix loop was entered in any run, no infra failures, no reruns, no crashed rows, no audit flags.
 - **Invocation 2.** The single agent resolved `tc-001` in all three repeats, using 31, 38 and 30 tool calls in the run. Each of those is above 25, so the multi-agent coder's per-turn cap would have stopped it too. It has the same habit of probing `datetime.fromisoformat` call by call. No failures of any kind, no reruns, no audit flags.
 - **Invocation 3, first attempt (multi, pro, concurrency 3): aborted.** Two separate problems.
-  - *Rate limit.* Vertex answered `429 RESOURCE_EXHAUSTED` when three Pro runs started at once. `tc-001`, `tc-002` and `tc-003` each failed all three attempts within seconds, because a rerun after an infra failure starts immediately and landed in the same rate-limit window. `tc-005` was declined on its second attempt.
+  - *Rate limit.* Vertex answered `429 RESOURCE_EXHAUSTED` when three Pro runs started at once. `tc-001`, `tc-002` and `tc-003` each failed all three attempts within a minute, because a rerun after an infra failure starts immediately and landed in the same rate-limit window. `tc-005` was declined on its second attempt.
   - *A hung model call.* `tc-004` got through the planner and the coder on its third attempt, then a reviewer model call never returned. The process sat at 0% CPU for 23 minutes with the connection still open; there is no request timeout on the model client.
   - At 14:43 the process was interrupted with Ctrl-C (SIGINT). It shut down cleanly: no sandbox left behind, and the four finished rows were already on disk. Spend: $0.09 in recorded rows plus about $0.46 for the hung attempt (estimated from its event log). The partial results file was moved to `results/aborted/` and is not part of the report.
   - Decision: rerun both Pro invocations with `--concurrency 1` on the same commit, under a small watchdog script that interrupts the run if its log is quiet for 10 minutes. No code was changed between the Flash and Pro runs. The two defects (no request timeout, no pause before an infra rerun) are recorded to fix before merge.
