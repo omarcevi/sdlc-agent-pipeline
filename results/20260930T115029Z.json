@@ -1,0 +1,19 @@
+[
+  {
+    "task_id": "tc-001",
+    "category": "bug",
+    "resolved": true,
+    "run_id": "tc-001-20260930T115029Z",
+    "outcome": "patch_written",
+    "failure_kind": "none",
+    "reason": "",
+    "patch_path": "runs/tc-001-20260930T115029Z/patch.diff",
+    "test_attempts": 0,
+    "review_rounds": 0,
+    "tokens_in": 238581,
+    "tokens_out": 15566,
+    "cost_usd": 0.2373,
+    "tool_calls": 41,
+    "duration_s": 229.62
+  }
+]
