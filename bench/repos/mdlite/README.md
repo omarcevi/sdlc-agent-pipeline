@@ -33,17 +33,22 @@ the table of contents.
 
 ## Rules
 
-Everything the library does is specified here. "Line" means a line after rule R1.
+Everything the library does is specified here. "Line" means a line after rule R1. In
+the block rules (R1 to R9) "whitespace" and "blank" mean spaces and tabs only; other
+characters such as a no-break space are ordinary text there. Elsewhere "space" and
+"whitespace" mean any Unicode whitespace character (Python's `str.isspace`), unless a
+rule says otherwise.
 
 **R1. Input normalisation.** `\r\n` and `\r` become `\n`. Tabs in the leading
 whitespace of a line are expanded to 4-column tab stops; tabs elsewhere are left
-alone. A blank line is one with only spaces and tabs. The empty document renders as
-the empty string.
+alone. A final newline ends the last line; it does not start another one. A blank line
+is one with only spaces and tabs. The empty document renders as the empty string.
 
 **R2. ATX headings.** A line of 1 to 6 `#`, indented by at most 3 spaces and followed
-by a space (or the end of the line), is a heading of that level. Its text is the rest
-of the line, trimmed, minus an optional closing run of `#` that is preceded by a space
-(or is the whole text). Seven or more `#`, or no space after them, make a paragraph.
+by a space or a tab (or the end of the line), is a heading of that level. Its text is
+the rest of the line, trimmed, minus an optional closing run of `#` that is preceded by
+a space or tab (or is the whole text). Seven or more `#`, or anything else after them,
+make a paragraph.
 There are no setext headings. Output: `<hN id="slug">...</hN>`.
 
 **R3. Paragraphs.** Consecutive non-blank lines form one paragraph, unless a line
@@ -57,12 +62,14 @@ and tabs allowed between them, at most 3 spaces of indent) is a thematic break,
 `<hr>`. This is checked before list markers, so `- - -` is a break, not a list.
 
 **R5. Fenced code blocks.** A line of three or more backticks or tildes opens a fence
-(a backtick fence's info string may not contain a backtick). The fence closes at the
-first line of the same character, at least as long, with nothing after it; an
+(a backtick fence's info string may not contain a backtick). Both the opening and the
+closing fence are indented by at most 3 spaces. The fence closes at the first line of
+the same character, at least as long, with nothing after it but spaces or tabs; an
 unclosed fence runs to the end of the document. Content lines are taken literally
 (nothing is parsed), minus up to as many leading spaces as the opening fence was
 indented. The first word of the info string becomes `class="language-WORD"`.
-Output: `<pre><code ...>text\n</code></pre>`.
+Output: `<pre><code ...>` followed by every content line (empty ones too) plus a
+newline, then `</code></pre>`; a fence with no content lines has an empty `<code>`.
 
 **R6. Block quotes.** Consecutive lines starting with `>` (at most 3 spaces of indent)
 form a block quote. One space after the `>` is removed, and the remaining lines are
@@ -70,22 +77,26 @@ parsed as blocks. A line without `>` ends the quote (no lazy continuation).
 Output: `<blockquote>`.
 
 **R7. Lists.** A list item starts with a marker at most 3 spaces indented: `-`, `*` or
-`+`, or 1 to 9 digits followed by `.` or `)`; then at least one space (or the end of
-the line). Items whose markers are the same kind (same bullet character, or same
+`+`, or 1 to 9 ASCII digits (`0`-`9`) followed by `.` or `)`; then at least one space
+(or the end of the line). Items whose markers are the same kind (same bullet character, or same
 delimiter) belong to one list; a different kind ends the list and starts a new one. A
 single blank line between items does not end the list, and items are never "loose":
-item text is never wrapped in `<p>`. An ordered list starts at its first item's
+item text is never wrapped in `<p>`, and it is inline text only (`- # h` is an item with
+the text `# h`, not a heading). An ordered list starts at its first item's
 number; `<ol>` gets `start="N"` only when N is not 1.
 
 **R8. List item continuation.** A non-blank line after an item line that is not a
 marker line and does not start another block (R2, R4, R5, R6) continues the item's text,
 whatever its indentation; the lines are joined by `\n` like a paragraph. A blank line
-followed by anything other than an item of the same list ends the list.
+followed by anything other than an item of the same list or a nested marker line (R9)
+ends the list.
 
 **R9. Nesting.** A marker line indented to at least the column where the current
-item's text starts (marker indent, plus the marker width, plus one space) is nested
-under that item; all such lines after one item form a single sublist, whose type is the
-first nested marker's. Nesting is one level deep: a deeper marker line is an item of
+item's text starts is nested under that item. That column is the marker's indent plus
+the marker width plus the number of spaces after the marker, where 0 spaces (an empty
+item) and 5 or more spaces count as 1 (`- a` and `1. a` start text at columns 2 and 3;
+`-   a` at column 4). All such lines after one item form a single sublist, whose type
+is the first nested marker's. Nesting is one level deep: a deeper marker line is an item of
 the same sublist. Continuation lines after a nested item continue that nested item.
 A marker line indented less than that column is not nested: it is a sibling item if it
 is the same kind as the list, otherwise it ends the list.
@@ -97,9 +108,9 @@ escaped, so an input entity such as `&amp;` is shown literally. Raw HTML is not
 supported: `<b>` in the input is text and comes out escaped.
 
 **R11. Backslash escapes.** A backslash before an ASCII punctuation character yields
-that character literally (it is never part of emphasis, code, a link or an autolink).
-A backslash before anything else is a literal backslash. Backslash escapes are not
-processed inside code spans, code blocks or info strings.
+that character literally (it is never part of emphasis, code, a link or an autolink
+delimiter). A backslash before anything else is a literal backslash. Backslash escapes
+are not processed inside code spans, code blocks, info strings or autolinks (R17).
 
 **R12. Line breaks.** A newline inside a paragraph, list item or quote is kept as
 `\n` (a soft break), after removing spaces before it. Two or more spaces, or a
@@ -117,29 +128,32 @@ delimiters outside it.
 
 **R14. Emphasis and strong.** A run of `*` or `_` can open when followed by a
 non-space character and close when preceded by a non-space character (the start and end
-of the text count as spaces). For `_`, a run that touches a letter or digit on the
+of the text count as spaces; a no-break space is a space). For `_`, a run that touches a letter or digit on the
 outside cannot open (letter or digit before it) or close (letter or digit after it), so
 `snake_case_name` is plain text; `*` may be used inside words. Each closing run pairs
 with the nearest open run of the same character before it; two characters on both
 sides make `<strong>`, otherwise `<em>`; `***x***` is `<em><strong>x</strong></em>`.
-Unpaired delimiters are literal text.
+Unpaired delimiters are literal text. Emphasis and strong nest at most 20 levels deep
+(R22).
 
 **R15. Links and images.** `[text](url)` and `[text](url "title")` (title in `"` or
 `'`) make links; `![alt](url)` makes an image. The url is either `<...>` (may contain
-spaces) or a run without spaces and with balanced parentheses; backslash escapes are
-resolved in url and title. The text may contain emphasis, code spans and images but not
-another link (an inner `[` is literal). An image's `alt` is the plain text of its
-label. Without a `(` right after the closing `]`, the brackets are literal text.
+spaces; `\>` is a literal `>` and any other `>` ends it) or a run without whitespace
+and with balanced parentheses; backslash escapes are resolved in url and title. The text may contain emphasis, code spans and images but not
+another link or autolink (an inner `[` or `<` is literal). An image's `alt` is the plain text of its
+label. Without a `(` right after the closing `]`, the brackets are literal text. Image
+labels nest at most 10 levels deep (R22).
 
-**R16. URL safety.** A url has a scheme when, after deleting all whitespace and control
-characters, it starts with a letter, then letters, digits, `+`, `.` or `-`, then `:`.
+**R16. URL safety.** A url has a scheme when, after deleting the characters U+0000 to
+U+0020 and U+007F (control characters and ASCII whitespace), it starts with a letter, then letters, digits, `+`, `.` or `-`, then `:`.
 Urls without a scheme (relative urls, `#anchors`, `//host/path`) and with the scheme
 `http`, `https` or `mailto` (case-insensitive) are safe. Any other scheme is unsafe: a
 link with an unsafe url renders as its text alone, without `<a>`, and an image renders
 as its alt text alone.
 
 **R17. Autolinks.** `<scheme:rest>`, where the scheme is 2 to 32 characters (R16's
-syntax) and the text has no spaces or `<`/`>`, is a link whose text is the url itself.
+syntax) and the text has no whitespace, `<` or `>`, is a link whose text is the url
+itself. Nothing inside is a backslash escape, so the first `>` always ends it.
 `<name@host>` (no spaces, exactly one `@`) is a link to `mailto:name@host` showing the
 address. R16 applies: an autolink with an unsafe scheme renders as its text.
 
@@ -162,3 +176,9 @@ The plain text is the same text R18 starts from.
 input), writes the HTML to standard output as UTF-8 and exits 0. An unreadable or
 undecodable file prints `mdlite: ...` to standard error and exits 1. Wrong arguments
 exit 2.
+
+**R22. Nesting limits.** Every input renders; none raises. Block quotes nest at most 20
+levels: a `>` line that would open a 21st level is paragraph text (and is escaped as
+`&gt;`). Image labels nest at most 10 levels: a deeper `![` is literal text. Emphasis and
+strong nest at most 20 levels: a closing run that would pair at a deeper level stays
+literal text.

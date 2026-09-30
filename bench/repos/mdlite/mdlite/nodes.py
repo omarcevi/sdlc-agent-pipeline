@@ -87,7 +87,7 @@ class Paragraph:
 
 @dataclass
 class CodeBlock:
-    """A fenced code block. `code` has no trailing newline."""
+    """A fenced code block. `code` is the content lines, each followed by a newline."""
 
     info: str
     code: str

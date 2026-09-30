@@ -33,6 +33,8 @@ _ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
 _BACKTICK_RUN = re.compile(r"`+")
 _AUTOLINK_FORBIDDEN = re.compile(r"[\s<]")
 _EMAIL = re.compile(r"^[^\s<>@]+@[^\s<>@]+$")
+MAX_IMAGE_DEPTH = 10
+MAX_EMPHASIS_DEPTH = 20
 _MIN_SCHEME = 2
 _MAX_SCHEME = 32
 
@@ -50,13 +52,17 @@ class _Delimiter:
 _Node = Inline | _Delimiter
 
 
-def parse_inline(text: str, *, allow_links: bool = True) -> list[Inline]:
+def parse_inline(
+    text: str, *, allow_links: bool = True, image_depth: int = 0
+) -> list[Inline]:
     """Parse inline markup in `text`.
 
-    With `allow_links=False` a `[` is always literal; this is how the label of a link
-    is parsed, since links do not nest (rule R15).
+    With `allow_links=False` a `[` or `<` never starts a link or autolink; this is
+    how the label of a link is parsed, since links do not nest (rules R15, R17).
+    `image_depth` is how many image labels enclose `text`; at `MAX_IMAGE_DEPTH` a
+    further `![` is literal (rule R22).
     """
-    return _Scanner(text, allow_links).scan()
+    return _Scanner(text, allow_links, image_depth).scan()
 
 
 def plain_text(nodes: list[Inline]) -> str:
@@ -83,9 +89,10 @@ def unescape(text: str) -> str:
 class _Scanner:
     """One pass over the text of a block."""
 
-    def __init__(self, text: str, allow_links: bool) -> None:
+    def __init__(self, text: str, allow_links: bool, image_depth: int) -> None:
         self.text = text
         self.allow_links = allow_links
+        self.image_depth = image_depth
         self.pos = 0
         self.nodes: list[_Node] = []
         self.buffer: list[str] = []
@@ -103,9 +110,13 @@ class _Scanner:
                 self._delimiter_run()
             elif char == "[" and self.allow_links:
                 self._bracket(image=False)
-            elif char == "!" and self.text.startswith("![", self.pos):
+            elif (
+                char == "!"
+                and self.text.startswith("![", self.pos)
+                and self.image_depth < MAX_IMAGE_DEPTH
+            ):
                 self._bracket(image=True)
-            elif char == "<":
+            elif char == "<" and self.allow_links:
                 self._angle()
             else:
                 self._literal(char)
@@ -187,7 +198,11 @@ class _Scanner:
             self._literal("![" if image else "[")
             return
         label, url, title, end = parsed
-        children = parse_inline(label, allow_links=False)
+        children = parse_inline(
+            label,
+            allow_links=False,
+            image_depth=self.image_depth + (1 if image else 0),
+        )
         self._emit(Image(children, url, title) if image else Link(children, url, title))
         self.pos = end
 
@@ -297,8 +312,8 @@ def _parse_destination(text: str, pos: int) -> tuple[str, str | None, int] | Non
     """Parse `url`, `<url>` and an optional title up to the closing paren."""
     pos = _skip_spaces(text, pos)
     if text.startswith("<", pos):
-        close = text.find(">", pos)
-        if close == -1 or "<" in text[pos + 1 : close] or "\n" in text[pos:close]:
+        close = _find_angle_end(text, pos)
+        if close is None:
             return None
         url, pos = text[pos + 1 : close], close + 1
     else:
@@ -328,6 +343,25 @@ def _parse_destination(text: str, pos: int) -> tuple[str, str | None, int] | Non
     if not text.startswith(")", pos):
         return None
     return unescape(url), None if title is None else unescape(title), pos + 1
+
+
+def _find_angle_end(text: str, start: int) -> int | None:
+    """The index of the `>` closing the `<...>` url at `start`.
+
+    `\\>` does not close it; a `<` or a newline inside means there is no url.
+    """
+    i = start + 1
+    while i < len(text):
+        char = text[i]
+        if char == "\\":
+            i += 2
+            continue
+        if char == ">":
+            return i
+        if char in "<\n":
+            return None
+        i += 1
+    return None
 
 
 def _parse_title(text: str, pos: int) -> tuple[str | None, int]:
@@ -363,8 +397,12 @@ def _pair_emphasis(nodes: list[_Node]) -> list[_Node]:
             continue
         opener = nodes[opener_at]
         assert isinstance(opener, _Delimiter) and isinstance(closer, _Delimiter)
+        inner = _finish(nodes[opener_at + 1 : i])
+        if _emphasis_depth(inner) >= MAX_EMPHASIS_DEPTH:
+            i += 1  # nested too deeply: this closer stays text
+            continue
         used = 2 if opener.count >= 2 and closer.count >= 2 else 1
-        wrapper = (Strong if used == 2 else Emphasis)(_finish(nodes[opener_at + 1 : i]))
+        wrapper = (Strong if used == 2 else Emphasis)(inner)
         opener.count -= used
         closer.count -= used
         replacement: list[_Node] = [opener] if opener.count else []
@@ -374,6 +412,18 @@ def _pair_emphasis(nodes: list[_Node]) -> list[_Node]:
         nodes[opener_at : i + 1] = replacement
         i = opener_at + len(replacement) - (1 if closer.count else 0)
     return nodes
+
+
+def _emphasis_depth(nodes: list[Inline]) -> int:
+    """How deeply Emphasis and Strong nodes are nested in `nodes`."""
+    return max(
+        (
+            1 + _emphasis_depth(node.children)
+            for node in nodes
+            if isinstance(node, Emphasis | Strong)
+        ),
+        default=0,
+    )
 
 
 def _is_closer(node: _Node) -> bool:

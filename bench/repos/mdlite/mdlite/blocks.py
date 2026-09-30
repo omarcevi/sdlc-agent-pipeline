@@ -27,9 +27,11 @@ _CLOSING_HASHES = re.compile(r"(?:^|[ \t]+)#+$")
 _THEMATIC_BREAK = re.compile(r"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
 _QUOTE = re.compile(r"^ {0,3}> ?(.*)$")
 _FENCE = re.compile(r"^( {0,3})(`{3,}|~{3,})(.*)$")
-_LIST_MARKER = re.compile(r"^( *)([-*+]|\d{1,9}[.)])( +|$)(.*)$")
+_LIST_MARKER = re.compile(r"^( *)([-*+]|[0-9]{1,9}[.)])( +|$)(.*)$")
 _LEADING_WHITESPACE = re.compile(r"^[ \t]+")
 
+_BLANK = " \t"  # the only whitespace the block parser trims or treats as blank
+MAX_QUOTE_DEPTH = 20
 _MAX_TOP_LEVEL_INDENT = 3
 _MAX_MARKER_GAP = 4
 
@@ -42,6 +44,8 @@ def parse(text: str) -> Document:
 def _split_lines(text: str) -> list[str]:
     """Normalise line endings and expand leading tabs (rule R1)."""
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if text.endswith(("\n", "\r")):
+        lines.pop()  # a final newline ends the last line; it does not start another
     return [_LEADING_WHITESPACE.sub(_expand_tabs, line) for line in lines]
 
 
@@ -50,7 +54,7 @@ def _expand_tabs(match: re.Match[str]) -> str:
 
 
 def _is_blank(line: str) -> bool:
-    return not line.strip()
+    return not line.strip(_BLANK)
 
 
 # Block starts ----------------------------------------------------------------
@@ -74,31 +78,31 @@ def _open_fence(line: str) -> _Fence | None:
     match = _FENCE.match(line)
     if match is None:
         return None
-    marker, info = match.group(2), match.group(3).strip()
+    marker, info = match.group(2), match.group(3).strip(_BLANK)
     if marker[0] == "`" and "`" in info:
         return None
     return _Fence(marker[0], len(marker), len(match.group(1)), info)
 
 
 def _closes_fence(line: str, fence: _Fence) -> bool:
-    stripped = line.strip()
+    stripped = line.strip(_BLANK)
     if len(line) - len(line.lstrip(" ")) > _MAX_TOP_LEVEL_INDENT:
         return False
     return len(stripped) >= fence.length and stripped == fence.char * len(stripped)
 
 
-def _interrupts_list_item(line: str) -> bool:
+def _interrupts_list_item(line: str, quotes: bool) -> bool:
     """True for lines that end a list item's text without being a marker line."""
     return (
         _ATX.match(line) is not None
         or _open_fence(line) is not None
-        or _QUOTE.match(line) is not None
+        or (quotes and _QUOTE.match(line) is not None)
         or _is_thematic_break(line)
     )
 
 
-def _interrupts_paragraph(line: str) -> bool:
-    if _interrupts_list_item(line):
+def _interrupts_paragraph(line: str, quotes: bool) -> bool:
+    if _interrupts_list_item(line, quotes):
         return True
     marker = _marker(line)
     return marker is not None and marker.indent <= _MAX_TOP_LEVEL_INDENT
@@ -107,7 +111,7 @@ def _interrupts_paragraph(line: str) -> bool:
 # Block parsing ---------------------------------------------------------------
 
 
-def _parse_blocks(lines: list[str]) -> list[Block]:
+def _parse_blocks(lines: list[str], depth: int = 0) -> list[Block]:
     blocks: list[Block] = []
     i = 0
     while i < len(lines):
@@ -122,14 +126,14 @@ def _parse_blocks(lines: list[str]) -> list[Block]:
             block, i = heading, i + 1
         elif _is_thematic_break(line):
             block, i = ThematicBreak(), i + 1
-        elif _QUOTE.match(line):
-            block, i = _parse_quote(lines, i)
+        elif depth < MAX_QUOTE_DEPTH and _QUOTE.match(line):
+            block, i = _parse_quote(lines, i, depth)
         elif (marker := _marker(line)) is not None and (
             marker.indent <= _MAX_TOP_LEVEL_INDENT
         ):
-            block, i = _parse_list(lines, i, marker)
+            block, i = _parse_list(lines, i, marker, depth < MAX_QUOTE_DEPTH)
         else:
-            block, i = _parse_paragraph(lines, i)
+            block, i = _parse_paragraph(lines, i, depth < MAX_QUOTE_DEPTH)
         blocks.append(block)
     return blocks
 
@@ -139,7 +143,7 @@ def _parse_heading(line: str) -> Heading | None:
     match = _ATX.match(line)
     if match is None:
         return None
-    text = _CLOSING_HASHES.sub("", (match.group(2) or "").strip()).strip()
+    text = _CLOSING_HASHES.sub("", (match.group(2) or "").strip(_BLANK)).strip(_BLANK)
     return Heading(level=len(match.group(1)), text=text)
 
 
@@ -150,7 +154,9 @@ def _parse_fence(lines: list[str], start: int, fence: _Fence) -> tuple[CodeBlock
     while i < len(lines) and not _closes_fence(lines[i], fence):
         content.append(_strip_indent(lines[i], fence.indent))
         i += 1
-    return CodeBlock(info=fence.info, code="\n".join(content)), min(i + 1, len(lines))
+    return CodeBlock(
+        info=fence.info, code="".join(f"{line}\n" for line in content)
+    ), min(i + 1, len(lines))
 
 
 def _strip_indent(line: str, width: int) -> str:
@@ -159,26 +165,28 @@ def _strip_indent(line: str, width: int) -> str:
     return line[min(width, removable) :]
 
 
-def _parse_quote(lines: list[str], start: int) -> tuple[BlockQuote, int]:
+def _parse_quote(lines: list[str], start: int, depth: int) -> tuple[BlockQuote, int]:
     """A block quote (rule R6): the unquoted lines are parsed as blocks."""
     inner: list[str] = []
     i = start
     while i < len(lines) and (match := _QUOTE.match(lines[i])) is not None:
         inner.append(match.group(1))
         i += 1
-    return BlockQuote(_parse_blocks(inner)), i
+    return BlockQuote(_parse_blocks(inner, depth + 1)), i
 
 
-def _parse_paragraph(lines: list[str], start: int) -> tuple[Paragraph, int]:
+def _parse_paragraph(
+    lines: list[str], start: int, quotes: bool
+) -> tuple[Paragraph, int]:
     """A paragraph (rule R3): lines up to a blank line or the start of a block."""
-    collected = [lines[start].lstrip()]
+    collected = [lines[start].lstrip(_BLANK)]
     i = start + 1
     while i < len(lines) and not _is_blank(lines[i]):
-        if _interrupts_paragraph(lines[i]):
+        if _interrupts_paragraph(lines[i], quotes):
             break
-        collected.append(lines[i].lstrip())
+        collected.append(lines[i].lstrip(_BLANK))
         i += 1
-    return Paragraph("\n".join(collected).rstrip()), i
+    return Paragraph("\n".join(collected).rstrip(_BLANK)), i
 
 
 # Lists -----------------------------------------------------------------------
@@ -243,10 +251,12 @@ class _ItemDraft:
 
 
 def _join(lines: list[str]) -> str:
-    return "\n".join(line.lstrip() for line in lines).rstrip()
+    return "\n".join(line.lstrip(_BLANK) for line in lines).rstrip(_BLANK)
 
 
-def _parse_list(lines: list[str], start: int, first: _Marker) -> tuple[ListBlock, int]:
+def _parse_list(
+    lines: list[str], start: int, first: _Marker, quotes: bool
+) -> tuple[ListBlock, int]:
     """A list with its items (rules R7 to R9)."""
     drafts = [_ItemDraft(first)]
     i = start + 1
@@ -261,7 +271,7 @@ def _parse_list(lines: list[str], start: int, first: _Marker) -> tuple[ListBlock
             continue
         marker = _marker(line)
         if marker is None:
-            if _interrupts_list_item(line):
+            if _interrupts_list_item(line, quotes):
                 break
             drafts[-1].continue_with(line)
         elif marker.indent >= drafts[-1].marker.offset:

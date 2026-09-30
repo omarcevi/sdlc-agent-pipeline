@@ -113,6 +113,7 @@ def test_delimiters_next_to_spaces_are_literal():
     """R14: a run followed by a space cannot open; one preceded by a space cannot close."""
     assert p("a * b * c") == "a * b * c"
     assert p("*a *") == "*a *"
+    assert p("*\u00a0a*") == "*\u00a0a*"  # a no-break space is a space
 
 
 def test_underscore_does_not_work_inside_words():
@@ -141,6 +142,7 @@ def test_link_forms():
 def test_link_destinations():
     """R15: `<...>` urls may hold spaces; bare urls may hold balanced parentheses."""
     assert parse_inline("[a](<a b>)") == [Link([Text("a")], "a b")]
+    assert parse_inline("[a](<b\\>c>)") == [Link([Text("a")], "b>c")]  # `\\>` is `>`
     assert parse_inline("[a](/x_(y))") == [Link([Text("a")], "/x_(y)")]
     assert parse_inline("[a](/x\\)y)") == [Link([Text("a")], "/x)y")]
     assert parse_inline('[a](/u "t\\"q")') == [Link([Text("a")], "/u", 't"q')]
@@ -152,6 +154,8 @@ def test_link_text_holds_markup_but_not_links():
     assert p("[a [b](/i) c](/o)") == '<a href="/o">a [b](/i) c</a>'
     assert p("[`]`](/u)") == '<a href="/u"><code>]</code></a>'
     assert p("[a\\]b](/u)") == '<a href="/u">a]b</a>'
+    assert p("[<http://x>](/u)") == '<a href="/u">&lt;http://x&gt;</a>'
+    assert p("[a <b@c.d>](/u)") == '<a href="/u">a &lt;b@c.d&gt;</a>'
 
 
 def test_brackets_without_a_destination_are_text():
@@ -218,6 +222,9 @@ def test_autolink_needs_a_valid_shape():
     assert p("<x:y>") == "&lt;x:y&gt;"
     assert p("<a@b@c>") == "&lt;a@b@c&gt;"
     assert p("<>") == "&lt;&gt;"
+    ok, too_long = "a" * 32 + ":x", "a" * 33 + ":x"  # schemes have 2 to 32 characters
+    assert parse_inline(f"<{ok}>") == [Link([Text(ok)], ok)]
+    assert parse_inline(f"<{too_long}>") == [Text(f"<{too_long}>")]
     assert p("a < b") == "a &lt; b"
 
 
@@ -230,3 +237,29 @@ def test_plain_text_flattens_markup():
     """R18: the plain text drops markers and keeps code, link text and alt text."""
     nodes = parse_inline("A *b* **c** `d` [e](/u) ![f](/i) g\\*")
     assert plain_text(nodes) == "A b c d e f g*"
+
+
+def test_autolinks_do_not_process_escapes():
+    """R11: inside `<...>` an autolink keeps backslashes, and any `>` closes it."""
+    assert p("<http://a\\*b>") == '<a href="http://a\\*b">http://a\\*b</a>'
+    assert p("<http://a\\>b>") == '<a href="http://a\\">http://a\\</a>b&gt;'
+
+
+def test_images_nest_to_a_fixed_depth():
+    """R22: image labels nest 10 levels deep; deeper `![` are text; no input raises."""
+
+    def depth(nodes):
+        images = [n for n in nodes if isinstance(n, Image)]
+        return 1 + max(depth(i.children) for i in images) if images else 0
+
+    assert depth(parse_inline("![" * 12 + "a" + "](u)" * 12)) == 10
+    assert depth(parse_inline("![" * 5 + "a" + "](u)" * 5)) == 5
+    assert isinstance(to_html("![" * 50_000 + "a" + "](u)" * 50_000), str)
+
+
+def test_emphasis_nesting_never_raises():
+    """R22: emphasis nests 20 levels deep; leftover delimiters are text."""
+    html = to_html("*" * 4_000 + "a" + "*" * 4_000)
+    assert html.count("<strong>") == 20
+    assert html.startswith("<p>" + "*" * 3_960 + "<strong>")
+    assert isinstance(to_html("*_" * 2_000 + "a" + "_*" * 2_000), str)

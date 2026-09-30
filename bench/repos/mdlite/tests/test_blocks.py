@@ -55,6 +55,9 @@ def test_atx_closing_hashes_and_indent():
     assert parse("#").children == [Heading(1, "")]
     assert parse("   # Three").children == [Heading(1, "Three")]
     assert parse("    # Four").children == [Paragraph("# Four")]
+    assert parse("#\tFoo").children == [Heading(1, "Foo")]  # a tab works like a space
+    assert parse("# a\t#").children == [Heading(1, "a")]
+    assert parse("#\u00a0Foo").children == [Paragraph("#\u00a0Foo")]
 
 
 def test_paragraphs_join_lines_and_split_on_blank_lines():
@@ -111,28 +114,28 @@ def test_fenced_code_is_literal_and_escaped():
 
 def test_fence_closing_rules():
     """R5: the closing fence matches the character, is long enough, and is bare."""
-    assert parse("````\n```\n````").children == [CodeBlock("", "```")]
-    assert parse("~~~\n```\n~~~").children == [CodeBlock("", "```")]
-    assert parse("```\na\n``` b\n```").children == [CodeBlock("", "a\n``` b")]
-    assert parse("```\n~~~\n```").children == [CodeBlock("", "~~~")]
+    assert parse("````\n```\n````").children == [CodeBlock("", "```\n")]
+    assert parse("~~~\n```\n~~~").children == [CodeBlock("", "```\n")]
+    assert parse("```\na\n``` b\n```").children == [CodeBlock("", "a\n``` b\n")]
+    assert parse("```\n~~~\n```").children == [CodeBlock("", "~~~\n")]
 
 
 def test_unclosed_fence_runs_to_the_end():
     """R5: an unclosed fence takes the rest of the document."""
-    assert parse("```\nabc\n\ndef").children == [CodeBlock("", "abc\n\ndef")]
+    assert parse("```\nabc\n\ndef").children == [CodeBlock("", "abc\n\ndef\n")]
 
 
 def test_fence_indent_is_removed_from_content_lines():
     """R5: content loses up to as many spaces as the opening fence had."""
     source = " ```\n  a\n b\nc\n ```"
-    assert parse(source).children == [CodeBlock("", " a\nb\nc")]
+    assert parse(source).children == [CodeBlock("", " a\nb\nc\n")]
 
 
 def test_empty_fence_and_backtick_info_rule():
     """R5: an empty block has no text; a backtick fence's info has no backtick."""
     assert to_html("```\n```") == "<pre><code></code></pre>\n"
     assert not any(isinstance(b, CodeBlock) for b in parse("``` a`b").children)
-    assert parse("~~~ a`b\nx\n~~~").children == [CodeBlock("a`b", "x")]
+    assert parse("~~~ a`b\nx\n~~~").children == [CodeBlock("a`b", "x\n")]
 
 
 def test_block_quote_contents_are_blocks():
@@ -245,3 +248,72 @@ def test_continuation_after_a_nested_item_and_blank_before_nested():
     assert parse("- a\n\n  - b").children == [
         ListBlock(False, 1, [ListItem("a", nested)])
     ]
+
+
+def test_nesting_column_counts_the_gap_after_the_marker():
+    """R9: the text column adds 1 to 4 spaces after the marker; 0 or 5+ count as 1."""
+    sibling = [ListBlock(False, 1, [ListItem("a"), ListItem("b")])]
+    assert parse("-   a\n  - b").children == sibling  # gap 3: text at column 4
+    nested = ListBlock(False, 1, [ListItem("b")])
+    assert parse("-      a\n  - b").children == [
+        ListBlock(False, 1, [ListItem("a", nested)])
+    ]
+    assert parse("-    a\n  - b").children == sibling  # gap 4: text at column 5
+
+
+def test_nested_marker_may_follow_a_blank_line():
+    """R8: after a blank line only an item of the list or a nested marker goes on."""
+    nested = ListBlock(True, 1, [ListItem("b")])
+    assert parse("- a\n\n  1. b").children == [
+        ListBlock(False, 1, [ListItem("a", nested)])
+    ]
+    assert (
+        to_html("- a\n\n1. b") == "<ul>\n<li>a</li>\n</ul>\n<ol>\n<li>b</li>\n</ol>\n"
+    )
+
+
+def test_list_item_text_and_digits():
+    """R7: item text is never a block; marker digits are ASCII 0-9 only."""
+    assert to_html("- # h") == "<ul>\n<li># h</li>\n</ul>\n"
+    assert to_html("- > q") == "<ul>\n<li>&gt; q</li>\n</ul>\n"
+    assert to_html("\u0661. x") == "<p>\u0661. x</p>\n"
+
+
+def test_empty_content_lines_in_a_fence():
+    """R5: each content line, even an empty one, is followed by a newline."""
+    assert to_html("```\n```") == "<pre><code></code></pre>\n"
+    assert to_html("```\n\n```") == "<pre><code>\n</code></pre>\n"
+    assert to_html("```\n\n\n```") == "<pre><code>\n\n</code></pre>\n"
+
+
+def test_fence_indent_limit():
+    """R5: a fence, opening or closing, is indented by at most 3 spaces."""
+    assert parse("    ```\nx").children == [Paragraph("```\nx")]
+    assert parse("```\na\n    ```\nb").children == [CodeBlock("", "a\n    ```\nb\n")]
+    assert parse("```\na\n   ```").children == [CodeBlock("", "a\n")]
+
+
+def test_final_newline_ends_the_last_line():
+    """R1: a final newline ends the last line; it does not add a blank line."""
+    assert (
+        to_html("```\nabc\n")
+        == to_html("```\nabc")
+        == "<pre><code>abc\n</code></pre>\n"
+    )
+    assert to_html("```\nabc\n\n") == "<pre><code>abc\n\n</code></pre>\n"
+    assert to_html("\n") == ""
+
+
+def test_blank_lines_are_spaces_and_tabs_only():
+    """R1: other whitespace, such as a no-break space, does not make a line blank."""
+    assert to_html("a\n \t \nb") == "<p>a</p>\n<p>b</p>\n"
+    assert to_html("a\n\u00a0\nb") == "<p>a\n\u00a0\nb</p>\n"
+    assert to_html("a\n\x0c\nb") == "<p>a\n\x0c\nb</p>\n"
+
+
+def test_quotes_nest_to_a_fixed_depth():
+    """R22: quotes nest 20 levels deep; deeper `>` are text; no input raises."""
+    html = to_html(">" * 22 + " x")
+    assert html.count("<blockquote>") == 20
+    assert "<p>&gt;&gt; x</p>" in html
+    assert to_html(">" * 100_000).count("<blockquote>") == 20

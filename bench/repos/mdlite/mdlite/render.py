@@ -115,7 +115,7 @@ class _Renderer:
     def code_block(self, info: str, code: str) -> str:
         words = info.split()
         css_class = f' class="language-{escape_attr(words[0])}"' if words else ""
-        body = escape_text(code) + "\n" if code else ""
+        body = escape_text(code)
         return f"<pre><code{css_class}>{body}</code></pre>\n"
 
     def list_block(self, block: ListBlock) -> str:

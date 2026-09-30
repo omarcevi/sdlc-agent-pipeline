@@ -70,7 +70,7 @@ def test_python_dash_m_runs_the_cli(tmp_path):
 
 
 def test_every_readme_rule_is_named_by_a_test():
-    """Every rule R1..Rn in the README appears in at least one test docstring."""
+    """Every numbered README rule is named in at least one test docstring."""
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     rules = set(re.findall(r"^\*\*(R\d+)\.", readme, flags=re.MULTILINE))
     assert len(rules) >= 10
