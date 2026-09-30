@@ -5,12 +5,19 @@ from pathlib import Path
 import aiohttp
 import httpx
 import pytest
+from google.adk.plugins import ReflectAndRetryModelPlugin
 from google.genai import errors as genai_errors
 from pydantic import ValidationError
 
-from app.budget import BudgetExceeded
-from app.driver import classify_failure, run_pipeline
+from app.budget import BudgetExceeded, BudgetPlugin
+from app.driver import (
+    _ActiveAgentTracker,
+    build_plugins,
+    classify_failure,
+    run_pipeline,
+)
 from app.environment.base import ExecResult, InfraError
+from app.guardrails import GuardrailPlugin
 from app.models import RoleModels
 from app.nodes import intake
 from app.nodes.verify import DIFF_CMD, NUMSTAT_CMD, TEST_CMD
@@ -22,6 +29,7 @@ from tests.fakes import (
     call,
     json_out,
     make_bench_task,
+    malformed_call,
     raises,
     text,
 )
@@ -203,6 +211,41 @@ async def test_failing_sandbox_release_keeps_the_classified_failure(bench, monke
     record = await run(planner, FakeLlm([]), FakeLlm([]))
     assert (record.outcome, record.failure_kind) == ("failed", "budget")
     assert _record_on_disk(bench)["failure_kind"] == "budget"
+
+
+def test_driver_plugins_are_budget_tracker_retry_guardrails():
+    budget, tracker = BudgetPlugin(), _ActiveAgentTracker()
+    plugins = build_plugins(budget, tracker)
+    assert plugins[0] is budget and plugins[1] is tracker
+    assert [type(p) for p in plugins[2:]] == [
+        ReflectAndRetryModelPlugin,
+        GuardrailPlugin,
+    ]
+    assert plugins[2].max_retries == 2
+
+
+async def test_malformed_function_call_is_retried(bench, monkeypatch):
+    env = FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
+    use_env(monkeypatch, env)
+    planner = FakeLlm([malformed_call(), malformed_call(), json_out(PLAN)])
+    record = await run(
+        planner, FakeLlm([json_out(PATCH)]), FakeLlm([json_out(APPROVE)])
+    )
+    assert (record.outcome, record.failure_kind) == ("patch_written", "none")
+    assert planner.calls == 3
+    assert record.tokens_in == 5000  # the failed calls are still paid for
+
+
+async def test_malformed_function_calls_beyond_the_retry_limit_fail_the_agent(
+    bench, monkeypatch
+):
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    planner = FakeLlm([malformed_call()] * 3)
+    record = await run(planner, FakeLlm([]), FakeLlm([]))
+    assert (record.outcome, record.failure_kind) == ("failed", "agent")
+    assert "malformed function calls" in record.reason
+    assert planner.calls == 3 and env.closed
 
 
 async def test_malformed_model_output_is_an_agent_failure(bench, monkeypatch):

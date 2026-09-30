@@ -8,6 +8,7 @@ from typing import Any
 import aiohttp
 import httpx
 from google.adk.apps import App
+from google.adk.plugins import ReflectAndRetryModelPlugin
 from google.adk.plugins.base_plugin import BasePlugin
 from google.adk.runners import InMemoryRunner
 from google.adk.workflow import Workflow
@@ -29,6 +30,10 @@ logger = logging.getLogger(__name__)
 # The native Gemini client raises APIError for HTTP error statuses and lets
 # transport failures through from whichever HTTP library it is using.
 _MODEL_API_ERRORS = (genai_errors.APIError, httpx.HTTPError, aiohttp.ClientError)
+# ReflectAndRetryModelPlugin gives up with a bare RuntimeError carrying this text.
+# tests/unit/test_pipeline.py runs the real plugin to its limit, so a change of
+# wording in ADK shows up as a failing test.
+_RETRIES_EXHAUSTED = "The model has failed consecutively"
 
 
 class _ActiveAgentTracker(BasePlugin):
@@ -52,6 +57,17 @@ class _ActiveAgentTracker(BasePlugin):
 
     async def after_agent_callback(self, *, agent: Any, callback_context: Any) -> None:
         self._active.pop(callback_context.session.id, None)
+
+
+def build_plugins(budget: BudgetPlugin, tracker: BasePlugin) -> list[BasePlugin]:
+    """Runner-wide plugins in the same order as app/agent.py, plus the tracker:
+    budget, tracker, malformed-function-call retry, guardrails."""
+    return [
+        budget,
+        tracker,
+        ReflectAndRetryModelPlugin(max_retries=2),
+        GuardrailPlugin(),
+    ]
 
 
 def _chain(exc: BaseException) -> Iterator[BaseException]:
@@ -86,6 +102,8 @@ def classify_failure(
             return "infra", str(error)
         if _is_model_api_error(error):
             return "infra", f"{type(error).__name__}: {error}"
+        if isinstance(error, RuntimeError) and _RETRIES_EXHAUSTED in str(error):
+            return "agent", "malformed function calls: retry limit exceeded"
         if llm_agent_active and isinstance(error, ValidationError):
             return "agent", f"malformed model output: {error.errors()[0]['msg']}"
     raise exc
@@ -99,7 +117,7 @@ async def run_pipeline(
     app = App(
         name="app",
         root_agent=workflow or build_workflow(RoleModels.from_env()),
-        plugins=[budget, tracker, GuardrailPlugin()],
+        plugins=build_plugins(budget, tracker),
     )
     runner = InMemoryRunner(app=app)
     session = await runner.session_service.create_session(

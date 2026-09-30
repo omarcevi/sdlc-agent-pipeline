@@ -35,6 +35,11 @@ def raises(error: Exception) -> dict:
     return {"raise": error}
 
 
+def malformed_call() -> dict:
+    """A model response the provider rejected as a malformed function call."""
+    return {"malformed": True}
+
+
 def json_out(value: BaseModel | dict) -> dict:
     data = value.model_dump() if isinstance(value, BaseModel) else value
     return text(json.dumps(data))
@@ -70,6 +75,16 @@ class FakeLlm(BaseLlm):
         step = self._steps.pop(0)
         if "raise" in step:
             raise step["raise"]
+        if "malformed" in step:
+            yield LlmResponse(
+                error_code="MALFORMED_FUNCTION_CALL",
+                error_message="Malformed function call: print(read_file(",
+                finish_reason=types.FinishReason.MALFORMED_FUNCTION_CALL,
+                usage_metadata=types.GenerateContentResponseUsageMetadata(
+                    prompt_token_count=1000, candidates_token_count=100
+                ),
+            )
+            return
         if "call" in step:
             part = types.Part(
                 function_call=types.FunctionCall(name=step["call"], args=step["args"])
