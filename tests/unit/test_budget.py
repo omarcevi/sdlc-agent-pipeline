@@ -24,6 +24,14 @@ def test_cost_long_context_applies_to_prefixed_variants():
     assert cost_usd("gemini-3.1-pro-preview", 300_000, 0) == pytest.approx(1.20)
 
 
+def test_cost_pro_preview_price():
+    assert cost_usd("gemini-3.1-pro-preview", 100_000, 10_000) == pytest.approx(0.32)
+
+
+def test_cost_pro_preview_long_context_rate():
+    assert cost_usd("gemini-3.1-pro-preview", 300_000, 0) == pytest.approx(1.20)
+
+
 def test_cost_unknown_model_is_conservative():
     assert cost_usd("mystery", 1_000_000, 0) == pytest.approx(5.00)
 

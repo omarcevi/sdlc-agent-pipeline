@@ -42,9 +42,17 @@ class RoleModels:
     reviewer: BaseLlm
 
     @classmethod
-    def from_env(cls) -> "RoleModels":
+    def from_names(cls, planner: str, coder: str, reviewer: str) -> "RoleModels":
         return cls(
-            planner=make_model(os.environ.get("PLANNER_MODEL", DEFAULT_MODEL)),
-            coder=make_model(os.environ.get("CODER_MODEL", DEFAULT_MODEL)),
-            reviewer=make_model(os.environ.get("REVIEWER_MODEL", DEFAULT_MODEL)),
+            planner=make_model(planner),
+            coder=make_model(coder),
+            reviewer=make_model(reviewer),
+        )
+
+    @classmethod
+    def from_env(cls) -> "RoleModels":
+        return cls.from_names(
+            planner=os.environ.get("PLANNER_MODEL", DEFAULT_MODEL),
+            coder=os.environ.get("CODER_MODEL", DEFAULT_MODEL),
+            reviewer=os.environ.get("REVIEWER_MODEL", DEFAULT_MODEL),
         )
