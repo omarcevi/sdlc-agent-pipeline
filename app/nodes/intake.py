@@ -1,5 +1,6 @@
 """Issue intake and sandbox provisioning (bench mode)."""
 
+import re
 import tempfile
 from pathlib import Path
 
@@ -11,12 +12,20 @@ from app.environment.factory import start_environment
 from app.schemas import IssueTask, RunRequest
 from app.task_store import load_task, materialize, test_files
 
+# The pipeline's git directory lives outside the worktree, and every pipeline git
+# command names it explicitly. The worktree keeps a `.git` file so the coder's own
+# git commands work, but nothing the coder does to that file (or to HEAD, by
+# committing) can hide changes from collect_diff.
+PIPELINE_GIT_DIR = "/workspace/.pipeline-git"
+GIT = f"git --git-dir={PIPELINE_GIT_DIR} --work-tree={WORKDIR}"
 GIT_BASELINE = (
-    "git init -q && "
-    "printf '__pycache__/\\n.pytest_cache/\\n*.pyc\\n' >> .git/info/exclude && "
-    "git add -A && "
-    "git -c user.name=pipeline -c user.email=pipeline@localhost commit -q -m baseline"
+    f"git init -q --separate-git-dir {PIPELINE_GIT_DIR} && "
+    f"printf '__pycache__/\\n.pytest_cache/\\n*.pyc\\n' >> {PIPELINE_GIT_DIR}/info/exclude && "
+    f"{GIT} add -A && "
+    f"{GIT} -c user.name=pipeline -c user.email=pipeline@localhost commit -q -m baseline"
 )
+BASELINE_SHA_CMD = f"{GIT} rev-parse HEAD"
+_SHA = re.compile(r"[0-9a-f]{40,64}")
 
 
 def fetch_issue(node_input: RunRequest):
@@ -54,11 +63,18 @@ async def provision_sandbox(node_input: IssueTask):
             baseline = await env.exec(GIT_BASELINE)
             if baseline.exit_code != 0:
                 raise InfraError(f"git baseline failed: {baseline.stderr.strip()}")
+            baseline_sha = (await env.exec(BASELINE_SHA_CMD)).stdout.strip()
+            if not _SHA.fullmatch(baseline_sha):
+                raise InfraError(f"git baseline has no commit id: {baseline_sha!r}")
         except Exception:
             await registry.release(env.env_id)
             raise
     yield Event(message=f"sandbox {env.env_id} ready")
     yield Event(
         output=node_input,
-        state={"sandbox_id": env.env_id, "protected_paths": protected},
+        state={
+            "sandbox_id": env.env_id,
+            "protected_paths": protected,
+            "baseline_sha": baseline_sha,
+        },
     )

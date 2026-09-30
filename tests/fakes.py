@@ -17,6 +17,9 @@ from pydantic import BaseModel, PrivateAttr
 
 from app.environment import registry
 from app.environment.base import DEFAULT_TIMEOUT_S, WORKDIR, ExecResult
+from app.nodes.intake import BASELINE_SHA_CMD
+
+BASELINE_SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
 def call(name: str, **args: Any) -> dict:
@@ -76,7 +79,8 @@ class FakeLlm(BaseLlm):
 
 class FakeEnvironment:
     """In-memory sandbox. `responses` maps a command prefix to one result or a
-    queue of results (the last one repeats)."""
+    queue of results (the last one repeats). Unless overridden, the baseline
+    commit id query answers BASELINE_SHA."""
 
     def __init__(
         self,
@@ -104,6 +108,8 @@ class FakeEnvironment:
         for prefix, queue in self._responses.items():
             if command.startswith(prefix):
                 return queue.pop(0) if len(queue) > 1 else queue[0]
+        if command == BASELINE_SHA_CMD:
+            return ExecResult(exit_code=0, stdout=f"{BASELINE_SHA}\n", stderr="")
         return ExecResult(exit_code=0, stdout="", stderr="")
 
     async def read_file(self, path: str) -> str:

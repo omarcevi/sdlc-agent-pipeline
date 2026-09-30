@@ -8,6 +8,7 @@ from app.driver import classify_failure, run_pipeline
 from app.environment.base import ExecResult, InfraError
 from app.models import RoleModels
 from app.nodes import intake
+from app.nodes.verify import DIFF_CMD, NUMSTAT_CMD, TEST_CMD
 from app.pipeline import build_workflow
 from app.schemas import PatchResult, Plan, Review, RunRequest
 from tests.fakes import FakeEnvironment, FakeLlm, call, json_out, make_bench_task, text
@@ -25,12 +26,8 @@ FAIL = ExecResult(
 
 def diff_responses(diffs=(DIFF,), numstats=("1\t1\tmini.py\n",)):
     return {
-        "git add -A && git diff": [
-            ExecResult(exit_code=0, stdout=d, stderr="") for d in diffs
-        ],
-        "git diff --cached --numstat": [
-            ExecResult(exit_code=0, stdout=n, stderr="") for n in numstats
-        ],
+        DIFF_CMD: [ExecResult(exit_code=0, stdout=d, stderr="") for d in diffs],
+        NUMSTAT_CMD: [ExecResult(exit_code=0, stdout=n, stderr="") for n in numstats],
     }
 
 
@@ -58,7 +55,7 @@ async def run(planner, coder, reviewer):
 
 
 async def test_happy_path_writes_patch(bench, monkeypatch):
-    env = FakeEnvironment(responses={**diff_responses(), "python -m pytest": PASS})
+    env = FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
     use_env(monkeypatch, env)
     record = await run(
         FakeLlm([json_out(PLAN)]),
@@ -94,7 +91,7 @@ async def test_declined_issue_skips_coder(bench, monkeypatch):
 async def test_failing_tests_exhaust_after_three_returns(bench, monkeypatch):
     use_env(
         monkeypatch,
-        FakeEnvironment(responses={**diff_responses(), "python -m pytest": FAIL}),
+        FakeEnvironment(responses={**diff_responses(), TEST_CMD: FAIL}),
     )
     coder = FakeLlm([json_out(PATCH)] * 4)
     record = await run(FakeLlm([json_out(PLAN)]), coder, FakeLlm([]))
@@ -105,7 +102,7 @@ async def test_failing_tests_exhaust_after_three_returns(bench, monkeypatch):
 async def test_review_rounds_exhaust(bench, monkeypatch):
     use_env(
         monkeypatch,
-        FakeEnvironment(responses={**diff_responses(), "python -m pytest": PASS}),
+        FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS}),
     )
     coder = FakeLlm([json_out(PATCH)] * 3)
     reviewer = FakeLlm([json_out(CHANGES)] * 3)
@@ -117,7 +114,7 @@ async def test_review_rounds_exhaust(bench, monkeypatch):
 async def test_empty_diff_is_sent_back_to_coder(bench, monkeypatch):
     responses = {
         **diff_responses(diffs=("", DIFF), numstats=("", "1\t1\tmini.py\n")),
-        "python -m pytest": PASS,
+        TEST_CMD: PASS,
     }
     use_env(monkeypatch, FakeEnvironment(responses=responses))
     coder = FakeLlm([json_out(PATCH)] * 2)
