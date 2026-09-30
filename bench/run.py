@@ -17,9 +17,10 @@ from dotenv import load_dotenv
 from google.adk.events import Event
 
 from app.driver import run_pipeline
-from app.schemas import RunRequest
+from app.schemas import RunRecord, RunRequest
 from app.task_store import TaskSpec, list_tasks, load_task, task_dir
 from app.tracing import enable_cloud_trace, flush_traces, trace_explorer_url
+from bench.audit import audit_patch
 from bench.progress import format_event
 from bench.score import is_resolved
 
@@ -38,8 +39,18 @@ async def run_task(task: TaskSpec, stamp: str, on_event: OnEvent | None = None) 
         "task_id": task.task_id,
         "category": task.category,
         "resolved": await is_resolved(task, record),
+        "audit": _audit(record),
         **record.model_dump(),
     }
+
+
+def _audit(record: RunRecord) -> list[str]:
+    if record.patch_path is None:
+        return []
+    try:
+        return audit_patch(Path(record.patch_path).read_text())
+    except OSError:
+        return []
 
 
 def _crash_row(task: TaskSpec, exc: Exception) -> dict:

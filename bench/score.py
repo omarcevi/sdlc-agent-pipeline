@@ -3,8 +3,9 @@ then run the visible and the hidden tests.
 
 Model-written code never runs on the host. The patch cannot influence what is
 scored: existing test files are restored after it is applied, pytest ignores any
-config file in the repo, and the hidden tests live outside the repo, cut off from
-its conftest files.
+config file in the repo, the hidden tests live outside the repo, cut off from its
+conftest files, and they are uploaded only after the visible run has passed, so a
+patch's conftest never runs while they are on disk.
 """
 
 import logging
@@ -56,12 +57,14 @@ async def score_patch(task: TaskSpec, patch_path: Path) -> bool:
         except OSError:
             # The patch put something unwritable where a test file belongs.
             return False
+        # The patch's code (a conftest.py, say) runs during the visible tests, so the
+        # hidden tests reach the sandbox only after that run has passed.
+        visible = await env.exec(VISIBLE_CMD, timeout=TEST_TIMEOUT_S)
+        if visible.exit_code != 0 or visible.timed_out:
+            return False
         await env.upload_dir(task_dir(task.task_id) / "hidden_tests", HIDDEN_DIR)
-        for command in (VISIBLE_CMD, HIDDEN_CMD):
-            result = await env.exec(command, timeout=TEST_TIMEOUT_S)
-            if result.exit_code != 0 or result.timed_out:
-                return False
-        return True
+        hidden = await env.exec(HIDDEN_CMD, timeout=TEST_TIMEOUT_S)
+        return hidden.exit_code == 0 and not hidden.timed_out
     finally:
         # A failed release must not turn a finished score into a crash. The
         # sandbox removes itself at its TTL.

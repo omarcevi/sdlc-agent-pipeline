@@ -43,6 +43,35 @@ async def test_scoring_steps_run_in_order_with_hidden_tests_outside_repo(
     assert env.closed
 
 
+async def test_hidden_tests_are_uploaded_only_after_the_visible_run_passes(
+    patch_file, monkeypatch
+):
+    class Recording(FakeEnvironment):
+        async def exec(self, command, **kwargs):
+            self.commands.append(
+                f"{command} [hidden on disk: {any(HIDDEN_DIR in p for p in self.files)}]"
+            )
+            return ExecResult(exit_code=0, stdout="", stderr="")
+
+    env = Recording()
+    use_env(monkeypatch, env)
+    assert await score_patch(load_task("t-1"), patch_file)
+    assert env.commands[1].endswith("[hidden on disk: False]")
+    assert env.commands[2].endswith("[hidden on disk: True]")
+
+
+async def test_a_failing_visible_run_never_uploads_hidden_tests(
+    patch_file, monkeypatch
+):
+    env = FakeEnvironment(
+        responses={VISIBLE_CMD: ExecResult(exit_code=1, stdout="", stderr="")}
+    )
+    use_env(monkeypatch, env)
+    assert not await score_patch(load_task("t-1"), patch_file)
+    assert not any(HIDDEN_DIR in p for p in env.files)
+    assert HIDDEN_CMD not in env.commands
+
+
 @pytest.mark.parametrize("command", [VISIBLE_CMD, HIDDEN_CMD])
 async def test_test_timeout_is_not_resolved(command, patch_file, monkeypatch):
     env = FakeEnvironment(responses={command: TIMED_OUT})

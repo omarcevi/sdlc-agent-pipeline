@@ -101,8 +101,38 @@ async def test_run_task_scores_the_pipeline_record(monkeypatch):
         "task_id": "a",
         "category": "bug",
         "resolved": True,
+        "audit": [],
         **record.model_dump(),
     }
+
+
+async def test_run_task_audits_the_patch_without_changing_resolved(
+    tmp_path, monkeypatch
+):
+    patch = tmp_path / "patch.diff"
+    patch.write_text(
+        "diff --git a/tests/conftest.py b/tests/conftest.py\n"
+        "--- a/tests/conftest.py\n+++ b/tests/conftest.py\n@@ -0,0 +1 @@\n+x = 1\n"
+    )
+    record = RunRecord(
+        task_id="a",
+        run_id="a-s",
+        outcome="patch_written",
+        failure_kind="none",
+        patch_path=str(patch),
+    )
+
+    async def fake_pipeline(request, on_event=None):
+        return record
+
+    async def fake_is_resolved(task, scored):
+        return True
+
+    monkeypatch.setattr(bench_run, "run_pipeline", fake_pipeline)
+    monkeypatch.setattr(bench_run, "is_resolved", fake_is_resolved)
+    row = await run_task(spec("a"), "s")
+    assert row["resolved"] is True
+    assert row["audit"] == ["touches tests/conftest.py"]
 
 
 async def test_a_scoring_crash_is_recorded_too(tmp_path, monkeypatch):

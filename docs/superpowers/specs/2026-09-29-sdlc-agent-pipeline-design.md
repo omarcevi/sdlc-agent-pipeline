@@ -225,6 +225,7 @@ Issue text is untrusted input. There are four layers of defence:
   - Normal tasks: apply the patch to a clean checkout (base + plant), then run visible and hidden tests. Resolved means all pass. (Clean checkout = base with `plant/` overlaid.)
   - Trap tasks: resolved means the outcome is `declined`.
   - `infra` failures are rerun up to 2 times and never scored as agent failures.
+- **Threat model:** scoring runs the patch's code, so a patch that attacks the test process (a shadowing `pytest.py`, an exit hook in package code) can fake a pass. Results are valid for patches that do not do that. Every patch is audited for these patterns (`bench/audit.py`) and flagged rows are reported separately; the audit never changes `resolved`. Scoring uploads the hidden tests only after the visible run passes, so a patch's `conftest.py` never runs while they are on disk.
 - **Split discipline:** prompts are tuned only against `dev`. `heldout` runs once, at the end. Both numbers are published.
 - **Output:** `results/<timestamp>.json`, from which a generated Markdown table and charts are committed to `docs/results/`.
 
@@ -366,3 +367,10 @@ Controls: the per-run budget cap, sandbox TTL plus sweeper, no always-on instanc
 6. Model API and transport errors are classified as infra (§6.4).
 7. Deferred to Week 3: enforcing the output cap inside the `Environment` (§7.3).
 8. Spike S3 result: on gemini-3.8-flash, native output-schema + tools loops on the tool call (13 of 18 runs); agents use ADK's `set_model_response` tool instead (9 of 9 runs finished in 2 model calls).
+
+**2026-09-30, from Week 2A, Task 1.**
+
+1. `run_tests` restores protected test files and `.github/` paths itself (`git checkout <baseline_sha> -- <paths>`; files added under `.github/` are removed). The attempt still counts as failed, and the report says the paths have been restored and that new tests belong in new files. It no longer tells the coder to run `git checkout -- <file>`, which does nothing after the pipeline's `add -A`.
+2. Scoring order is: apply patch, restore protected files, run the visible tests, and only if they pass upload and run the hidden tests (§9.1).
+3. A test pins that the visible run ignores pytest config files shipped in a patch.
+4. `bench/audit.py::audit_patch` flags patches that touch `pytest.py`, `conftest.py`, `sitecustomize.py`, `usercustomize.py`, `pytest.ini`, `tox.ini`, `setup.cfg`, `*.pth` or `pyproject.toml`, or add `os._exit`, `atexit`, `sys.exit(`, `pytest_collection_modifyitems`, `pytest_runtest_makereport` or `collect_ignore`. Result rows carry `audit: list[str]`; the audit never changes `resolved`.

@@ -1,6 +1,7 @@
 """Ground truth from the sandbox: the real diff and real test results."""
 
 import re
+import shlex
 import time
 from typing import Any
 
@@ -73,32 +74,72 @@ def _precheck(diff: Diff, protected_paths: list[str]) -> str | None:
         return (
             "No changes were made to the repository. Implement the change, then finish."
         )
-    touched = sorted(set(diff.files) & set(protected_paths))
-    if touched:
-        return (
+    protected, github = _violations(diff, protected_paths)
+    parts = []
+    if protected:
+        parts.append(
             "These existing test files are read-only but were modified: "
-            + ", ".join(touched)
-            + ". Revert them (git checkout -- <file>) and put new tests in new files."
+            + ", ".join(protected)
+            + ". They have been restored to their original content."
         )
-    github_paths = sorted(
+    if github:
+        parts.append(
+            ".github/ is read-only but these paths were modified: "
+            + ", ".join(github)
+            + ". They have been restored (files you added there were removed)."
+        )
+    if parts:
+        parts.append("Put new tests in new files instead of editing existing ones.")
+        return " ".join(parts)
+    return None
+
+
+def _violations(diff: Diff, protected_paths: list[str]) -> tuple[list[str], list[str]]:
+    """Protected test files and .github/ paths the diff touches."""
+    protected = sorted(set(diff.files) & set(protected_paths))
+    github = sorted(
         path
         for path in set(diff.files)
         if path == ".github" or path.startswith(".github/")
     )
-    if github_paths:
-        return (
-            ".github/ is read-only but these paths were modified: "
-            + ", ".join(github_paths)
-            + ". Revert them (git checkout -- <file>) and delete any you added."
+    return protected, github
+
+
+async def _restore(
+    env, protected: list[str], github: list[str], baseline_sha: str
+) -> None:
+    """Put protected files back from the baseline and undo edits under .github/."""
+    commands = []
+    if protected:
+        paths = " ".join(shlex.quote(p) for p in protected)
+        commands.append(f"{GIT} checkout {baseline_sha} -- {paths}")
+    for path in github:
+        quoted = shlex.quote(path)
+        commands.append(
+            f"if {GIT} cat-file -e {baseline_sha}:{quoted}; "
+            f"then {GIT} checkout {baseline_sha} -- {quoted}; "
+            f"else rm -rf -- {quoted}; fi"
         )
-    return None
+    for command in commands:
+        result = await env.exec(command)
+        if result.exit_code != 0:
+            raise InfraError(
+                f"could not restore protected paths: {result.stderr.strip()}"
+            )
 
 
 async def run_tests(
-    node_input: Diff, sandbox_id: str, protected_paths: list[str], test_attempts: int
+    node_input: Diff,
+    sandbox_id: str,
+    protected_paths: list[str],
+    test_attempts: int,
+    baseline_sha: str,
 ):
     problem = _precheck(node_input, protected_paths)
     if problem:
+        protected, github = _violations(node_input, protected_paths)
+        if protected or github:
+            await _restore(registry.get(sandbox_id), protected, github, baseline_sha)
         report = TestReport(passed=False, exit_code=-1, output_tail=problem)
     else:
         started = time.monotonic()

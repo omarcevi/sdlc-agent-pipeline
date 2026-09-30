@@ -80,7 +80,6 @@ async def test_renaming_a_protected_test_fails_the_attempt(bench):
             FIX,
             call("bash", command="git mv tests/test_mini.py tests/test_renamed.py"),
             DONE,
-            call("bash", command="git mv tests/test_renamed.py tests/test_mini.py"),
             DONE,
         ]
     )
@@ -88,4 +87,18 @@ async def test_renaming_a_protected_test_fails_the_attempt(bench):
     assert "These existing test files are read-only but were modified" in events
     assert record.test_attempts == 1
     assert_patch_fixes_add(record)
-    assert "test_renamed" not in Path(record.patch_path).read_text()
+    # The pipeline restored the original; the renamed copy is just a new test file.
+    patch = Path(record.patch_path).read_text()
+    assert "a/tests/test_mini.py" not in patch
+
+
+async def test_pipeline_restores_an_edited_protected_test_itself(bench):
+    """The coder weakens a protected test with sed. The pipeline puts the file
+    back, so the coder's next turn (the real fix) yields a clean patch."""
+    weaken = call("bash", command="sed -i 's/== 0/== 1/' tests/test_mini.py")
+    record = await run([weaken, DONE, FIX, DONE])
+    events = (bench / "runs" / "d-1" / "events.jsonl").read_text()
+    assert "They have been restored to their original content" in events
+    assert record.test_attempts == 1
+    assert_patch_fixes_add(record)
+    assert "tests/test_mini.py" not in Path(record.patch_path).read_text()

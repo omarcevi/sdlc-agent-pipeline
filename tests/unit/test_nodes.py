@@ -136,7 +136,12 @@ async def test_a_renamed_protected_test_is_reported_as_delete_and_add(numstat):
     diff = _last(events).output
     assert diff.files == ["tests/test_mini.py", "tests/x.py"]
     final = _last(
-        [e async for e in run_tests(diff, env.env_id, ["tests/test_mini.py"], 0)]
+        [
+            e
+            async for e in run_tests(
+                diff, env.env_id, ["tests/test_mini.py"], 0, BASELINE_SHA
+            )
+        ]
     )
     assert final.actions.route == "fail"
     assert "read-only" in final.output.output_tail
@@ -186,7 +191,9 @@ async def test_run_tests_pass_routes_to_review():
         responses={TEST_CMD: ExecResult(exit_code=0, stdout="3 passed", stderr="")}
     )
     registry.register(env)
-    final = _last([e async for e in run_tests(_diff(), env.env_id, [], 0)])
+    final = _last(
+        [e async for e in run_tests(_diff(), env.env_id, [], 0, BASELINE_SHA)]
+    )
     assert final.actions.route == "pass" and final.output.passed
 
 
@@ -196,11 +203,13 @@ async def test_run_tests_fail_counts_attempts_and_exhausts():
         responses={TEST_CMD: ExecResult(exit_code=1, stdout=out, stderr="")}
     )
     registry.register(env)
-    first = _last([e async for e in run_tests(_diff(), env.env_id, [], 0)])
+    first = _last(
+        [e async for e in run_tests(_diff(), env.env_id, [], 0, BASELINE_SHA)]
+    )
     assert first.actions.route == "fail"
     assert first.actions.state_delta["test_attempts"] == 1
     assert first.output.failed_tests == ["tests/test_mini.py::test_add"]
-    last = _last([e async for e in run_tests(_diff(), env.env_id, [], 3)])
+    last = _last([e async for e in run_tests(_diff(), env.env_id, [], 3, BASELINE_SHA)])
     assert last.actions.route == "exhausted"
     assert last.actions.state_delta["failure"]["kind"] == "agent"
 
@@ -210,7 +219,9 @@ async def test_run_tests_rejects_empty_diff():
         responses={TEST_CMD: ExecResult(exit_code=0, stdout="3 passed", stderr="")}
     )
     registry.register(env)
-    final = _last([e async for e in run_tests(_diff(files=()), env.env_id, [], 0)])
+    final = _last(
+        [e async for e in run_tests(_diff(files=()), env.env_id, [], 0, BASELINE_SHA)]
+    )
     assert final.actions.route == "fail"
     assert "No changes were made" in final.output.output_tail
     assert not any(c.startswith(TEST_CMD) for c in env.commands)
@@ -227,11 +238,65 @@ async def test_run_tests_rejects_protected_file_edits():
                 env.env_id,
                 ["tests/test_mini.py"],
                 0,
+                BASELINE_SHA,
             )
         ]
     )
     assert final.actions.route == "fail"
     assert "tests/test_mini.py" in final.output.output_tail
+    assert "restored" in final.output.output_tail
+
+
+async def test_run_tests_restores_protected_files_and_says_so():
+    env = FakeEnvironment()
+    registry.register(env)
+    final = _last(
+        [
+            e
+            async for e in run_tests(
+                _diff(files=("mini.py", "tests/test_mini.py")),
+                env.env_id,
+                ["tests/test_mini.py"],
+                0,
+                BASELINE_SHA,
+            )
+        ]
+    )
+    assert final.actions.route == "fail"
+    assert final.actions.state_delta["test_attempts"] == 1
+    assert any(
+        f"checkout {BASELINE_SHA} -- tests/test_mini.py" in c for c in env.commands
+    )
+    tail = final.output.output_tail
+    assert "restored" in tail and "git checkout --" not in tail
+    assert "new files" in tail
+    assert not any(c.startswith(TEST_CMD) for c in env.commands)
+
+
+async def test_run_tests_removes_added_github_files():
+    env = FakeEnvironment()
+    registry.register(env)
+    path = ".github/workflows/x.yaml"
+    final = _last(
+        [
+            e
+            async for e in run_tests(
+                _diff(files=("mini.py", path)), env.env_id, [], 0, BASELINE_SHA
+            )
+        ]
+    )
+    assert final.actions.route == "fail"
+    assert any(f"rm -rf -- {path}" in c for c in env.commands)
+    assert "restored" in final.output.output_tail
+
+
+async def test_run_tests_does_not_restore_when_nothing_is_protected():
+    env = FakeEnvironment(
+        responses={TEST_CMD: ExecResult(exit_code=0, stdout="3 passed", stderr="")}
+    )
+    registry.register(env)
+    [e async for e in run_tests(_diff(), env.env_id, [], 0, BASELINE_SHA)]
+    assert not any("checkout" in c for c in env.commands)
 
 
 @pytest.mark.parametrize(
@@ -244,7 +309,11 @@ async def test_run_tests_rejects_github_edits(path):
         [
             e
             async for e in run_tests(
-                _diff(files=("mini.py", path)), env.env_id, ["tests/test_mini.py"], 0
+                _diff(files=("mini.py", path)),
+                env.env_id,
+                ["tests/test_mini.py"],
+                0,
+                BASELINE_SHA,
             )
         ]
     )
@@ -263,7 +332,11 @@ async def test_run_tests_allows_paths_that_only_resemble_github():
         [
             e
             async for e in run_tests(
-                _diff(files=(".githubx/a.py", "docs/.github/b.md")), env.env_id, [], 0
+                _diff(files=(".githubx/a.py", "docs/.github/b.md")),
+                env.env_id,
+                [],
+                0,
+                BASELINE_SHA,
             )
         ]
     )
@@ -281,7 +354,9 @@ async def test_run_tests_allows_paths_that_only_resemble_github():
 async def test_run_tests_treats_no_tests_and_timeouts_as_failure(result):
     env = FakeEnvironment(responses={TEST_CMD: result})
     registry.register(env)
-    final = _last([e async for e in run_tests(_diff(), env.env_id, [], 0)])
+    final = _last(
+        [e async for e in run_tests(_diff(), env.env_id, [], 0, BASELINE_SHA)]
+    )
     assert final.actions.route == "fail" and not final.output.passed
 
 
