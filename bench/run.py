@@ -56,6 +56,7 @@ def _fail(message: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    load_dotenv()  # BENCH_*_DIR may live in .env; selection and runs must agree
     if args.repeats < 1 or args.concurrency < 1:
         return _fail("--repeats and --concurrency must be at least 1")
     if args.system == "single":
@@ -91,7 +92,6 @@ def main(argv: list[str] | None = None) -> int:
         if problems:
             return _fail("invalid tasks:\n  " + "\n  ".join(problems))
 
-    load_dotenv()
     tracing_on = enable_cloud_trace()
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out = Path(args.out)

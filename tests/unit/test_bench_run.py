@@ -7,6 +7,7 @@ from google.genai import types
 from bench import matrix
 from bench import run as bench_run
 from bench.run import main
+from tests.fakes import make_bench_task
 
 
 def ok_row(spec: matrix.RunSpec) -> dict:
@@ -185,3 +186,24 @@ def test_help_lists_every_flag(capsys):
         "--concurrency", "--out", "--quiet", "--confirm-heldout", "--skip-validate",
     ):  # fmt: skip
         assert flag in text
+
+
+def test_dotenv_is_loaded_before_tasks_are_selected(tmp_path, monkeypatch):
+    make_bench_task(tmp_path, task_id="env-only-1")
+
+    def fake_load_dotenv():
+        monkeypatch.setenv("BENCH_TASKS_DIR", str(tmp_path / "tasks"))
+        monkeypatch.setenv("BENCH_REPOS_DIR", str(tmp_path / "repos"))
+
+    monkeypatch.setattr(bench_run, "load_dotenv", fake_load_dotenv)
+    _use_run_one(monkeypatch, _fake_one)
+    out = tmp_path / "out"
+    assert main(["--tasks", "env-only-1", "--out", str(out)]) == 0
+    (results,) = out.glob("*.json")
+    assert [r["task_id"] for r in json.loads(results.read_text())] == ["env-only-1"]
+
+
+@pytest.mark.parametrize("flag", ["--repeats", "--concurrency"])
+def test_zero_repeats_or_concurrency_exits_2(tmp_path, capsys, flag):
+    assert main(["--tasks", "tc-001", flag, "0", "--out", str(tmp_path / "o")]) == 2
+    assert "at least 1" in capsys.readouterr().err
