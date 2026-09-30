@@ -84,6 +84,8 @@ invalid-return-type = "ignore"
 possibly-missing-attribute = "ignore"
 not-subscriptable = "ignore"
 deprecated = "ignore"
+# ADK Event accepts message/route/state via a custom __init__ that ty cannot see
+pydantic-discarded-extra-argument = "ignore"
 
 [tool.codespell]
 ignore-words-list = "rouge"
