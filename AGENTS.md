@@ -68,8 +68,10 @@ This project follows the `agents-cli` lifecycle: scaffold → build → evaluate
 | Interactive UI | `agents-cli playground` |
 | Quality evals | `agents-cli eval run` |
 | Deploy (approval required) | `agents-cli deploy` |
-
-Benchmark commands (`bench validate`, `bench run ...`) are specified in spec §9.1. Add them to this table once they exist.
+| Build sandbox image | `make sandbox-image` |
+| Docker-backed tests | `make test-docker` |
+| Validate bench tasks | `uv run python -m bench.validate` |
+| Run bench (spends credits) | `uv run python -m bench.run --tasks tc-001` or `--split dev` |
 
 ## Keeping this file current
 
