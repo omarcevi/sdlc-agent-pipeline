@@ -22,7 +22,7 @@ Temperature made no difference in native mode (it looped at the default and at 0
 
 How it showed up: `agents-cli eval run` appeared to hang for more than 10 minutes. The CLI has no per-case timeout, and over `/run_sse` the agent made 32 tool calls in 60 seconds without ending the turn. An earlier single `agents-cli run` had happened to finish, which hid the problem.
 
-**Decision:** every Gemini agent in the pipeline gets structured output through `set_model_response`. `app/models.py` returns a `Gemini` subclass that declares `output_schema_and_tools=False`. The extra tool call counts toward the per-run tool-call cap. The per-run tool-call cap would have stopped a loop like this in the real pipeline, which is what it is for.
+**Decision:** every Gemini agent in the pipeline gets structured output through `set_model_response`. `app/models.py` returns a `Gemini` subclass that declares `output_schema_and_tools=False`. The extra tool call counts toward the tool-call caps. The per-turn and per-run tool-call caps would have stopped a loop like this in the real pipeline, which is what they are for.
 
 ## S2 result: `agents-cli eval run` works with a Workflow
 

@@ -395,3 +395,9 @@ Controls: the per-run budget cap, sandbox TTL plus sweeper, no always-on instanc
 8. The baseline can take up to four turns (one plus three test-fix returns), not one as §6.3 says. The per-turn tool-call cap still names the `coder` agent only. The first comparison showed that this one difference accounts for the whole measured gap between the systems (3 of 15 multi-agent runs ended on it; the single agent used 30 to 38 calls on the same task). **Open decision for the owner:** apply the per-turn cap to both systems, to neither, or keep it and report it.
 9. The report (`bench/report.py`) puts every run in exactly one of six buckets (resolved, unresolved, agent, budget, infra, crashed), states each row's own sample, prints `n/a` when nothing was counted, lists budget failures by cap, and refuses duplicate rows (§9.1).
 10. Known and open: on `gemini-3.1-pro-preview` the reviewer's model call did not return in 2 of 2 runs that reached it. The cause is not known. The Pro comparison is not done.
+
+**2026-09-30, owner decision after the first comparison.**
+
+1. The per-turn tool-call cap (`MAX_TOOL_CALLS_PER_TURN`, 25, coder only) is removed. Both systems run under one set of per-issue caps: $1.00 (`RUN_BUDGET_USD`), 75 tool calls (`MAX_TOOL_CALLS_PER_RUN`) and 1500 s of wall clock (`RUN_TIMEOUT_S`). This closes item 8 of the previous block and amends §6.3. The per-run tool-call cap is what stops a tool-calling loop.
+2. The comparison was rerun on Flash under the equal caps; its report sits next to the first one in `docs/results/`.
+
