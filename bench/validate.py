@@ -1,5 +1,11 @@
 """Check every task is well-formed: visible tests pass at base+plant, hidden tests
-fail there, and everything passes with the reference solution."""
+fail there, and everything passes with the reference solution.
+
+Hidden tests must be self-contained (no reliance on the repo's conftest): scoring
+runs them from a directory outside the repo, cut off from its conftest files and
+pytest config (see bench/score.py). This module runs on the host because it only
+executes code we authored: the base repo, the plant and the reference solution.
+"""
 
 import sys
 import tempfile

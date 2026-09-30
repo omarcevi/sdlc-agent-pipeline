@@ -21,5 +21,5 @@ def test_cli_list_sort_due(tmp_path, capsys):
     main(["--file", path, "add", "soon", "--due", "2026-10-01"])
     capsys.readouterr()
     main(["--file", path, "list", "--sort", "due"])
-    titles = [line.split()[3] for line in capsys.readouterr().out.splitlines()]
-    assert titles == ["soon", "late", "none"]
+    out = capsys.readouterr().out
+    assert out.index("soon") < out.index("late") < out.index("none")

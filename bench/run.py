@@ -30,7 +30,7 @@ async def run_tasks(task_ids: list[str], stamp: str) -> list[dict]:
             {
                 "task_id": task_id,
                 "category": task.category,
-                "resolved": is_resolved(task, record),
+                "resolved": await is_resolved(task, record),
                 **record.model_dump(),
             }
         )
