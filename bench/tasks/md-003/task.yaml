@@ -1,0 +1,18 @@
+repo: mdlite
+title: "Let `toc()` stop at a heading level"
+body: |
+  Our docs sidebar only shows the top levels of each page. Today I call `mdlite.toc(text)`
+  and throw away the deeper entries myself. It would be nicer to ask for that directly:
+
+      mdlite.toc(text, max_level=2)
+
+  should return only the entries for headings of level 1 and 2, in document order, as the
+  same `(level, text, slug)` tuples `toc()` returns now. `max_level` is a whole number from
+  1 to 6. Without `max_level`, `toc(text)` should keep returning every heading, exactly as
+  it does today.
+
+  We use the slugs as link targets in the sidebar.
+category: feature
+difficulty: medium
+split: dev
+levers: [doc_rule]

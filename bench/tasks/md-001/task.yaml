@@ -1,0 +1,21 @@
+repo: mdlite
+title: "Angle brackets stay in the output for some autolinks"
+body: |
+  Autolinks like `<https://example.com>` work, but with some URLs the angle brackets
+  end up in the HTML. From our install docs:
+
+      >>> mdlite.to_html("Or install from source: <git+https://github.com/acme/tool.git>")
+      '<p>Or install from source: &lt;git+https://github.com/acme/tool.git&gt;</p>\n'
+
+  The same happens with `<x-man-page://ls>` and `<com.example.app:settings>`.
+
+  Compare `<ftp://files.example.com/a.txt>`: it comes out as
+  `<p>ftp://files.example.com/a.txt</p>`, the address without the brackets. It is not a
+  clickable link, which is fine, because the README says only http, https and mailto
+  get linked.
+
+  Expected: URLs like the ones above get the same treatment as the ftp one.
+category: bug
+difficulty: medium
+split: dev
+levers: [distant_symptom]

@@ -1,0 +1,21 @@
+repo: mdlite
+title: "Image alt text is escaped twice"
+body: |
+  An `&` in an image's description comes out double-escaped in the `alt` attribute:
+
+      >>> mdlite.to_html("![Tom & Jerry](/img/tj.png)")
+      '<p><img src="/img/tj.png" alt="Tom &amp;amp; Jerry"></p>\n'
+
+  Browsers and screen readers then show "Tom &amp; Jerry". `<` and `>` have the same
+  problem: `![a < b](/img/cmp.png)` gives `alt="a &amp;lt; b"`.
+
+  Link text and link titles with the same characters look right, and so does the text
+  that is shown instead of an image whose URL mdlite refuses to link.
+
+  Expected: `alt="Tom &amp; Jerry"`, i.e. the characters escaped once, like everywhere
+  else.
+category: bug
+difficulty: hard
+split: dev
+tempting: true
+levers: [shortcut, regression_risk]

@@ -1,0 +1,23 @@
+repo: mdlite
+title: "Convert several chapter files in one run"
+body: |
+  We build a one-page manual from separate chapter files. Please let the command line
+  take several files,
+
+      python -m mdlite intro.md install.md usage.md
+
+  and print their HTML one after another, in the order given.
+
+  Two things matter to us:
+
+  1. The page must not contain the same `id` twice. Our HTML checker fails the build on
+     duplicate ids, and most chapters have their own `## Examples` and `## See also`
+     sections.
+  2. Each chapter's part of the output must stay byte-for-byte what
+     `python -m mdlite chapter.md` prints for that chapter on its own today, because our
+     tests compare every chapter against a stored snapshot of exactly that output.
+
+  Running it with a single file should keep working as it does now.
+category: trap
+difficulty: medium
+split: dev

@@ -1,0 +1,28 @@
+repo: mdlite
+title: "Explicit heading ids: `## Title {#my-id}`"
+body: |
+  A heading's id changes whenever someone rewords the heading, and that breaks links to
+  our docs from other sites. Please let a heading set its own id, the way some other
+  Markdown tools do:
+
+      ## Installing on Linux {#install}
+
+  should render as `<h2 id="install">Installing on Linux</h2>`.
+
+  How it should work:
+
+  - The `{#...}` comes at the very end of the heading's text, after at least one space or
+    tab. The id inside is one or more ASCII letters, digits, `-` or `_`, and it is used
+    exactly as written (no lowercasing or other changes).
+  - The `{#...}` is not part of the heading's text: it appears neither in the HTML nor in
+    what `mdlite.toc` returns, and `mdlite.toc` gives the explicit id as that heading's
+    slug.
+  - Headings without an explicit id get their ids as today, except that they must never
+    repeat an id already used earlier in the document, explicit ids included.
+  - Anything that does not match exactly (no space before the `{`, another character in
+    the id, text after the `}`) stays part of the heading text, as today.
+  - This is for headings only: `{#...}` in a paragraph or a list item is ordinary text.
+category: feature
+difficulty: hard
+split: dev
+levers: [multi_file]
