@@ -1,6 +1,8 @@
 import json
 
 import pytest
+from google.adk.events import Event
+from google.genai import types
 
 from app.schemas import RunRecord
 from app.task_store import TaskSpec
@@ -84,7 +86,7 @@ async def test_run_task_scores_the_pipeline_record(monkeypatch):
     )
     requests = []
 
-    async def fake_pipeline(request):
+    async def fake_pipeline(request, on_event=None):
         requests.append(request)
         return record
 
@@ -104,7 +106,7 @@ async def test_run_task_scores_the_pipeline_record(monkeypatch):
 
 
 async def test_a_scoring_crash_is_recorded_too(tmp_path, monkeypatch):
-    async def fake_pipeline(request):
+    async def fake_pipeline(request, on_event=None):
         return RunRecord(
             task_id="a", run_id="a-s", outcome="patch_written", failure_kind="none"
         )
@@ -127,7 +129,7 @@ def test_unknown_task_id_exits_2_and_runs_nothing(tmp_path, capsys):
 
 
 def test_main_writes_results_and_survives_a_crash(tmp_path, monkeypatch, capsys):
-    async def fake_run_task(task: TaskSpec, stamp: str) -> dict:
+    async def fake_run_task(task: TaskSpec, stamp: str, on_event=None) -> dict:
         if task.task_id == "tc-002":
             raise RuntimeError("boom")
         return ok_row(task)
@@ -144,3 +146,35 @@ def test_main_writes_results_and_survives_a_crash(tmp_path, monkeypatch, capsys)
     ]
     summary = capsys.readouterr().out
     assert "resolved 2/3" in summary and "1 crashed" in summary and "$0.50" in summary
+
+
+def _tool_event() -> Event:
+    part = types.Part(
+        function_call=types.FunctionCall(name="read_file", args={"path": "a.py"})
+    )
+    return Event(author="coder", content=types.Content(role="model", parts=[part]))
+
+
+def _patch_run_task(monkeypatch):
+    async def fake_run_task(task: TaskSpec, stamp: str, on_event=None) -> dict:
+        if on_event:
+            on_event(_tool_event())
+        return ok_row(task)
+
+    monkeypatch.setattr(bench_run, "run_task", fake_run_task)
+
+
+def test_progress_lines_are_printed_by_default(tmp_path, monkeypatch, capsys):
+    _patch_run_task(monkeypatch)
+    assert main(["--tasks", "tc-001", "--out", str(tmp_path / "out")]) == 0
+    out = capsys.readouterr().out
+    assert "tc-001     coder → read_file a.py" in out
+    assert "tc-001: patch_written" in out
+
+
+def test_quiet_prints_no_progress_lines(tmp_path, monkeypatch, capsys):
+    _patch_run_task(monkeypatch)
+    assert main(["--tasks", "tc-001", "--quiet", "--out", str(tmp_path / "out")]) == 0
+    out = capsys.readouterr().out
+    assert "read_file" not in out
+    assert "tc-001: patch_written" in out

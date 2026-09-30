@@ -409,3 +409,60 @@ def test_classify_does_not_treat_lookalike_errors_as_model_api_errors():
     lookalike = type("OpenAIError", (Exception,), {"__module__": "myapp.errors"})
     with pytest.raises(lookalike):
         classify_failure(lookalike("x"), llm_agent_active=False)
+
+
+async def test_on_event_sees_events_in_order_after_they_are_logged(bench, monkeypatch):
+    use_env(
+        monkeypatch, FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
+    )
+    log = bench / "runs" / "r-1" / "events.jsonl"
+    seen, lines_on_disk = [], []
+
+    def on_event(event):
+        seen.append(event.id)
+        lines_on_disk.append(len(log.read_text().splitlines()))
+
+    models = RoleModels(
+        planner=FakeLlm([json_out(PLAN)]),
+        coder=FakeLlm([json_out(PATCH)]),
+        reviewer=FakeLlm([json_out(APPROVE)]),
+    )
+    record = await run_pipeline(
+        RunRequest(task_id="t-1", run_id="r-1"),
+        workflow=build_workflow(models),
+        on_event=on_event,
+    )
+    assert record.outcome == "patch_written"
+    logged = [json.loads(line)["id"] for line in log.read_text().splitlines()]
+    assert seen == logged and len(seen) > 1
+    # Each event's own line is on disk before on_event sees it, and already flushed.
+    assert lines_on_disk == list(range(1, len(seen) + 1))
+
+
+async def test_a_raising_on_event_changes_nothing_and_warns_once(
+    bench, monkeypatch, caplog
+):
+    use_env(
+        monkeypatch, FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
+    )
+    calls = []
+
+    def on_event(event):
+        calls.append(event)
+        raise ValueError("display broke")
+
+    models = RoleModels(
+        planner=FakeLlm([json_out(PLAN)]),
+        coder=FakeLlm([json_out(PATCH)]),
+        reviewer=FakeLlm([json_out(APPROVE)]),
+    )
+    with caplog.at_level(logging.WARNING, logger="app.driver"):
+        record = await run_pipeline(
+            RunRequest(task_id="t-1", run_id="r-1"),
+            workflow=build_workflow(models),
+            on_event=on_event,
+        )
+    assert (record.outcome, record.failure_kind) == ("patch_written", "none")
+    assert len(calls) > 1
+    warnings = [r for r in caplog.records if "on_event" in r.getMessage()]
+    assert len(warnings) == 1 and "display broke" in warnings[0].getMessage()

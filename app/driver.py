@@ -2,12 +2,13 @@
 
 import logging
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import aiohttp
 import httpx
 from google.adk.apps import App
+from google.adk.events import Event
 from google.adk.plugins import ReflectAndRetryModelPlugin
 from google.adk.plugins.base_plugin import BasePlugin
 from google.adk.runners import InMemoryRunner
@@ -116,14 +117,19 @@ async def run_pipeline(
     *,
     workflow: Workflow | None = None,
     tracer: trace.Tracer | None = None,
+    on_event: Callable[[Event], None] | None = None,
 ) -> RunRecord:
-    """Run one pipeline inside a root span that carries the run's outcome."""
+    """Run one pipeline inside a root span that carries the run's outcome.
+
+    `on_event`, when given, sees every event after its line is in events.jsonl.
+    It is display-only: an exception from it is logged once and never affects the run.
+    """
     tracer = tracer or trace.get_tracer(TRACER_NAME)
     with tracer.start_as_current_span(
         ROOT_SPAN_NAME,
         attributes={"task_id": request.task_id, "run_id": request.run_id},
     ) as span:
-        record = await _run(request, workflow)
+        record = await _run(request, workflow, on_event)
         span.set_attributes(
             {
                 "outcome": record.outcome,
@@ -139,7 +145,11 @@ async def run_pipeline(
     return record
 
 
-async def _run(request: RunRequest, workflow: Workflow | None) -> RunRecord:
+async def _run(
+    request: RunRequest,
+    workflow: Workflow | None,
+    on_event: Callable[[Event], None] | None = None,
+) -> RunRecord:
     budget = BudgetPlugin()
     tracker = _ActiveAgentTracker()
     app = App(
@@ -159,12 +169,26 @@ async def _run(request: RunRequest, workflow: Workflow | None) -> RunRecord:
 
     started = time.monotonic()
     failure: tuple[FailureKind, str] | None = None
+    on_event_warned = False
     try:
         with (run_dir / "events.jsonl").open("w") as log:
             async for event in runner.run_async(
                 user_id=USER_ID, session_id=session.id, new_message=message
             ):
                 log.write(event.model_dump_json(exclude_none=True) + "\n")
+                log.flush()
+                if on_event is not None:
+                    try:
+                        on_event(event)
+                    except Exception as exc:
+                        if not on_event_warned:
+                            on_event_warned = True
+                            logger.warning(
+                                "on_event callback failed; further failures ignored: "
+                                "%s: %s",
+                                type(exc).__name__,
+                                exc,
+                            )
     except Exception as exc:
         failure = classify_failure(
             exc, llm_agent_active=tracker.active_agent(session.id) is not None

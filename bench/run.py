@@ -14,20 +14,25 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
+from google.adk.events import Event
 
 from app.driver import run_pipeline
 from app.schemas import RunRequest
 from app.task_store import TaskSpec, list_tasks, load_task, task_dir
 from app.tracing import enable_cloud_trace, flush_traces, trace_explorer_url
+from bench.progress import format_event
 from bench.score import is_resolved
 
-RunOne = Callable[[TaskSpec, str], Awaitable[dict]]
+OnEvent = Callable[[Event], None]
+# With progress on, run_one is also given an `on_event` keyword argument.
+RunOne = Callable[..., Awaitable[dict]]
 
 
-async def run_task(task: TaskSpec, stamp: str) -> dict:
+async def run_task(task: TaskSpec, stamp: str, on_event: OnEvent | None = None) -> dict:
     """Run the pipeline on one task and score the result."""
     record = await run_pipeline(
-        RunRequest(task_id=task.task_id, run_id=f"{task.task_id}-{stamp}")
+        RunRequest(task_id=task.task_id, run_id=f"{task.task_id}-{stamp}"),
+        on_event=on_event,
     )
     return {
         "task_id": task.task_id,
@@ -49,6 +54,14 @@ def _crash_row(task: TaskSpec, exc: Exception) -> dict:
     }
 
 
+def _print_progress(task_id: str) -> OnEvent:
+    def on_event(event: Event) -> None:
+        for line in format_event(task_id, event):
+            print(line, flush=True)
+
+    return on_event
+
+
 def _status_line(row: dict) -> str:
     if row.get("crashed"):
         return f"{row['task_id']}: crashed ({row['reason']})"
@@ -63,15 +76,20 @@ async def run_tasks(
     stamp: str,
     results_path: Path,
     run_one: RunOne | None = None,
+    progress: bool = False,
 ) -> list[dict]:
     """Run every task in turn. An exception from one task's pipeline or scoring is
     recorded as a crashed row and the run continues; the results file is rewritten
-    after every task, so an interrupted run keeps what it finished."""
+    after every task, so an interrupted run keeps what it finished. With `progress`,
+    each task's events are printed as they happen."""
     run_one = run_one or run_task
     rows: list[dict] = []
     for task in tasks:
         try:
-            row = await run_one(task, stamp)
+            if progress:
+                row = await run_one(task, stamp, on_event=_print_progress(task.task_id))
+            else:
+                row = await run_one(task, stamp)
         except Exception as exc:
             row = _crash_row(task, exc)
         rows.append(row)
@@ -87,6 +105,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tasks", help="comma-separated task ids")
     parser.add_argument("--split", choices=["dev"], default="dev")
     parser.add_argument("--out", default="results")
+    parser.add_argument(
+        "--quiet", action="store_true", help="do not print live progress"
+    )
     args = parser.parse_args(argv)
 
     # Every task is loaded before any of them runs, so a typo costs nothing.
@@ -107,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     results_path = out / f"{stamp}.json"
-    rows = asyncio.run(run_tasks(tasks, stamp, results_path))
+    rows = asyncio.run(run_tasks(tasks, stamp, results_path, progress=not args.quiet))
 
     resolved = sum(r["resolved"] for r in rows)
     crashed = sum(bool(r.get("crashed")) for r in rows)

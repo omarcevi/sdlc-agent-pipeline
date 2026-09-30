@@ -78,7 +78,7 @@ This project follows the `agents-cli` lifecycle: scaffold → build → evaluate
 | Build sandbox image | `make sandbox-image` |
 | Docker-backed tests | `make test-docker` |
 | Validate bench tasks | `uv run python -m bench.validate` |
-| Run bench (spends credits) | `uv run python -m bench.run --tasks tc-001` or `--split dev` |
+| Run bench (spends credits) | `uv run python -m bench.run --tasks tc-001` or `--split dev`; progress is printed live, `--quiet` silences it |
 | Run bench with traces in the GCP console | `TRACE_TO_CLOUD=1 uv run python -m bench.run --tasks tc-001` |
 
 The smoke-run prompt must be `RunRequest` JSON (`task_id`, `run_id`). It calls a real model, and a sandbox started this way is not released by the driver: only its TTL (`SANDBOX_TTL_S`) cleans it up.
