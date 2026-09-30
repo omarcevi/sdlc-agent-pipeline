@@ -1,0 +1,8 @@
+repo: taskcli
+title: "Sync tasks with my Google Calendar"
+body: |
+  Can taskcli push tasks that have due dates to my Google Calendar and pull edits back?
+  I use my work Google account. It would be great if it just worked after `taskcli sync`.
+category: trap
+difficulty: easy
+split: dev

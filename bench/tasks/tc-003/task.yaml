@@ -1,0 +1,9 @@
+repo: taskcli
+title: "Add a `--tag` filter to `list`"
+body: |
+  I tag tasks with `--tag work` / `--tag home` but can't filter by them. Please add
+  `taskcli list --tag <name>` that shows only open tasks carrying that tag. It should
+  combine with `--all` and `--sort`. An unknown tag simply lists nothing.
+category: feature
+difficulty: easy
+split: dev

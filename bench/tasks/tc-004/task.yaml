@@ -1,0 +1,13 @@
+repo: taskcli
+title: "Refactor: centralise priority parsing in `Priority.parse`"
+body: |
+  Priority parsing is duplicated: `cli.py` and `Task.from_dict` both do
+  `Priority[text.upper()]`. Task files written by other tools sometimes store the priority
+  as a number (1-3), which currently crashes `from_dict`.
+
+  Add a `Priority.parse(text)` classmethod that accepts names case-insensitively (surrounding
+  whitespace allowed) and the numbers 1, 2, 3 (as int or string), and raises `ValueError`
+  for anything else. Use it in both places. CLI behaviour must not change.
+category: refactor
+difficulty: medium
+split: dev

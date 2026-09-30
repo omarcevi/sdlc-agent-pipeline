@@ -1,0 +1,9 @@
+repo: taskcli
+title: "`list --sort due` shows tasks without a due date first"
+body: |
+  With a mix of dated and undated tasks, `taskcli list --sort due` puts the undated ones at
+  the top, above tasks that are due tomorrow. Undated tasks should come last; dated tasks
+  should stay in ascending due-date order (ties by id).
+category: bug
+difficulty: medium
+split: dev
