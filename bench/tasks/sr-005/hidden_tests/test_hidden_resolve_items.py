@@ -54,16 +54,18 @@ def test_resolve_items_rejects_bad_items(items, error):
 
 
 def test_quoting_and_order_creation_go_through_resolve_items(monkeypatch):
-    store = build_store()
-    original = store.catalog.resolve_items
+    # Patch the class before any store exists, so a bound method cached at
+    # construction is the spy too; forward any arguments, keywords included.
+    catalog_type = type(Store().catalog)
+    original = catalog_type.resolve_items
     calls = []
 
-    def spy(self, items):
-        items = list(items)
-        calls.append(items)
-        return original(items)
+    def spy(self, *args, **kwargs):
+        calls.append(args)
+        return original(self, *args, **kwargs)
 
-    monkeypatch.setattr(type(store.catalog), "resolve_items", spy)
+    monkeypatch.setattr(catalog_type, "resolve_items", spy)
+    store = build_store()
     quote = store.quote([("pen-1", 6), ("PEN-1", 6)])
     assert calls
     assert [(line.sku, line.quantity) for line in quote.lines] == [("PEN-1", 12)]
