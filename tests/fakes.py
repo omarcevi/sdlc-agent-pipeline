@@ -45,6 +45,12 @@ def empty_response() -> dict:
     return {"empty": True}
 
 
+def no_content_response(error_code: str | None = None) -> dict:
+    """A model response whose `content` is None: a STOP with no candidate content,
+    or (with `error_code`, e.g. "MAX_TOKENS") a non-STOP finish with no parts."""
+    return {"no_content": True, "error_code": error_code}
+
+
 def json_out(value: BaseModel | dict) -> dict:
     data = value.model_dump() if isinstance(value, BaseModel) else value
     return text(json.dumps(data))
@@ -87,6 +93,21 @@ class FakeLlm(BaseLlm):
                 finish_reason=types.FinishReason.MALFORMED_FUNCTION_CALL,
                 usage_metadata=types.GenerateContentResponseUsageMetadata(
                     prompt_token_count=1000, candidates_token_count=100
+                ),
+            )
+            return
+        if "no_content" in step:
+            code = step["error_code"]
+            yield LlmResponse(
+                content=None,
+                error_code=code,
+                finish_reason=(
+                    types.FinishReason.MAX_TOKENS
+                    if code == "MAX_TOKENS"
+                    else types.FinishReason.STOP
+                ),
+                usage_metadata=types.GenerateContentResponseUsageMetadata(
+                    prompt_token_count=1000, candidates_token_count=0
                 ),
             )
             return

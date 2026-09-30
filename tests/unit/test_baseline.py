@@ -17,6 +17,7 @@ from tests.fakes import (
     empty_response,
     json_out,
     make_bench_task,
+    no_content_response,
 )
 from tests.unit.test_pipeline import DIFF, FAIL, PASS, diff_responses, use_env
 
@@ -135,6 +136,18 @@ def test_route_solo(declined):
             "kind": "declined",
             "reason": "why",
         }
+
+
+@pytest.mark.parametrize("error_code", [None, "MAX_TOKENS"])
+async def test_no_content_solo_reply_is_an_agent_failure(
+    bench, monkeypatch, error_code
+):
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    record = await run(FakeLlm([no_content_response(error_code)]))
+    assert (record.outcome, record.failure_kind) == ("failed", "agent")
+    assert record.reason == "model returned no structured answer (solo)"
+    assert record.tokens_in > 0 and record.cost_usd > 0 and env.closed
 
 
 async def test_empty_solo_answer_is_an_agent_failure(bench, monkeypatch):

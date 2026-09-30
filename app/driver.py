@@ -25,7 +25,7 @@ from app.guardrails import GuardrailPlugin
 from app.models import RoleModels
 from app.nodes.finish import runs_dir
 from app.pipeline import build_workflow
-from app.schemas import FailureKind, RunRecord, RunRequest
+from app.schemas import FailureKind, Plan, Review, RunRecord, RunRequest, SoloResult
 from app.tracing import ROOT_SPAN_NAME, TRACER_NAME
 
 USER_ID = "bench"
@@ -111,15 +111,23 @@ def _is_model_api_error(error: BaseException) -> bool:
     )
 
 
-# Router nodes that consume an LLM agent's structured answer. An LLM node that
-# gets an empty response completes with no output, its after_agent callback runs,
-# and the router's input validation fails: that ValidationError is titled
-# "dynamic node '<router>'".
-_ANSWER_CONSUMERS = {
-    "route_plan": "planner",
-    "route_review": "reviewer",
-    "route_solo": "solo",
+# Router nodes that consume an LLM agent's structured answer:
+# router -> (producing agent, the router's input schema). An LLM node that gets no
+# usable answer completes with no output and its after_agent callback runs. Then
+# either the scheduler's validation fails, titled "dynamic node '<router>'" (a
+# content object without usable text), or, when the response has no content
+# object at all, the node output is None, the scheduler skips its validation, and
+# the router's own validation fails, titled with the schema name and with input None.
+_ANSWER_CONSUMERS: dict[str, tuple[str, type]] = {
+    "route_plan": ("planner", Plan),
+    "route_review": ("reviewer", Review),
+    "route_solo": ("solo", SoloResult),
 }
+
+
+def _input_is_none(error: ValidationError) -> bool:
+    errors = error.errors()
+    return len(errors) == 1 and errors[0]["loc"] == () and errors[0]["input"] is None
 
 
 def missing_answer_agent(exc: BaseException, last_finished: str | None) -> str | None:
@@ -130,8 +138,12 @@ def missing_answer_agent(exc: BaseException, last_finished: str | None) -> str |
     for error in _chain(exc):
         if not isinstance(error, ValidationError):
             continue
-        for router, agent in _ANSWER_CONSUMERS.items():
-            if agent == last_finished and error.title == f"dynamic node '{router}'":
+        for router, (agent, schema) in _ANSWER_CONSUMERS.items():
+            if agent != last_finished:
+                continue
+            if error.title == f"dynamic node '{router}'":
+                return agent
+            if error.title == schema.__name__ and _input_is_none(error):
                 return agent
     return None
 

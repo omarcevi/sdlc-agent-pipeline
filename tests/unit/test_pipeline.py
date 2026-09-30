@@ -16,6 +16,7 @@ from app.driver import (
     _ActiveAgentTracker,
     build_plugins,
     classify_failure,
+    missing_answer_agent,
     run_pipeline,
 )
 from app.environment.base import ExecResult, InfraError
@@ -24,7 +25,7 @@ from app.models import RoleModels
 from app.nodes import intake
 from app.nodes.verify import DIFF_CMD, NUMSTAT_CMD, TEST_CMD
 from app.pipeline import build_workflow
-from app.schemas import PatchResult, Plan, Review, RunRequest
+from app.schemas import PatchResult, Plan, Review, RunRequest, SoloResult
 from tests.fakes import (
     FakeEnvironment,
     FakeLlm,
@@ -33,6 +34,7 @@ from tests.fakes import (
     json_out,
     make_bench_task,
     malformed_call,
+    no_content_response,
     raises,
     text,
 )
@@ -374,6 +376,33 @@ def test_classify_validation_error_without_active_agent_reraises():
         classify_failure(_validation_error(), llm_agent_active=False)
 
 
+def _none_input_error(schema) -> ValidationError:
+    try:
+        schema.model_validate(None)
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("expected a ValidationError")
+
+
+@pytest.mark.parametrize(
+    ("schema", "agent"), [(Plan, "planner"), (Review, "reviewer"), (SoloResult, "solo")]
+)
+def test_none_input_validation_is_a_missing_answer_only_for_its_producer(schema, agent):
+    error = _none_input_error(schema)
+    assert missing_answer_agent(error, agent) == agent
+    assert missing_answer_agent(error, "coder") is None
+    assert missing_answer_agent(error, None) is None
+
+
+def test_plan_validation_error_with_a_non_none_input_is_not_a_missing_answer():
+    # A deterministic bug that builds a bad Plan while the planner finished last.
+    error = _validation_error()
+    assert error.title == "Plan" and error.errors()[0]["input"] == {}
+    assert missing_answer_agent(error, "planner") is None
+    with pytest.raises(ValidationError):
+        classify_failure(error, llm_agent_active=False, missing_answer_from=None)
+
+
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
@@ -509,6 +538,36 @@ def test_classify_client_error_by_http_code(code, kind):
     assert got_kind == kind
     if kind == "agent":
         assert reason.startswith(f"model rejected the request: {code} ")
+
+
+@pytest.mark.parametrize("error_code", [None, "MAX_TOKENS"])
+async def test_no_content_planner_reply_is_an_agent_failure(
+    bench, monkeypatch, error_code
+):
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    record = await run(
+        FakeLlm([no_content_response(error_code)]), FakeLlm([]), FakeLlm([])
+    )
+    assert (record.outcome, record.failure_kind) == ("failed", "agent")
+    assert record.reason == "model returned no structured answer (planner)"
+    assert record.tokens_in > 0 and record.cost_usd > 0 and env.closed
+
+
+@pytest.mark.parametrize("error_code", [None, "MAX_TOKENS"])
+async def test_no_content_reviewer_reply_is_an_agent_failure(
+    bench, monkeypatch, error_code
+):
+    env = FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
+    use_env(monkeypatch, env)
+    record = await run(
+        FakeLlm([json_out(PLAN)]),
+        FakeLlm([json_out(PATCH)]),
+        FakeLlm([no_content_response(error_code)]),
+    )
+    assert (record.outcome, record.failure_kind) == ("failed", "agent")
+    assert record.reason == "model returned no structured answer (reviewer)"
+    assert record.tokens_in > 0 and record.cost_usd > 0 and env.closed
 
 
 async def test_empty_planner_answer_is_an_agent_failure(bench, monkeypatch):

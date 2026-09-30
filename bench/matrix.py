@@ -228,7 +228,7 @@ async def run_matrix(
                 # A status line is display only; a closed pipe must not abort runs.
                 try:
                     print(_status_line(row), flush=True)
-                except OSError:
+                except (OSError, ValueError):  # ValueError: closed stdout
                     pass
 
     # A failing worker (for example an unwritable results file) must not cancel

@@ -385,9 +385,14 @@ async def test_a_failed_results_write_does_not_stop_the_other_runs(
     assert len(json.loads(path.read_text())) == 3
 
 
-async def test_a_broken_status_print_loses_nothing(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "error",
+    [BrokenPipeError(), ValueError("I/O operation on closed file")],
+    ids=["broken-pipe", "closed-stdout"],
+)
+async def test_a_broken_status_print_loses_nothing(tmp_path, monkeypatch, error):
     def broken_print(*args, **kwargs):
-        raise BrokenPipeError
+        raise error
 
     monkeypatch.setattr("builtins.print", broken_print)
 
