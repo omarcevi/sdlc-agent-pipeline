@@ -28,6 +28,11 @@ from tests.unit.test_pipeline import (  # noqa: F401  (bench is a fixture)
 )
 
 
+@pytest.fixture(autouse=True)
+def no_infra_retry_pause(monkeypatch):
+    monkeypatch.setattr(matrix, "INFRA_RETRY_PAUSE_S", 0)
+
+
 def spec(task_id: str, category: str = "bug") -> TaskSpec:
     return TaskSpec(
         task_id=task_id,
@@ -171,6 +176,54 @@ async def test_infra_failures_are_retried_then_recorded(tmp_path):
     assert only["infra_retries"] == 2
     assert only["cost_usd"] == pytest.approx(0.3)
     assert only["crashed"] is False
+
+
+async def test_infra_reruns_wait_a_growing_pause_first(tmp_path, monkeypatch):
+    monkeypatch.setattr(matrix, "INFRA_RETRY_PAUSE_S", 30.0)
+    events: list = []
+
+    async def fake_sleep(seconds: float) -> None:
+        events.append(("sleep", seconds))
+
+    monkeypatch.setattr(matrix.asyncio, "sleep", fake_sleep)
+    outcomes = [row(0.1, "infra"), row(0.2, "infra"), row(0.3)]
+
+    async def flaky(s: RunSpec) -> dict:
+        events.append(("run", s.attempt))
+        return outcomes.pop(0)
+
+    (only,) = await run_matrix(
+        specs_for("a"), tmp_path / "r.json", run_one=flaky, max_infra_retries=2
+    )
+    assert events == [
+        ("run", 0),
+        ("sleep", 30.0),
+        ("run", 1),
+        ("sleep", 60.0),
+        ("run", 2),
+    ]
+    assert only["infra_retries"] == 2 and only["resolved"] is True
+    assert only["cost_usd"] == pytest.approx(0.6)
+
+
+async def test_non_infra_and_crashed_rows_request_no_pause(tmp_path, monkeypatch):
+    monkeypatch.setattr(matrix, "INFRA_RETRY_PAUSE_S", 30.0)
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(matrix.asyncio, "sleep", fake_sleep)
+
+    async def run_one(s: RunSpec) -> dict:
+        if s.task.task_id == "crash":
+            raise RuntimeError("boom")
+        return row(0.1, "budget" if s.task.task_id == "budget" else "none")
+
+    await run_matrix(
+        specs_for("ok", "budget", "crash"), tmp_path / "r.json", run_one=run_one
+    )
+    assert sleeps == []
 
 
 async def test_a_crashing_run_is_recorded_and_the_matrix_continues(tmp_path, capsys):

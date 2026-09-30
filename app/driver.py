@@ -1,6 +1,8 @@
 """Runs one pipeline instance end to end and always releases its sandbox."""
 
+import asyncio
 import logging
+import os
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -30,6 +32,20 @@ from app.tracing import ROOT_SPAN_NAME, TRACER_NAME
 
 USER_ID = "bench"
 logger = logging.getLogger(__name__)
+
+
+def run_timeout_s() -> float:
+    """The wall-clock cap for one run, from RUN_TIMEOUT_S (default 1500 s, below the
+    sandbox TTL so the driver releases the sandbox first). Anything that is not a
+    positive number is a configuration error."""
+    raw = os.environ.get("RUN_TIMEOUT_S", "1500")
+    try:
+        value = float(raw)
+    except ValueError:
+        value = float("nan")
+    if not value > 0 or value == float("inf"):
+        raise ValueError(f"RUN_TIMEOUT_S must be a positive number, got {raw!r}")
+    return value
 
 
 class RunCrashed(Exception):
@@ -174,6 +190,26 @@ def classify_failure(
     raise exc
 
 
+def _classify_or_crash(
+    exc: Exception, tracker: _ActiveAgentTracker, session_id: str
+) -> tuple[tuple[FailureKind, str], Exception | None]:
+    try:
+        return (
+            classify_failure(
+                exc,
+                llm_agent_active=tracker.active_agent(session_id) is not None,
+                missing_answer_from=missing_answer_agent(
+                    exc, tracker.last_finished_agent(session_id)
+                ),
+            ),
+            None,
+        )
+    except Exception:
+        # A bug, not a run failure. Keep the run's numbers and raise after
+        # record.json is written.
+        return ("infra", f"unhandled {type(exc).__name__}: {exc}"), exc
+
+
 async def run_pipeline(
     request: RunRequest,
     *,
@@ -220,6 +256,7 @@ async def _run(
     workflow: Workflow | None,
     on_event: Callable[[Event], None] | None = None,
 ) -> RunRecord:
+    timeout_s = run_timeout_s()
     budget = BudgetPlugin()
     tracker = _ActiveAgentTracker()
     app = App(
@@ -242,38 +279,35 @@ async def _run(
     crash: Exception | None = None
     on_event_warned = False
     try:
-        with (run_dir / "events.jsonl").open("w") as log:
-            async for event in runner.run_async(
-                user_id=USER_ID, session_id=session.id, new_message=message
-            ):
-                log.write(event.model_dump_json(exclude_none=True) + "\n")
-                log.flush()
-                if on_event is not None:
-                    try:
-                        on_event(event)
-                    except Exception as exc:
-                        if not on_event_warned:
-                            on_event_warned = True
-                            logger.warning(
-                                "on_event callback failed; further failures ignored: "
-                                "%s: %s",
-                                type(exc).__name__,
-                                exc,
-                            )
+        # The cap bounds the whole event loop; on expiry the in-flight work (a hung
+        # model call included) is cancelled. asyncio.timeout turns only its own
+        # expiry into TimeoutError, so an outer cancellation still propagates.
+        async with asyncio.timeout(timeout_s) as cap:
+            with (run_dir / "events.jsonl").open("w") as log:
+                async for event in runner.run_async(
+                    user_id=USER_ID, session_id=session.id, new_message=message
+                ):
+                    log.write(event.model_dump_json(exclude_none=True) + "\n")
+                    log.flush()
+                    if on_event is not None:
+                        try:
+                            on_event(event)
+                        except Exception as exc:
+                            if not on_event_warned:
+                                on_event_warned = True
+                                logger.warning(
+                                    "on_event callback failed; further failures "
+                                    "ignored: %s: %s",
+                                    type(exc).__name__,
+                                    exc,
+                                )
+    except TimeoutError as exc:
+        if cap.expired():
+            failure = ("budget", f"run exceeded {timeout_s:g} s wall clock")
+        else:
+            failure, crash = _classify_or_crash(exc, tracker, session.id)
     except Exception as exc:
-        try:
-            failure = classify_failure(
-                exc,
-                llm_agent_active=tracker.active_agent(session.id) is not None,
-                missing_answer_from=missing_answer_agent(
-                    exc, tracker.last_finished_agent(session.id)
-                ),
-            )
-        except Exception:
-            # A bug, not a run failure. Keep the run's numbers and raise after
-            # record.json is written.
-            crash = exc
-            failure = ("infra", f"unhandled {type(exc).__name__}: {exc}")
+        failure, crash = _classify_or_crash(exc, tracker, session.id)
     finally:
         final = await runner.session_service.get_session(
             app_name="app", user_id=USER_ID, session_id=session.id

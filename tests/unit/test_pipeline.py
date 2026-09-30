@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -18,6 +19,7 @@ from app.driver import (
     classify_failure,
     missing_answer_agent,
     run_pipeline,
+    run_timeout_s,
 )
 from app.environment.base import ExecResult, InfraError
 from app.guardrails import GuardrailPlugin
@@ -601,3 +603,88 @@ async def test_empty_coder_answer_is_still_tolerated(bench, monkeypatch):
         FakeLlm([json_out(APPROVE)]),
     )
     assert record.outcome == "patch_written", record.reason
+
+
+# --- wall-clock cap per run ---
+
+
+class HangingLlm(FakeLlm):
+    """A model call that never returns, like a stalled provider connection."""
+
+    def __init__(self, steps: list[dict]) -> None:
+        super().__init__(steps)
+
+    async def generate_content_async(self, llm_request, stream=False):
+        await asyncio.Event().wait()
+        yield  # pragma: no cover
+
+
+async def test_run_exceeding_the_wall_clock_cap_is_a_budget_failure(bench, monkeypatch):
+    monkeypatch.setenv("RUN_TIMEOUT_S", "0.3")
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    record = await run(HangingLlm([]), FakeLlm([]), FakeLlm([]))
+    assert (record.outcome, record.failure_kind) == ("failed", "budget")
+    assert record.reason == "run exceeded 0.3 s wall clock"
+    assert env.closed
+    assert _record_on_disk(bench)["failure_kind"] == "budget"
+
+
+async def test_wall_clock_failure_keeps_the_runs_spend(bench, monkeypatch):
+    monkeypatch.setenv("RUN_TIMEOUT_S", "0.5")
+    use_env(
+        monkeypatch,
+        FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS}),
+    )
+    record = await run(
+        FakeLlm([json_out(PLAN)]), FakeLlm([json_out(PATCH)]), HangingLlm([])
+    )
+    assert record.failure_kind == "budget"
+    assert record.tokens_in > 0 and record.cost_usd > 0
+
+
+async def test_default_wall_clock_cap_leaves_a_normal_run_unchanged(bench, monkeypatch):
+    monkeypatch.delenv("RUN_TIMEOUT_S", raising=False)
+    assert run_timeout_s() == 1500.0
+
+    use_env(
+        monkeypatch,
+        FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS}),
+    )
+    record = await run(
+        FakeLlm([json_out(PLAN)]),
+        FakeLlm([json_out(PATCH)]),
+        FakeLlm([json_out(APPROVE)]),
+    )
+    assert (record.outcome, record.failure_kind) == ("patch_written", "none")
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "abc", "", "nan", "inf"])
+async def test_bad_run_timeout_fails_before_anything_runs(bench, monkeypatch, value):
+    monkeypatch.setenv("RUN_TIMEOUT_S", value)
+    started = []
+
+    async def fake_start():
+        started.append(1)
+        return FakeEnvironment()
+
+    monkeypatch.setattr(intake, "start_environment", fake_start)
+    with pytest.raises(ValueError, match="RUN_TIMEOUT_S"):
+        await run(FakeLlm([]), FakeLlm([]), FakeLlm([]))
+    assert started == []
+    assert not (bench / "runs" / "r-1").exists()
+
+
+async def test_outer_cancellation_still_propagates_and_releases_the_sandbox(
+    bench, monkeypatch
+):
+    monkeypatch.setenv("RUN_TIMEOUT_S", "60")
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    task = asyncio.create_task(run(HangingLlm([]), FakeLlm([]), FakeLlm([])))
+    await asyncio.sleep(0.5)
+    assert not task.done()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert env.closed

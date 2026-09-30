@@ -22,6 +22,9 @@ OnEvent = Callable[[Event], None]
 RunOne = Callable[..., Awaitable[dict]]
 SCORE_ATTEMPTS = 3
 SCORE_RETRY_PAUSE_S = 2.0
+# Rerun k of an infra failure waits INFRA_RETRY_PAUSE_S * k seconds first, so a
+# rerun does not land in the same rate-limit window as the failure it repeats.
+INFRA_RETRY_PAUSE_S = 30.0
 
 
 @dataclass(frozen=True)
@@ -184,7 +187,7 @@ async def run_matrix(
 ) -> list[dict]:
     """Run every spec, at most `concurrency` at once. A crash becomes a crashed row
     and the matrix continues; an infra failure is rerun (fresh run id) up to
-    `max_infra_retries` times. The results file is rewritten after every spec."""
+    `max_infra_retries` times, after a growing pause (the concurrency slot is held). The results file is rewritten after every spec."""
     run_one = run_one or run_spec
     semaphore = asyncio.Semaphore(concurrency)
     lock = asyncio.Lock()
@@ -210,6 +213,7 @@ async def run_matrix(
             and retries < max_infra_retries
         ):
             retries += 1
+            await asyncio.sleep(INFRA_RETRY_PAUSE_S * retries)
             row = await attempt(replace(spec, attempt=retries))
             cost += row["cost_usd"]
         row["infra_retries"] = retries
