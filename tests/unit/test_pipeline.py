@@ -5,6 +5,7 @@ from pathlib import Path
 import aiohttp
 import httpx
 import pytest
+from google.adk.models import LlmCapabilities
 from google.adk.plugins import ReflectAndRetryModelPlugin
 from google.genai import errors as genai_errors
 from pydantic import ValidationError
@@ -89,6 +90,58 @@ async def test_happy_path_writes_patch(bench, monkeypatch):
     assert env.closed
     assert (bench / "runs" / "r-1" / "events.jsonl").stat().st_size > 0
     assert (bench / "runs" / "r-1" / "record.json").exists()
+
+
+class ResponseToolFakeLlm(FakeLlm):
+    """Scripted model that, like the Gemini models from make_model, reports it
+    cannot pair an output schema with tools, so ADK gives the agent the
+    `set_model_response` tool and takes the final answer from that call."""
+
+    def __init__(self, steps: list[dict]) -> None:
+        super().__init__(steps)
+
+    @property
+    def capabilities(self) -> LlmCapabilities:
+        return LlmCapabilities(output_schema_and_tools=False)
+
+
+def respond(value) -> dict:
+    return call("set_model_response", **value.model_dump())
+
+
+async def test_happy_path_with_answers_given_through_set_model_response(
+    bench, monkeypatch
+):
+    env = FakeEnvironment(
+        files={"/workspace/repo/mini.py": "def add(a, b):\n    return a - b\n"},
+        responses={**diff_responses(), TEST_CMD: PASS},
+    )
+    use_env(monkeypatch, env)
+    planner = ResponseToolFakeLlm([call("read_file", path="mini.py"), respond(PLAN)])
+    coder = ResponseToolFakeLlm([respond(PATCH)])
+    reviewer = ResponseToolFakeLlm([respond(APPROVE)])
+    record = await run(planner, coder, reviewer)
+    assert (record.outcome, record.failure_kind) == ("patch_written", "none")
+    assert Path(record.patch_path).read_text() == DIFF
+    # One model call per scripted step: the set_model_response call ends the turn.
+    assert (planner.calls, coder.calls, reviewer.calls) == (2, 1, 1)
+    # read_file plus one set_model_response per agent, all counted toward the caps.
+    assert record.tool_calls == 4
+
+
+async def test_invalid_set_model_response_arguments_can_be_corrected(
+    bench, monkeypatch
+):
+    env = FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
+    use_env(monkeypatch, env)
+    planner = ResponseToolFakeLlm(
+        [call("set_model_response", summary=5), respond(PLAN)]
+    )
+    record = await run(
+        planner, ResponseToolFakeLlm([respond(PATCH)]), FakeLlm([json_out(APPROVE)])
+    )
+    assert (record.outcome, record.failure_kind) == ("patch_written", "none")
+    assert planner.calls == 2
 
 
 async def test_declined_issue_skips_coder(bench, monkeypatch):

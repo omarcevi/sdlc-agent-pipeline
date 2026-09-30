@@ -29,6 +29,7 @@ Read the spec before making architectural changes. If the code and the spec disa
 
 - `app/pipeline.py` builds the graph; `app/agent.py` exposes it to agents-cli as `root_agent` / `app`; `app/driver.py` (`run_pipeline`) is the entry point for bench runs and the only place that releases the sandbox.
 - Runner-wide plugins, in order: `BudgetPlugin` (cost and tool-call caps), `GuardrailPlugin` (shell and protected-path checks), plus the BigQuery analytics plugin when `GOOGLE_CLOUD_PROJECT` is set. The driver also adds an internal tracker used for failure classification.
+- Gemini agents return structured output through ADK's `set_model_response` tool (`app/models.py` reports `output_schema_and_tools=False`), because native output schema + tools loops on the tool call on gemini-3.8-flash. That tool call counts toward the tool-call caps.
 - Environment variables:
 
 | Variable | Default | Purpose |

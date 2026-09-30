@@ -1,5 +1,6 @@
 import re
 
+import pytest
 from google.adk.models import Gemini
 from google.adk.models.lite_llm import LiteLlm
 
@@ -47,6 +48,40 @@ def test_agent_contracts():
 def test_make_model_routes_provider_strings_to_litellm():
     assert isinstance(make_model("gemini-3.8-flash"), Gemini)
     assert isinstance(make_model("anthropic/claude-sonnet"), LiteLlm)
+
+
+@pytest.fixture
+def on_vertex(monkeypatch):
+    """Vertex is where ADK's own Gemini class reports schema+tools as supported."""
+    monkeypatch.delenv("GOOGLE_GENAI_USE_VERTEXAI", raising=False)
+    monkeypatch.setenv("GOOGLE_GENAI_USE_ENTERPRISE", "true")
+
+
+def test_stock_gemini_reports_native_schema_and_tools_on_vertex(on_vertex):
+    # The behaviour make_model overrides. If ADK stops reporting True here, the
+    # override in app/models.py can be revisited.
+    assert Gemini(model="gemini-3.8-flash").capabilities.output_schema_and_tools
+
+
+def test_gemini_models_get_structured_output_through_set_model_response(on_vertex):
+    model = make_model("gemini-3.8-flash")
+    assert isinstance(model, Gemini) and model.model == "gemini-3.8-flash"
+    assert model.capabilities.output_schema_and_tools is False
+    assert model.retry_options.attempts == 3
+
+
+def test_litellm_models_are_returned_unchanged(on_vertex):
+    model = make_model("anthropic/claude-sonnet")
+    assert type(model) is LiteLlm and model.model == "anthropic/claude-sonnet"
+
+
+def test_default_role_models_all_use_set_model_response(on_vertex, monkeypatch):
+    for variable in ("PLANNER_MODEL", "CODER_MODEL", "REVIEWER_MODEL"):
+        monkeypatch.delenv(variable, raising=False)
+    models = RoleModels.from_env()
+    for model in (models.planner, models.coder, models.reviewer):
+        assert model.model == DEFAULT_MODEL
+        assert model.capabilities.output_schema_and_tools is False
 
 
 def test_role_models_from_env(monkeypatch):
