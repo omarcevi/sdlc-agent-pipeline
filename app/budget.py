@@ -25,7 +25,6 @@ class Usage:
     tokens_out: int = 0
     cost_usd: float = 0.0
     tool_calls: int = 0
-    turn_tool_calls: int = 0
     last_model: str = ""
 
 
@@ -35,8 +34,6 @@ class BudgetPlugin(BasePlugin):
         *,
         max_usd: float | None = None,
         max_tool_calls: int | None = None,
-        max_turn_tool_calls: int | None = None,
-        turn_limited_agents: frozenset[str] = frozenset({"coder"}),
     ) -> None:
         super().__init__(name="budget")
         self.max_usd = (
@@ -49,19 +46,10 @@ class BudgetPlugin(BasePlugin):
             if max_tool_calls is not None
             else int(os.environ.get("MAX_TOOL_CALLS_PER_RUN", "75"))
         )
-        self.max_turn_tool_calls = (
-            max_turn_tool_calls
-            if max_turn_tool_calls is not None
-            else int(os.environ.get("MAX_TOOL_CALLS_PER_TURN", "25"))
-        )
-        self.turn_limited_agents = turn_limited_agents
         self._usage: dict[str, Usage] = {}
 
     def usage(self, session_id: str) -> Usage:
         return self._usage.setdefault(session_id, Usage())
-
-    async def before_agent_callback(self, *, agent: Any, callback_context: Any) -> None:
-        self.usage(callback_context.session.id).turn_tool_calls = 0
 
     async def before_model_callback(
         self, *, callback_context: Any, llm_request: Any
@@ -100,14 +88,6 @@ class BudgetPlugin(BasePlugin):
     ) -> None:
         usage = self.usage(tool_context.session.id)
         usage.tool_calls += 1
-        usage.turn_tool_calls += 1
         if usage.tool_calls > self.max_tool_calls:
             raise BudgetExceeded(f"run exceeded {self.max_tool_calls} tool calls")
-        if (
-            tool_context.agent_name in self.turn_limited_agents
-            and usage.turn_tool_calls > self.max_turn_tool_calls
-        ):
-            raise BudgetExceeded(
-                f"{tool_context.agent_name} exceeded {self.max_turn_tool_calls} tool calls in one turn"
-            )
         return None

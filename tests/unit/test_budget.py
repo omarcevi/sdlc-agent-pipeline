@@ -53,7 +53,7 @@ def _response(tokens_in, tokens_out, thoughts=0):
 
 
 async def test_cost_accumulates_and_cap_blocks_next_call():
-    plugin = BudgetPlugin(max_usd=0.01, max_tool_calls=100, max_turn_tool_calls=100)
+    plugin = BudgetPlugin(max_usd=0.01, max_tool_calls=100)
     ctx = _ctx()
     await plugin.before_model_callback(
         callback_context=ctx, llm_request=SimpleNamespace(model="gemini-3.8-flash")
@@ -72,7 +72,7 @@ async def test_cost_accumulates_and_cap_blocks_next_call():
 
 
 async def test_run_tool_call_cap():
-    plugin = BudgetPlugin(max_usd=10, max_tool_calls=2, max_turn_tool_calls=100)
+    plugin = BudgetPlugin(max_usd=10, max_tool_calls=2)
     ctx = _ctx()
     tool = SimpleNamespace(name="bash")
     await plugin.before_tool_callback(tool=tool, tool_args={}, tool_context=ctx)
@@ -81,34 +81,28 @@ async def test_run_tool_call_cap():
         await plugin.before_tool_callback(tool=tool, tool_args={}, tool_context=ctx)
 
 
-async def test_turn_cap_applies_to_coder_and_resets_per_turn():
-    plugin = BudgetPlugin(max_usd=10, max_tool_calls=100, max_turn_tool_calls=2)
+async def test_coder_is_not_capped_per_turn_only_per_run():
+    plugin = BudgetPlugin(max_usd=10)
     tool = SimpleNamespace(name="bash")
     coder = _ctx("coder")
-    for _ in range(2):
-        await plugin.before_tool_callback(tool=tool, tool_args={}, tool_context=coder)
     await plugin.before_agent_callback(
         agent=SimpleNamespace(name="coder"), callback_context=coder
     )
-    for _ in range(2):
+    for _ in range(75):
         await plugin.before_tool_callback(tool=tool, tool_args={}, tool_context=coder)
-    with pytest.raises(BudgetExceeded):
+    with pytest.raises(BudgetExceeded, match="run exceeded 75 tool calls"):
         await plugin.before_tool_callback(tool=tool, tool_args={}, tool_context=coder)
-    planner = _ctx("planner")
-    await plugin.before_agent_callback(
-        agent=SimpleNamespace(name="planner"), callback_context=planner
-    )
-    for _ in range(5):
-        await plugin.before_tool_callback(tool=tool, tool_args={}, tool_context=planner)
 
 
 def test_defaults_come_from_env(monkeypatch):
     monkeypatch.setenv("RUN_BUDGET_USD", "0.5")
     monkeypatch.setenv("MAX_TOOL_CALLS_PER_RUN", "9")
+    plugin = BudgetPlugin()
+    assert (plugin.max_usd, plugin.max_tool_calls) == (0.5, 9)
+
+
+def test_per_turn_env_var_is_not_read(monkeypatch):
     monkeypatch.setenv("MAX_TOOL_CALLS_PER_TURN", "3")
     plugin = BudgetPlugin()
-    assert (plugin.max_usd, plugin.max_tool_calls, plugin.max_turn_tool_calls) == (
-        0.5,
-        9,
-        3,
-    )
+    assert not hasattr(plugin, "max_turn_tool_calls")
+    assert plugin.max_tool_calls == 75

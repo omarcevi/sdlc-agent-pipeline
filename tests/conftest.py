@@ -15,7 +15,6 @@ for _variable in (
     "BQ_ANALYTICS_ENABLED",
     "RUN_BUDGET_USD",
     "MAX_TOOL_CALLS_PER_RUN",
-    "MAX_TOOL_CALLS_PER_TURN",
     "PLANNER_MODEL",
     "CODER_MODEL",
     "REVIEWER_MODEL",

@@ -95,16 +95,6 @@ async def test_baseline_shares_the_run_budget(bench, monkeypatch):
     assert env.closed
 
 
-async def test_solo_is_exempt_from_the_per_turn_cap(bench, monkeypatch):
-    monkeypatch.setenv("MAX_TOOL_CALLS_PER_TURN", "2")
-    env = FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
-    use_env(monkeypatch, env)
-    solo = FakeLlm([call("list_dir", path=".")] * 4 + [json_out(SOLO)])
-    record = await run(solo)
-    assert record.outcome == "patch_written", record.reason
-    assert record.tool_calls == 4
-
-
 def test_solo_instruction_reads_only_issue_text():
     instruction = build_solo(FakeLlm([])).instruction
     assert isinstance(instruction, str)
