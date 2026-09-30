@@ -24,6 +24,7 @@ for _variable in (
     "BENCH_REPOS_DIR",
     "RUNS_DIR",
     "SANDBOX_TTL_S",
+    "TRACE_TO_CLOUD",
 ):
     os.environ.pop(_variable, None)
 

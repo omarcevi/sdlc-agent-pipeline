@@ -14,6 +14,7 @@ from google.adk.runners import InMemoryRunner
 from google.adk.workflow import Workflow
 from google.genai import errors as genai_errors
 from google.genai import types
+from opentelemetry import trace
 from pydantic import ValidationError
 
 from app.budget import BudgetExceeded, BudgetPlugin
@@ -24,6 +25,7 @@ from app.models import RoleModels
 from app.nodes.finish import runs_dir
 from app.pipeline import build_workflow
 from app.schemas import FailureKind, RunRecord, RunRequest
+from app.tracing import ROOT_SPAN_NAME, TRACER_NAME
 
 USER_ID = "bench"
 logger = logging.getLogger(__name__)
@@ -110,8 +112,34 @@ def classify_failure(
 
 
 async def run_pipeline(
-    request: RunRequest, *, workflow: Workflow | None = None
+    request: RunRequest,
+    *,
+    workflow: Workflow | None = None,
+    tracer: trace.Tracer | None = None,
 ) -> RunRecord:
+    """Run one pipeline inside a root span that carries the run's outcome."""
+    tracer = tracer or trace.get_tracer(TRACER_NAME)
+    with tracer.start_as_current_span(
+        ROOT_SPAN_NAME,
+        attributes={"task_id": request.task_id, "run_id": request.run_id},
+    ) as span:
+        record = await _run(request, workflow)
+        span.set_attributes(
+            {
+                "outcome": record.outcome,
+                "failure_kind": record.failure_kind,
+                "cost_usd": record.cost_usd,
+                "tool_calls": record.tool_calls,
+                "tokens_in": record.tokens_in,
+                "tokens_out": record.tokens_out,
+                "test_attempts": record.test_attempts,
+                "review_rounds": record.review_rounds,
+            }
+        )
+    return record
+
+
+async def _run(request: RunRequest, workflow: Workflow | None) -> RunRecord:
     budget = BudgetPlugin()
     tracker = _ActiveAgentTracker()
     app = App(

@@ -30,6 +30,7 @@ Read the spec before making architectural changes. If the code and the spec disa
 - `app/pipeline.py` builds the graph; `app/agent.py` exposes it to agents-cli as `root_agent` / `app`; `app/driver.py` (`run_pipeline`) is the entry point for bench runs and the only place that releases the sandbox.
 - Runner-wide plugins, in order: `BudgetPlugin` (cost and tool-call caps), ADK's `ReflectAndRetryModelPlugin(max_retries=2)` (retries malformed function calls), `GuardrailPlugin` (shell and protected-path checks), then the BigQuery analytics plugin when it is enabled. The driver inserts an internal tracker, used for failure classification, right after the budget plugin. The order matters: a plugin that returns a value stops the ones after it.
 - Scoring (`bench/score.py`) runs inside a sandbox; model-written code never runs on the host.
+- Tracing (`app/tracing.py`) is opt-in. With `TRACE_TO_CLOUD=1`, `bench.run` exports to Cloud Trace: the driver's root span `issue_to_pr.run` (task, run ID, outcome, cost, tool calls) with ADK's workflow, agent, model-call and tool-call spans under it.
 - The pipeline's git directory is `/workspace/.pipeline-git`, outside the worktree. Diffs are taken against the baseline commit recorded in state as `baseline_sha`.
 - Gemini agents return structured output through ADK's `set_model_response` tool (`app/models.py` reports `output_schema_and_tools=False`), because native output schema + tools loops on the tool call on gemini-3.8-flash. That tool call counts toward the tool-call caps.
 - Environment variables:
@@ -45,6 +46,7 @@ Read the spec before making architectural changes. If the code and the spec disa
 | `SANDBOX_TTL_S` | `1800` | Seconds after which a local sandbox removes itself (self-destruct) |
 | `BENCH_TASKS_DIR`, `BENCH_REPOS_DIR` | `bench/tasks`, `bench/repos` | Bench task and repo locations |
 | `RUNS_DIR` | `runs` | Per-run outputs (`events.jsonl`, `record.json`, `patch.diff`) |
+| `TRACE_TO_CLOUD` | unset | `1` exports each local run's spans to Cloud Trace in `GOOGLE_CLOUD_PROJECT` (needs the Cloud Trace API and credentials). Spans include prompt and tool content |
 | `BQ_ANALYTICS_ENABLED` | unset | `1` enables the BigQuery analytics plugin and creates its dataset (also needs `GOOGLE_CLOUD_PROJECT`). Owner approval required |
 
 ## Workflow
@@ -77,6 +79,7 @@ This project follows the `agents-cli` lifecycle: scaffold → build → evaluate
 | Docker-backed tests | `make test-docker` |
 | Validate bench tasks | `uv run python -m bench.validate` |
 | Run bench (spends credits) | `uv run python -m bench.run --tasks tc-001` or `--split dev` |
+| Run bench with traces in the GCP console | `TRACE_TO_CLOUD=1 uv run python -m bench.run --tasks tc-001` |
 
 The smoke-run prompt must be `RunRequest` JSON (`task_id`, `run_id`). It calls a real model, and a sandbox started this way is not released by the driver: only its TTL (`SANDBOX_TTL_S`) cleans it up.
 

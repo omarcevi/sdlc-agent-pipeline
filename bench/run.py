@@ -7,6 +7,7 @@ uv run python -m bench.run --split dev
 import argparse
 import asyncio
 import json
+import os
 import sys
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -17,6 +18,7 @@ from dotenv import load_dotenv
 from app.driver import run_pipeline
 from app.schemas import RunRequest
 from app.task_store import TaskSpec, list_tasks, load_task, task_dir
+from app.tracing import enable_cloud_trace, flush_traces, trace_explorer_url
 from bench.score import is_resolved
 
 RunOne = Callable[[TaskSpec, str], Awaitable[dict]]
@@ -80,6 +82,7 @@ async def run_tasks(
 
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
+    tracing_on = enable_cloud_trace()
     parser = argparse.ArgumentParser(prog="bench.run")
     parser.add_argument("--tasks", help="comma-separated task ids")
     parser.add_argument("--split", choices=["dev"], default="dev")
@@ -114,6 +117,9 @@ def main(argv: list[str] | None = None) -> int:
         + (f"  {crashed} crashed" if crashed else "")
         + f"  total ${cost:.2f}  → {results_path}"
     )
+    if tracing_on:
+        flush_traces()
+        print(f"traces: {trace_explorer_url(os.environ['GOOGLE_CLOUD_PROJECT'])}")
     return 0
 
 
