@@ -84,7 +84,8 @@ def import_products(path: str | Path, existing: Container[str] = ()) -> ImportRe
     A bad row is skipped and reported; the good rows are still returned. A row
     is bad if a field is invalid, if fields are missing or extra, or if its SKU
     appeared earlier in the file or is in `existing`. A file that is empty, not
-    UTF-8, or lacks exactly the expected columns raises `CsvFormatError`."""
+    UTF-8, malformed for the csv module, or lacks exactly the expected columns
+    raises `CsvFormatError`."""
     try:
         with open(path, newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle)
@@ -108,6 +109,8 @@ def import_products(path: str | Path, existing: Container[str] = ()) -> ImportRe
                     products.append(product)
     except UnicodeDecodeError:
         raise CsvFormatError("the file is not valid UTF-8") from None
+    except csv.Error as exc:
+        raise CsvFormatError(f"the file is not valid CSV: {exc}") from None
     return ImportResult(tuple(products), tuple(errors))
 
 

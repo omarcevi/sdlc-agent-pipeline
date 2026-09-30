@@ -120,3 +120,11 @@ def test_r18_import_then_export_round_trips_the_catalog(tmp_path):
         "LAMP,Lamp,each,4,0,4,48.00",
         'MIX-1,"Pen, blue",each,0,0,0,0.00',
     ]
+
+
+def test_r16_a_csv_parser_error_is_a_format_error(tmp_path):
+    """R16: a field over the csv module's size limit makes it fail; unusable file."""
+    path = tmp_path / "huge.csv"
+    path.write_text(HEADER + "x-1," + "n" * 200_000 + ",each,1.00,true,\n")
+    with pytest.raises(CsvFormatError):
+        csvio.import_products(path)

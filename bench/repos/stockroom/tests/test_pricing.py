@@ -110,3 +110,11 @@ def test_quote_rejects_bad_items_and_bad_tax_rates(store):
     for bad in (8.25, "101"):
         with pytest.raises(ValueError):
             Store(tax_percent=bad)
+
+
+def test_r11_quote_merges_repeated_skus_like_an_order(store):
+    """R11: a split quantity is priced as the merged quantity, in quote and order."""
+    split = store.quote([("pen-1", 6), ("PEN-1", 6)])
+    assert len(split.lines) == 1 and split.lines[0].tier_percent == D("5")
+    assert split == store.quote([("PEN-1", 12)])
+    assert split.total == store.create_order([("PEN-1", 6), ("PEN-1", 6)]).quote.total

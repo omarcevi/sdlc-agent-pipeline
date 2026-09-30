@@ -5,7 +5,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from . import csvio
-from .catalog import Catalog, Product
+from .catalog import Catalog, Product, merge_items
 from .errors import UnknownCoupon
 from .inventory import Inventory, StockLevel
 from .ledger import Ledger
@@ -33,6 +33,7 @@ class Store:
 
     # Catalog
     def add_product(self, product: Product) -> None:
+        """Add a product to the catalog (its SKU must be new)."""
         self.catalog.add(product)
 
     def import_products(self, path: str | Path) -> csvio.ImportResult:
@@ -43,23 +44,29 @@ class Store:
         return result
 
     def export_stock(self, path: str | Path) -> None:
+        """Write the stock levels of every product to a CSV file."""
         csvio.export_stock(self, path)
 
     # Stock
     def receive(self, sku: str, quantity: int, reason: str = "received") -> None:
+        """Add units to stock."""
         self.inventory.receive(sku, quantity, reason)
 
     def ship(self, sku: str, quantity: int, reason: str = "shipped") -> None:
+        """Ship available units directly, without an order."""
         self.inventory.ship(sku, quantity, reason)
 
     def adjust(self, sku: str, delta: int, reason: str) -> None:
+        """Correct the on-hand count by a signed amount, with a reason."""
         self.inventory.adjust(sku, delta, reason)
 
     def stock(self, sku: str) -> StockLevel:
+        """On hand, reserved and available units for one SKU."""
         return self.inventory.level(sku)
 
     # Coupons and quotes
     def add_coupon(self, code: str, percent: object) -> Coupon:
+        """Register (or replace) a percentage coupon under its code."""
         coupon = Coupon(code, parse_percent(percent))
         self._coupons[coupon.code] = coupon
         return coupon
@@ -75,26 +82,36 @@ class Store:
     def quote(
         self, items: Iterable[tuple[str, int]], coupon_code: str | None = None
     ) -> Quote:
-        """Price (sku, quantity) pairs without creating an order."""
-        pairs = [(self.catalog.get(sku), quantity) for sku, quantity in items]
+        """Price (sku, quantity) pairs without creating an order.
+
+        Repeated SKUs are merged first, exactly as `create_order` does."""
+        pairs = [
+            (self.catalog.get(sku), quantity)
+            for sku, quantity in merge_items(items).items()
+        ]
         return quote_items(pairs, self._coupon(coupon_code), self.tax_percent)
 
     # Orders
     def create_order(
         self, items: Iterable[tuple[str, int]], coupon_code: str | None = None
     ) -> Order:
+        """Price and record a new order; it does not touch stock."""
         return self.orders.create(items, self._coupon(coupon_code), self.tax_percent)
 
     def reserve_order(self, order_id: str) -> Order:
+        """Reserve all of a new order's units, or none."""
         return self.orders.reserve(order_id)
 
     def fulfil_order(
         self, order_id: str, quantities: Mapping[str, int] | None = None
     ) -> Order:
+        """Ship reserved units: everything outstanding, or the given quantities."""
         return self.orders.fulfil(order_id, quantities)
 
     def cancel_order(self, order_id: str) -> Order:
+        """Cancel an unfinished order and release what is still reserved."""
         return self.orders.cancel(order_id)
 
     def billable(self, order_id: str) -> Quote:
+        """What the customer owes for a fulfilled or cancelled order."""
         return self.orders.billable_quote(order_id)

@@ -14,7 +14,13 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 
-from .catalog import Catalog, Product, check_quantity, normalize_sku
+from .catalog import (
+    Catalog,
+    Product,
+    check_quantity,
+    merge_items,
+    normalize_sku,
+)
 from .errors import (
     InsufficientStock,
     InvalidOrderState,
@@ -90,10 +96,7 @@ class OrderBook:
 
         Repeated SKUs are merged into one line, in order of first appearance,
         before pricing. Nothing is recorded if any item is invalid."""
-        merged: dict[str, int] = {}
-        for sku, quantity in items:
-            key = normalize_sku(sku)
-            merged[key] = merged.get(key, 0) + check_quantity(quantity)
+        merged = merge_items(items)
         if not merged:
             raise InvalidQuantity("an order needs at least one line")
         lines = tuple(

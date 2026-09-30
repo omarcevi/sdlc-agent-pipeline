@@ -7,6 +7,7 @@ from stockroom.errors import (
     InvalidOrderState,
     InvalidQuantity,
     OverFulfilment,
+    UnknownOrder,
     UnknownSku,
 )
 
@@ -200,3 +201,10 @@ def test_a_run_of_operations_is_repeatable(make_store):
         return s.ledger.entries(), s.billable(order.id)
 
     assert run(make_store()) == run(make_store())
+
+
+def test_unknown_order_ids_raise_unknown_order(store):
+    """Order lookup: every operation on a missing ID raises UnknownOrder."""
+    for operation in (store.reserve_order, store.fulfil_order, store.billable):
+        with pytest.raises(UnknownOrder):
+            operation("ORD-9999")

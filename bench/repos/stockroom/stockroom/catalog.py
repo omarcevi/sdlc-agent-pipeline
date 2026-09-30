@@ -5,6 +5,7 @@ stock levels (see `inventory`) or how a quantity is priced (see `pricing`).
 """
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import Enum
@@ -60,6 +61,18 @@ def check_quantity(quantity: object) -> int:
     if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
         raise InvalidQuantity(f"quantity must be a positive whole number: {quantity!r}")
     return quantity
+
+
+def merge_items(items: Iterable[tuple[str, int]]) -> dict[str, int]:
+    """Merge (sku, quantity) pairs into one quantity per normalised SKU.
+
+    Repeated SKUs add up; order follows each SKU's first appearance. Used by
+    both quoting and order creation so they always price the same lines."""
+    merged: dict[str, int] = {}
+    for sku, quantity in items:
+        key = normalize_sku(sku)
+        merged[key] = merged.get(key, 0) + check_quantity(quantity)
+    return merged
 
 
 @dataclass(frozen=True)
