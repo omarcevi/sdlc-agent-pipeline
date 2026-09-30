@@ -28,7 +28,9 @@ Read the spec before making architectural changes. If the code and the spec disa
 ## Runtime wiring
 
 - `app/pipeline.py` builds the graph; `app/agent.py` exposes it to agents-cli as `root_agent` / `app`; `app/driver.py` (`run_pipeline`) is the entry point for bench runs and the only place that releases the sandbox.
-- Runner-wide plugins, in order: `BudgetPlugin` (cost and tool-call caps), `GuardrailPlugin` (shell and protected-path checks), plus the BigQuery analytics plugin when `GOOGLE_CLOUD_PROJECT` is set. The driver also adds an internal tracker used for failure classification.
+- Runner-wide plugins, in order: `BudgetPlugin` (cost and tool-call caps), ADK's `ReflectAndRetryModelPlugin(max_retries=2)` (retries malformed function calls), `GuardrailPlugin` (shell and protected-path checks), then the BigQuery analytics plugin when it is enabled. The driver inserts an internal tracker, used for failure classification, right after the budget plugin. The order matters: a plugin that returns a value stops the ones after it.
+- Scoring (`bench/score.py`) runs inside a sandbox; model-written code never runs on the host.
+- The pipeline's git directory is `/workspace/.pipeline-git`, outside the worktree. Diffs are taken against the baseline commit recorded in state as `baseline_sha`.
 - Gemini agents return structured output through ADK's `set_model_response` tool (`app/models.py` reports `output_schema_and_tools=False`), because native output schema + tools loops on the tool call on gemini-3.8-flash. That tool call counts toward the tool-call caps.
 - Environment variables:
 
@@ -40,8 +42,10 @@ Read the spec before making architectural changes. If the code and the spec disa
 | `MAX_TOOL_CALLS_PER_TURN` | `25` | Tool-call cap per coder turn |
 | `ENVIRONMENT_BACKEND` | `docker` | Sandbox backend |
 | `SANDBOX_IMAGE` | `issue-to-pr-sandbox:dev` | Docker image for the sandbox |
+| `SANDBOX_TTL_S` | `1800` | Seconds after which a local sandbox removes itself (self-destruct) |
 | `BENCH_TASKS_DIR`, `BENCH_REPOS_DIR` | `bench/tasks`, `bench/repos` | Bench task and repo locations |
 | `RUNS_DIR` | `runs` | Per-run outputs (`events.jsonl`, `record.json`, `patch.diff`) |
+| `BQ_ANALYTICS_ENABLED` | unset | `1` enables the BigQuery analytics plugin and creates its dataset (also needs `GOOGLE_CLOUD_PROJECT`). Owner approval required |
 
 ## Workflow
 
@@ -65,7 +69,7 @@ This project follows the `agents-cli` lifecycle: scaffold → build → evaluate
 | Install deps | `uv sync` |
 | Lint | `agents-cli lint` |
 | Unit tests | `uv run pytest tests/unit` |
-| Quick smoke run | `agents-cli run "<prompt>"` |
+| Quick smoke run (calls a real model) | `agents-cli run '{"task_id": "tc-001", "run_id": "smoke-1"}'` |
 | Interactive UI | `agents-cli playground` |
 | Quality evals | `agents-cli eval run` |
 | Deploy (approval required) | `agents-cli deploy` |
@@ -73,6 +77,8 @@ This project follows the `agents-cli` lifecycle: scaffold → build → evaluate
 | Docker-backed tests | `make test-docker` |
 | Validate bench tasks | `uv run python -m bench.validate` |
 | Run bench (spends credits) | `uv run python -m bench.run --tasks tc-001` or `--split dev` |
+
+The smoke-run prompt must be `RunRequest` JSON (`task_id`, `run_id`). It calls a real model, and a sandbox started this way is not released by the driver: only its TTL (`SANDBOX_TTL_S`) cleans it up.
 
 ## Keeping this file current
 

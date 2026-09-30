@@ -355,3 +355,14 @@ Controls: the per-run budget cap, sandbox TTL plus sweeper, no always-on instanc
 5. The budget plugin moved into Week 1 (§15).
 6. S3 is answered by source: `Gemini` on Vertex and `LiteLlm` support `output_schema` together with tools, and other models get ADK's `set_model_response` tool automatically. The Week 1 spike confirms it live.
 7. All Week-1 tasks are in the `dev` split. Held-out tasks are written in Week 2.
+
+**2026-09-30, from the Week 1 final review.**
+
+1. Scoring runs inside a sandbox, with hidden tests outside the repo and patch-supplied pytest config ignored; protected test files are restored before scoring (§9.1).
+2. The pipeline's git dir lives outside the worktree and diffs are taken against a recorded baseline SHA with `--no-renames` (§7.4).
+3. BigQuery analytics is opt-in via `BQ_ANALYTICS_ENABLED=1` (§10).
+4. The local Docker sandbox self-destructs after `SANDBOX_TTL_S` (default 1800 s) (§7.3).
+5. `ReflectAndRetryModelPlugin(max_retries=2)` covers malformed function calls; output-schema validation failures are recorded as agent failures (amends §6.4).
+6. Model API and transport errors are classified as infra (§6.4).
+7. Deferred to Week 3: enforcing the output cap inside the `Environment` (§7.3).
+8. Spike S3 result: on gemini-3.8-flash, native output-schema + tools loops on the tool call (13 of 18 runs); agents use ADK's `set_model_response` tool instead (9 of 9 runs finished in 2 model calls).

@@ -1,17 +1,34 @@
 """Test-wide setup.
 
-app/agent.py builds a BigQuery analytics plugin at import time when
-GOOGLE_CLOUD_PROJECT is set. Unit tests must never touch GCP, so clear it
-before any test module imports the package.
+Tests must not depend on the developer's shell or .env, and must never touch GCP.
+These variables change how the package behaves (some of them at import time), so
+they are removed before any test module imports it. SANDBOX_IMAGE is left alone:
+it only selects which local image the Docker tests use.
 """
 
 import os
 
-os.environ.pop("GOOGLE_CLOUD_PROJECT", None)
-
 import pytest
 
-from app.environment import registry
+for _variable in (
+    "GOOGLE_CLOUD_PROJECT",
+    "BQ_ANALYTICS_ENABLED",
+    "RUN_BUDGET_USD",
+    "MAX_TOOL_CALLS_PER_RUN",
+    "MAX_TOOL_CALLS_PER_TURN",
+    "PLANNER_MODEL",
+    "CODER_MODEL",
+    "REVIEWER_MODEL",
+    "ENVIRONMENT_BACKEND",
+    "BENCH_TASKS_DIR",
+    "BENCH_REPOS_DIR",
+    "RUNS_DIR",
+    "SANDBOX_TTL_S",
+):
+    os.environ.pop(_variable, None)
+
+# Imported only after the environment is clean: app/__init__.py imports app.agent.
+from app.environment import registry  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
