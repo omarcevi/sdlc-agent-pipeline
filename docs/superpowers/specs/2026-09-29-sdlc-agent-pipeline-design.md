@@ -353,7 +353,7 @@ Controls: the per-run budget cap, sandbox TTL plus sweeper, no always-on instanc
 3. `run_tests` fails an attempt deterministically on an empty diff or an edit to a protected file.
 4. Bench tasks use `plant/` and `solution/` overlay directories instead of patch files (§9.1).
 5. The budget plugin moved into Week 1 (§15).
-6. S3 is answered by source: `Gemini` on Vertex and `LiteLlm` support `output_schema` together with tools, and other models get ADK's `set_model_response` tool automatically. The Week 1 spike confirms it live.
+6. S3 was expected to pass from reading the source: `Gemini` on Vertex and `LiteLlm` declare support for `output_schema` together with tools, and other models get ADK's `set_model_response` tool automatically. **Superseded by item 8 of the 2026-09-30 block:** the live spike showed the native mode loops on gemini-3.8-flash.
 7. All Week-1 tasks are in the `dev` split. Held-out tasks are written in Week 2.
 
 **2026-09-30, from the Week 1 final review.**
