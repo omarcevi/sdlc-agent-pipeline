@@ -1,8 +1,10 @@
 import pytest
 from google.adk.telemetry.setup import OTelHooks
+from google.auth.exceptions import DefaultCredentialsError
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import StatusCode
 
 from app import tracing
 from app.driver import run_pipeline
@@ -124,3 +126,50 @@ async def test_each_run_has_a_root_span_with_its_outcome(tmp_path, monkeypatch):
     assert attributes["cost_usd"] == record.cost_usd
     assert attributes["tool_calls"] == record.tool_calls
     assert attributes["test_attempts"] == 0 and attributes["review_rounds"] == 0
+
+
+def test_missing_default_credentials_disable_tracing_with_one_warning(
+    monkeypatch, caplog
+):
+    monkeypatch.setenv("TRACE_TO_CLOUD", "1")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "some-project")
+    _forbid_exporters(monkeypatch)
+
+    def no_credentials(**kwargs):
+        raise DefaultCredentialsError("no adc")
+
+    monkeypatch.setattr(tracing.google.auth, "default", no_credentials)
+    with caplog.at_level("WARNING", logger="app.tracing"):
+        assert tracing.enable_cloud_trace() is False
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "gcloud auth application-default login" in warnings[0].getMessage()
+
+
+async def test_unclassified_error_marks_the_root_span_as_error(tmp_path, monkeypatch):
+    monkeypatch.setenv("BENCH_TASKS_DIR", str(tmp_path / "tasks"))
+    monkeypatch.setenv("BENCH_REPOS_DIR", str(tmp_path / "repos"))
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    make_bench_task(tmp_path)
+    env = FakeEnvironment()
+
+    async def fake_start():
+        return env
+
+    monkeypatch.setattr(intake, "start_environment", fake_start)
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    # An empty script makes the planner fail with an AssertionError: a bug, not a
+    # classified failure.
+    models = RoleModels(planner=FakeLlm([]), coder=FakeLlm([]), reviewer=FakeLlm([]))
+
+    with pytest.raises(AssertionError):
+        await run_pipeline(
+            RunRequest(task_id="t-1", run_id="r-bug"),
+            workflow=build_workflow(models),
+            tracer=provider.get_tracer("test"),
+        )
+
+    (root,) = [s for s in exporter.get_finished_spans() if s.name == "issue_to_pr.run"]
+    assert root.status.status_code == StatusCode.ERROR

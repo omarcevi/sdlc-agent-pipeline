@@ -140,3 +140,25 @@ async def test_agent_stderr_that_mentions_daemon_words_is_not_an_infra_error(
     monkeypatch.setattr(docker, "_run", fake_run)
     result = await DockerEnvironment("c1").exec("svc status")
     assert (result.exit_code, result.stderr) == (1, stderr)
+
+
+async def test_docker_daemon_down_is_an_infra_error(monkeypatch):
+    async def fake_run(args, **kwargs):
+        return (
+            1,
+            "",
+            "Cannot connect to the Docker daemon at unix:///x.sock. Is it running?\n",
+        )
+
+    monkeypatch.setattr(docker, "_run", fake_run)
+    env = DockerEnvironment("c1")
+    with pytest.raises(InfraError):
+        await env.exec("true")
+    with pytest.raises(InfraError):
+        await env.read_file("/workspace/repo/a.py")
+    with pytest.raises(InfraError):
+        await env.write_file("/workspace/repo/a.py", "x")
+    with pytest.raises(InfraError):
+        await env.upload_dir(".", "/workspace/repo")
+    with pytest.raises(InfraError):
+        await DockerEnvironment.start()

@@ -103,6 +103,9 @@ def classify_failure(
             return "budget", str(error)
         if isinstance(error, InfraError):
             return "infra", str(error)
+        if isinstance(error, genai_errors.ClientError) and error.code in (400, 413):
+            # The agent built a request the model cannot take, e.g. a context overflow.
+            return "agent", f"model rejected the request: {error.code} {error.message}"
         if _is_model_api_error(error):
             return "infra", f"{type(error).__name__}: {error}"
         if isinstance(error, RuntimeError) and _RETRIES_EXHAUSTED in str(error):

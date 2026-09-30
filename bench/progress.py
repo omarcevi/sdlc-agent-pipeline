@@ -27,14 +27,15 @@ def format_event(task_id: str, event: Event) -> list[str]:
     lines = []
     for part in event.content.parts:
         if part.text and event.author == PIPELINE_AUTHOR:
+            if not part.text.strip():
+                continue
             first_line = part.text.strip().split("\n", 1)[0]
             lines.append(f"{task_id}  pipeline · {first_line[:100]}")
         elif part.function_call:
             call = part.function_call
-            detail = _detail(call.name or "", call.args or {})
-            lines.append(
-                f"{task_id}  {event.author:>8} → {call.name} {detail}".rstrip()
-            )
+            name = call.name or "?"
+            detail = _detail(name, call.args or {})
+            lines.append(f"{task_id}  {event.author:>8} → {name} {detail}".rstrip())
         elif part.function_response:
             response = part.function_response.response
             if isinstance(response, dict) and "error" in response:

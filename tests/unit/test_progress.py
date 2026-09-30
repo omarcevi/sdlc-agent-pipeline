@@ -85,3 +85,13 @@ def test_several_parts_give_several_lines_in_order():
         "t     coder → read_file a.py",
         "t     coder → list_dir .",
     ]
+
+
+def test_whitespace_only_pipeline_text_prints_nothing():
+    assert format_event("t", event("issue_to_pr", types.Part(text="  \n "))) == []
+
+
+def test_function_call_without_a_name_prints_a_question_mark():
+    part = types.Part(function_call=types.FunctionCall(args={}))
+    (line,) = format_event("t", event("coder", part))
+    assert "?" in line and "None" not in line

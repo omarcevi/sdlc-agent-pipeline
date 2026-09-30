@@ -39,6 +39,8 @@ def _segments(command: str) -> Iterator[list[str]]:
     """Split a shell command into simple commands, respecting quotes."""
     lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()\n")
     lexer.whitespace = " \t\r"
+    lexer.commenters = ""  # a '#' must not swallow the rest of the line
+    # Redirections such as 2>&1 tokenise into harmless stray segments.
     lexer.whitespace_split = True
     segment: list[str] = []
     for token in lexer:

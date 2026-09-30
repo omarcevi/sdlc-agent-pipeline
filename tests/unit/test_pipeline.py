@@ -466,3 +466,34 @@ async def test_a_raising_on_event_changes_nothing_and_warns_once(
     assert len(calls) > 1
     warnings = [r for r in caplog.records if "on_event" in r.getMessage()]
     assert len(warnings) == 1 and "display broke" in warnings[0].getMessage()
+
+
+def _client_error(code: int) -> genai_errors.ClientError:
+    body = {"error": {"code": code, "message": "too big", "status": "X"}}
+    return genai_errors.ClientError(code, body)
+
+
+async def test_model_request_rejected_is_an_agent_failure(bench, monkeypatch):
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    record = await run(FakeLlm([raises(_client_error(400))]), FakeLlm([]), FakeLlm([]))
+    assert (record.outcome, record.failure_kind) == ("failed", "agent")
+    assert "model rejected the request" in record.reason
+    assert env.closed
+
+
+async def test_model_rate_limit_is_an_infra_failure(bench, monkeypatch):
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    record = await run(FakeLlm([raises(_client_error(429))]), FakeLlm([]), FakeLlm([]))
+    assert (record.outcome, record.failure_kind) == ("failed", "infra")
+
+
+@pytest.mark.parametrize(
+    ("code", "kind"), [(400, "agent"), (413, "agent"), (403, "infra"), (429, "infra")]
+)
+def test_classify_client_error_by_http_code(code, kind):
+    got_kind, reason = classify_failure(_client_error(code), llm_agent_active=True)
+    assert got_kind == kind
+    if kind == "agent":
+        assert reason.startswith(f"model rejected the request: {code} ")

@@ -90,3 +90,13 @@ async def test_plugin_blocks_and_allows():
         tool_context=ctx,
     )
     assert other is None  # read tools confine paths themselves
+
+
+@pytest.mark.parametrize("command", ["ls # x\ncurl y", "echo a#b\ncurl x"])
+def test_hash_does_not_hide_the_rest_of_the_line_or_the_next_command(command):
+    assert check_command(command) is not None
+
+
+@pytest.mark.parametrize("command", ['echo "a # b"', "rg '#include' src"])
+def test_hash_inside_quotes_is_allowed(command):
+    assert check_command(command) is None

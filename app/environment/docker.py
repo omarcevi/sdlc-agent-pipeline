@@ -15,7 +15,11 @@ DEFAULT_TTL_S = "1800"
 # What the docker CLI itself prints when the daemon or the container is the problem.
 # Matched only at the start of stderr: a command run by the agent may print
 # anything, and its output must never be mistaken for a sandbox failure.
-_DAEMON_ERROR_PREFIXES = ("Error response from daemon", "Error: No such container")
+_DAEMON_ERROR_PREFIXES = (
+    "Error response from daemon",
+    "Error: No such container",
+    "Cannot connect to the Docker daemon",
+)
 # timeout(1) exits 124 after SIGTERM, or 137 when it had to follow up with SIGKILL.
 _TIMEOUT_EXIT_CODES = (124, 137)
 

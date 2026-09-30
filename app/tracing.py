@@ -11,6 +11,7 @@ import os
 import google.auth
 from google.adk.telemetry.google_cloud import get_gcp_exporters, get_gcp_resource
 from google.adk.telemetry.setup import maybe_set_otel_providers
+from google.auth.exceptions import DefaultCredentialsError
 from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,14 @@ def enable_cloud_trace() -> bool:
     if not project_id:
         logger.warning("TRACE_TO_CLOUD=1 but GOOGLE_CLOUD_PROJECT is not set")
         return False
-    credentials, _ = google.auth.default(quota_project_id=project_id)
+    try:
+        credentials, _ = google.auth.default(quota_project_id=project_id)
+    except DefaultCredentialsError:
+        logger.warning(
+            "TRACE_TO_CLOUD=1 but no Google credentials were found; "
+            "run `gcloud auth application-default login`. Tracing is off."
+        )
+        return False
     hooks = get_gcp_exporters(
         enable_cloud_tracing=True, google_auth=(credentials, project_id)
     )
