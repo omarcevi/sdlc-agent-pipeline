@@ -211,3 +211,6 @@ tools/a2a-inspector/
 *.pem
 *-key.json
 credentials*.json
+
+# pipeline run artifacts
+runs/
