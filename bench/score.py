@@ -7,6 +7,7 @@ config file in the repo, and the hidden tests live outside the repo, cut off fro
 its conftest files.
 """
 
+import logging
 import tempfile
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from app.environment.factory import start_environment
 from app.schemas import RunRecord
 from app.task_store import TaskSpec, materialize, task_dir, test_files
 
+logger = logging.getLogger(__name__)
 PATCH_PATH = "/workspace/patch.diff"
 HIDDEN_ROOT = "/workspace/hidden"
 HIDDEN_DIR = f"{HIDDEN_ROOT}/hidden_tests"
@@ -61,7 +63,17 @@ async def score_patch(task: TaskSpec, patch_path: Path) -> bool:
                 return False
         return True
     finally:
-        await env.close()
+        # A failed release must not turn a finished score into a crash. The
+        # sandbox removes itself at its TTL.
+        try:
+            await env.close()
+        except Exception as exc:
+            logger.warning(
+                "could not release scoring sandbox %s: %s: %s",
+                env.env_id,
+                type(exc).__name__,
+                exc,
+            )
 
 
 async def is_resolved(task: TaskSpec, record: RunRecord) -> bool:

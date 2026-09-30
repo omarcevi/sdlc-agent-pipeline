@@ -1,5 +1,7 @@
 """Scoring flow against a fake sandbox. Real scoring is in tests/integration."""
 
+import logging
+
 import pytest
 
 from app.environment.base import WORKDIR, ExecResult, InfraError
@@ -59,3 +61,17 @@ async def test_sandbox_is_closed_when_scoring_raises(patch_file, monkeypatch):
     with pytest.raises(InfraError):
         await score_patch(load_task("t-1"), patch_file)
     assert env.closed
+
+
+async def test_failing_sandbox_release_does_not_change_the_score(
+    patch_file, monkeypatch, caplog
+):
+    class UnclosableEnvironment(FakeEnvironment):
+        async def close(self) -> None:
+            raise InfraError("docker command timed out: docker rm -f")
+
+    env = UnclosableEnvironment()
+    use_env(monkeypatch, env)
+    with caplog.at_level(logging.WARNING, logger="bench.score"):
+        assert await score_patch(load_task("t-1"), patch_file)
+    assert env.env_id in caplog.text and "docker rm" in caplog.text
