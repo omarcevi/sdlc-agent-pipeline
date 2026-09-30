@@ -6,20 +6,22 @@ Status: under construction. Design: `docs/superpowers/specs/2026-09-29-sdlc-agen
 
 ## Results so far
 
-First comparison, 2026-09-30: the multi-agent pipeline (planner, coder, reviewer) against a single agent that has the same tools, sandbox, guardrails, budget and test-fix loop. Five tasks on one demo repository, three repeats each, Gemini 3.8 Flash, scored by hidden tests the agents never see.
+Two runs on 2026-09-30 compare the multi-agent pipeline (planner, coder, reviewer) with a single agent that has the same tools, sandbox, guardrails and test-fix loop. Five tasks on one demo repository, three repeats each, Gemini 3.8 Flash, scored by hidden tests the agents never see.
 
-| System | Resolved | Cost per run | Cost per resolved issue | Median time |
+| Run | System | Resolved | Cost per run | Median time |
 |---|---|---|---|---|
-| Multi-agent | 12 of 15 (80%) | $0.13 | $0.17 | 147 s |
-| Single agent | 15 of 15 (100%) | $0.15 | $0.15 | 124 s |
+| Equal caps | Multi-agent | 15 of 15 | $0.16 | 249 s |
+| Equal caps | Single agent | 15 of 15 | $0.14 | 151 s |
+| First run (uneven caps) | Multi-agent | 12 of 15 | $0.13 | 147 s |
+| First run (uneven caps) | Single agent | 15 of 15 | $0.15 | 124 s |
 
 Read this with its caveats:
 
-- **This is not a benchmark yet.** Five small tasks (three easy, two medium), all from the development split, cannot separate the two systems. Both wrote near-identical fixes.
-- **The whole gap is one cap.** All three multi-agent failures are the same task, stopped by a limit of 25 tool calls per coder turn. That limit does not apply to the single agent, which used 30 to 38 calls on the same task. In each failed run the fix and its tests were already written.
-- **The reviewer never changed an outcome.** It approved all 9 patches it saw on the first round.
+- **This is not a benchmark yet.** Five small tasks (three easy, two medium), all from the development split. Both systems are at the ceiling and wrote near-identical fixes.
+- **The first run's gap was one cap.** A limit of 25 tool calls per coder turn applied to the multi-agent coder only, and stopped the same task three times with the fix already written. With one set of limits per issue for both systems ($1.00, 75 tool calls, 25 minutes), the gap is gone.
+- **On these tasks the extra agents cost more and changed nothing.** The reviewer approved every patch it saw on the first round (21 of 21 across both runs). Under equal caps the multi-agent pipeline cost about 13% more and took about 1.8 times as long on the tasks that need a patch.
 - **The Pro model run did not complete.** A reviewer call on Gemini 3.1 Pro did not return in 2 of 2 attempts, which exposed a missing time limit in the harness (since added).
 
-Full report, including every failed run and what was checked by hand: [`docs/results/2026-09-30-week2a-comparison.md`](docs/results/2026-09-30-week2a-comparison.md). How the run went, step by step, with costs: [`docs/results/2026-09-30-week2a-run-log.md`](docs/results/2026-09-30-week2a-run-log.md).
+Reports, including every failed run and what was checked by hand: [equal caps](docs/results/2026-09-30-equal-caps-comparison.md), [first run](docs/results/2026-09-30-week2a-comparison.md). How the runs went, step by step, with costs: [run log](docs/results/2026-09-30-week2a-run-log.md).
 
-Next: equal caps for both systems, more repositories and harder tasks, and a held-out split.
+Next: more repositories and harder tasks that leave headroom, and a held-out split.

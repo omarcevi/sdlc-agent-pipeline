@@ -113,3 +113,18 @@ All costs are estimates from token counts at list prices.
 - `runs/<run_id>/`: `events.jsonl`, `record.json` and `patch.diff` for every run (not committed; local only).
 - `runs/logs/`: the terminal output of each invocation (not committed).
 - Cloud Trace, project `cloud-agents-project`, root span `issue_to_pr.run`: one trace per run.
+
+## Rerun under equal caps (same day)
+
+After reading the first report, the owner decided to remove the per-turn cap so that both systems run under the same limits per issue ($1.00, 75 tool calls, 25 minutes), and to run the Flash comparison once more. Pro was left out: the reviewer hang is not explained, and each hung run would now use its full 25 minutes.
+
+| Time | Step | Result |
+|---|---|---|
+| 16:04–16:08 | Week 2A merged to `main`; cap removed on branch `equal-caps` (commit `fda8d71`) | 20 lines removed from the budget plugin. `uv run pytest -q`: 394 passed. `bench.validate`: ok for all 5 tasks. Lint clean |
+| 16:13–16:36 | `--split dev --system multi --preset flash --repeats 3 --concurrency 3` | 15 of 15 resolved, $2.42. `results/20260930T161316Z-multi-flash.json` |
+| 16:40–16:53 | `--split dev --system single --preset flash --repeats 3 --concurrency 3` | 15 of 15 resolved, $2.15. `results/20260930T164020Z-single-flash.json` |
+
+Nothing went wrong in either invocation: no infra failures, no reruns, no crashed rows, no audit flags, no sandbox left running. All 24 patches were read by hand. Report: `2026-09-30-equal-caps-comparison.md`.
+
+Rerun cost: $4.57. Total for the day: about $10.92 ($10.26 in recorded rows, plus about $0.66 estimated for the two hung Pro runs), against the estimate of about $12 for the first run alone. The hung Pro calls may be billed for output that was never received; the project's billing report is the final word.
+
