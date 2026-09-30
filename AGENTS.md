@@ -30,7 +30,7 @@ Read the spec before making architectural changes. If the code and the spec disa
 - `app/pipeline.py` builds the graph; `app/agent.py` exposes it to agents-cli as `root_agent` / `app`; `app/driver.py` (`run_pipeline`) is the entry point for bench runs and the only place that releases the sandbox.
 - `app/baseline.py` builds the single-agent baseline graph (`build_baseline_workflow`): fetch, provision, one `solo` agent (same tools, sandbox, guardrails and budget as the coder), `route_solo`, diff, tests, deliver, with the same 3-return test-fix loop. It drops only the planner and the reviewer. The per-turn tool-call cap applies to `coder` only, so `solo` is exempt; the per-run caps still apply.
 - Runner-wide plugins, in order: `BudgetPlugin` (cost and tool-call caps), ADK's `ReflectAndRetryModelPlugin(max_retries=2)` (retries malformed function calls), `GuardrailPlugin` (shell and protected-path checks), then the BigQuery analytics plugin when it is enabled. The driver inserts an internal tracker, used for failure classification, right after the budget plugin. The order matters: a plugin that returns a value stops the ones after it.
-- The driver bounds the whole event loop with `RUN_TIMEOUT_S` (`asyncio.timeout`); only the cap's own expiry becomes a `budget` failure, an outer cancellation still propagates. `bench.matrix` waits `INFRA_RETRY_PAUSE_S * k` (30 s default) before infra rerun k.
+- The driver bounds the whole event loop with `RUN_TIMEOUT_S` (`asyncio.timeout`); it cancels the in-flight work cooperatively (not a hard kill: a task that swallows cancellation could still block); only the cap's own expiry becomes a `budget` failure, an outer cancellation still propagates. `bench.matrix` waits `INFRA_RETRY_PAUSE_S * k` (30 s default) before infra rerun k.
 - Scoring (`bench/score.py`) runs inside a sandbox; model-written code never runs on the host.
 - Tracing (`app/tracing.py`) is opt-in. With `TRACE_TO_CLOUD=1`, `bench.run` exports to Cloud Trace: the driver's root span `issue_to_pr.run` (task, run ID, outcome, cost, tool calls) with ADK's workflow, agent, model-call and tool-call spans under it.
 - The pipeline's git directory is `/workspace/.pipeline-git`, outside the worktree. Diffs are taken against the baseline commit recorded in state as `baseline_sha`.
@@ -43,8 +43,8 @@ Read the spec before making architectural changes. If the code and the spec disa
 | `RUN_BUDGET_USD` | `1.00` | Per-run cost cap |
 | `MAX_TOOL_CALLS_PER_RUN` | `75` | Per-run tool-call cap |
 | `MAX_TOOL_CALLS_PER_TURN` | `25` | Tool-call cap per coder turn |
+| `RUN_TIMEOUT_S` | `1500` | Wall-clock cap per run; must stay below `SANDBOX_TTL_S`. On expiry the driver cancels the run, records a `budget` failure and releases the sandbox. Not a positive number: error before the run starts |
 | `ENVIRONMENT_BACKEND` | `docker` | Sandbox backend |
-| `RUN_TIMEOUT_S` | `1500` | Wall-clock cap per run (below the sandbox TTL). On expiry the driver cancels the run, records a `budget` failure and releases the sandbox. Not a positive number: error before the run starts |
 | `SANDBOX_IMAGE` | `issue-to-pr-sandbox:dev` | Docker image for the sandbox |
 | `SANDBOX_TTL_S` | `1800` | Seconds after which a local sandbox removes itself (self-destruct) |
 | `BENCH_TASKS_DIR`, `BENCH_REPOS_DIR` | `bench/tasks`, `bench/repos` | Bench task and repo locations |

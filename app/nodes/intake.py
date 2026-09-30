@@ -66,7 +66,9 @@ async def provision_sandbox(node_input: IssueTask):
             baseline_sha = (await env.exec(BASELINE_SHA_CMD)).stdout.strip()
             if not _SHA.fullmatch(baseline_sha):
                 raise InfraError(f"git baseline has no commit id: {baseline_sha!r}")
-        except Exception:
+        except BaseException:
+            # BaseException: a cancellation (the run's wall-clock cap, Ctrl-C) must
+            # not leave the registered sandbox behind; sandbox_id is not in state yet.
             await registry.release(env.env_id)
             raise
     yield Event(message=f"sandbox {env.env_id} ready")

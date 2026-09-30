@@ -688,3 +688,50 @@ async def test_outer_cancellation_still_propagates_and_releases_the_sandbox(
     with pytest.raises(asyncio.CancelledError):
         await task
     assert env.closed
+
+
+class BlockedUploadEnvironment(FakeEnvironment):
+    """A sandbox whose upload never finishes, so the run stalls in provisioning."""
+
+    async def upload_dir(self, local_dir, dest="/workspace") -> None:
+        await asyncio.Event().wait()
+
+
+async def test_wall_clock_cap_during_provisioning_releases_the_sandbox(
+    bench, monkeypatch
+):
+    monkeypatch.setenv("RUN_TIMEOUT_S", "0.3")
+    env = BlockedUploadEnvironment()
+    use_env(monkeypatch, env)
+    record = await run(FakeLlm([]), FakeLlm([]), FakeLlm([]))
+    assert (record.outcome, record.failure_kind) == ("failed", "budget")
+    assert env.closed
+
+
+async def test_cancelling_during_provisioning_releases_the_sandbox(bench, monkeypatch):
+    monkeypatch.setenv("RUN_TIMEOUT_S", "60")
+    env = BlockedUploadEnvironment()
+    use_env(monkeypatch, env)
+    task = asyncio.create_task(run(FakeLlm([]), FakeLlm([]), FakeLlm([])))
+    await asyncio.sleep(0.5)
+    assert not task.done()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert env.closed
+
+
+class TransportTimeoutLlm(HangingLlm):
+    async def generate_content_async(self, llm_request, stream=False):
+        raise aiohttp.ServerTimeoutError("x")
+        yield  # pragma: no cover
+
+
+async def test_transport_timeout_is_infra_not_the_wall_clock_budget(bench, monkeypatch):
+    monkeypatch.delenv("RUN_TIMEOUT_S", raising=False)
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    record = await run(TransportTimeoutLlm([]), FakeLlm([]), FakeLlm([]))
+    assert (record.outcome, record.failure_kind) == ("failed", "infra")
+    assert "wall clock" not in record.reason
+    assert env.closed
