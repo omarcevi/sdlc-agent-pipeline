@@ -380,3 +380,54 @@ def test_realistic_four_configuration_table_is_well_formed(capsys):
         assert len(widths) == 1, (header, widths)
     with capsys.disabled():
         print("\n=====RENDERED=====\n" + md + "=====END=====")
+
+
+def _table(md: str, header: str) -> list[str]:
+    return [ln for ln in _section(md, header).splitlines() if ln.startswith("|")]
+
+
+def _col(lines: list[str], i: int) -> list[str]:
+    return [ln.split("|")[i].strip() for ln in lines[2:]]
+
+
+def test_by_repo_and_by_difficulty_tables():
+    rows = [
+        row("a", repo="r1", difficulty="hard", resolved=True),
+        row("b", repo="r1", difficulty="easy", resolved=False),
+        row("c", repo="r2", difficulty="medium", resolved=True),
+        row("d", repo="r2", difficulty="easy", resolved=True),
+        row("e", repo="r2", difficulty="easy", failure_kind="infra"),
+    ]
+    md = render_markdown(summarize(rows), title="T", sources=[])
+    assert md.index("## By category") < md.index("## By repo")
+    assert md.index("## By repo") < md.index("## By difficulty")
+    for header in ("## By repo", "## By difficulty"):
+        section = _section(md, header)
+        assert "resolved / counted" in section
+        assert "repeats pooled" in section
+        assert "infra and crashed runs excluded" in section
+    repo = _table(md, "## By repo")
+    assert _col(repo, 1) == ["r1", "r2"]
+    assert _col(repo, 2) == ["1 / 2", "2 / 2"]
+    diff = _table(md, "## By difficulty")
+    assert _col(diff, 1) == ["easy", "medium", "hard"]
+    assert _col(diff, 2) == ["1 / 2", "1 / 1", "1 / 1"]
+
+
+def test_rows_without_repo_or_difficulty_load_as_unknown(tmp_path: Path):
+    old = {
+        "task_id": "tc-001",
+        "category": "bug",
+        "resolved": True,
+        "outcome": "patch_written",
+        "failure_kind": "none",
+    }
+    p = tmp_path / "r.json"
+    p.write_text(json.dumps([old]))
+    (loaded,) = load_rows([p])
+    assert (loaded["repo"], loaded["difficulty"], loaded["split"]) == ("unknown",) * 3
+    (s,) = summarize([loaded])
+    assert s.by_repo == {"unknown": (1, 1)}
+    assert s.by_difficulty == {"unknown": (1, 1)}
+    md = render_markdown([s], title="T", sources=[])
+    assert _col(_table(md, "## By difficulty"), 1) == ["unknown"]

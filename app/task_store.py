@@ -1,7 +1,7 @@
 """Bench task format: bench/tasks/<id>/{task.yaml, plant/, solution/, hidden_tests/}.
 
 A working copy is the clean repo from bench/repos/<repo>, with plant/ copied over it,
-then optionally solution/ and hidden_tests/.
+then optionally solution/ or shortcut/ (never both) and hidden_tests/.
 """
 
 import os
@@ -12,6 +12,10 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel
 
+LEVERS = frozenset(
+    {"multi_file", "distant_symptom", "doc_rule", "regression_risk", "shortcut"}
+)
+
 
 class TaskSpec(BaseModel):
     task_id: str
@@ -21,6 +25,10 @@ class TaskSpec(BaseModel):
     category: Literal["bug", "feature", "refactor", "trap"]
     difficulty: Literal["easy", "medium", "hard"]
     split: Literal["dev", "heldout"]
+    tempting: bool = False
+    # Plain strings: bench.validate rejects unknown names, so one bad task.yaml
+    # never stops list_tasks().
+    levers: list[str] = []
 
 
 def tasks_dir() -> Path:
@@ -55,9 +63,14 @@ def materialize(
     *,
     with_solution: bool = False,
     with_hidden_tests: bool = False,
+    with_shortcut: bool = False,
 ) -> Path:
+    if with_solution and with_shortcut:
+        raise ValueError("with_solution and with_shortcut are mutually exclusive")
     shutil.copytree(repos_dir() / task.repo, dest)
     _overlay(task_dir(task.task_id) / "plant", dest)
+    if with_shortcut:
+        _overlay(task_dir(task.task_id) / "shortcut", dest)
     if with_solution:
         _overlay(task_dir(task.task_id) / "solution", dest)
     if with_hidden_tests:

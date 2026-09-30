@@ -1,5 +1,9 @@
 """Check every task is well-formed: visible tests pass at base+plant, hidden tests
-fail there, and everything passes with the reference solution.
+fail there, and everything passes with the reference solution. A tempting task's
+shortcut/ must pass the visible tests and fail the hidden ones.
+
+Problems are fixed strings: no test output, test name or test source is ever
+printed, so validating a held-out task reveals nothing about it.
 
 Hidden tests must be self-contained (no reliance on the repo's conftest): scoring
 runs them from a directory outside the repo, cut off from its conftest files and
@@ -11,13 +15,52 @@ import sys
 import tempfile
 from pathlib import Path
 
-from app.task_store import TaskSpec, list_tasks, materialize, task_dir
+from app.task_store import (
+    LEVERS,
+    TaskSpec,
+    list_tasks,
+    materialize,
+    task_dir,
+    test_files,
+)
 from bench._pytest import run_pytest
 
 
-def validate_task(task: TaskSpec) -> list[str]:
+def _module_count(solution: Path) -> int:
+    """Non-test .py files in solution/."""
+    tests = set(test_files(solution))
+    return sum(
+        1
+        for p in solution.rglob("*.py")
+        if p.relative_to(solution).as_posix() not in tests
+    )
+
+
+def _metadata_problems(task: TaskSpec, directory: Path) -> list[str]:
     problems: list[str] = []
+    has_shortcut = (directory / "shortcut").is_dir()
+    if task.tempting and not has_shortcut:
+        problems.append("tempting task has no shortcut/")
+    if has_shortcut and not task.tempting:
+        problems.append("shortcut/ given but tempting is false")
+    problems += [f"unknown lever: {name}" for name in task.levers if name not in LEVERS]
+    if task.tempting and "shortcut" not in task.levers:
+        problems.append("tempting tasks must list the shortcut lever")
+    solution = directory / "solution"
+    if "multi_file" in task.levers and (
+        not solution.is_dir() or _module_count(solution) < 2
+    ):
+        problems.append("multi_file needs a solution that changes two or more modules")
+    return problems
+
+
+def _has_hidden_test_file(hidden: Path) -> bool:
+    return any(not f.endswith("conftest.py") for f in test_files(hidden))
+
+
+def validate_task(task: TaskSpec) -> list[str]:
     directory = task_dir(task.task_id)
+    problems = _metadata_problems(task, directory)
     with tempfile.TemporaryDirectory() as tmp:
         planted = materialize(task, Path(tmp) / "planted", with_hidden_tests=True)
         if not run_pytest(planted, "tests"):
@@ -31,8 +74,21 @@ def validate_task(task: TaskSpec) -> list[str]:
             or not (directory / "solution").is_dir()
         ):
             return [*problems, "non-trap tasks need hidden_tests/ and solution/"]
+        if not _has_hidden_test_file(directory / "hidden_tests"):
+            problems.append("non-trap tasks need at least one hidden test file")
         if run_pytest(planted, "hidden_tests"):
             problems.append("hidden tests already pass at base+plant")
+        if (directory / "shortcut").is_dir():
+            shortcut = materialize(
+                task,
+                Path(tmp) / "shortcut",
+                with_shortcut=True,
+                with_hidden_tests=True,
+            )
+            if not run_pytest(shortcut, "tests"):
+                problems.append("shortcut fails the visible tests")
+            if run_pytest(shortcut, "hidden_tests"):
+                problems.append("shortcut passes the hidden tests")
         solved = materialize(
             task, Path(tmp) / "solved", with_solution=True, with_hidden_tests=True
         )

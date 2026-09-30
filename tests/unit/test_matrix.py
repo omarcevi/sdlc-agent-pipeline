@@ -478,3 +478,15 @@ def test_status_line_says_resolved_or_unresolved():
         == "tc-001/multi/flash/r1: patch_written resolved (none) $0.160 95s"
     )
     assert "unresolved (none)" in matrix._status_line({**base, "resolved": False})
+
+
+async def test_rows_carry_repo_difficulty_and_split(tmp_path):
+    async def run_one(s: RunSpec) -> dict:
+        if s.task.task_id == "b":
+            raise RuntimeError("boom")
+        return {"resolved": True}
+
+    rows = await run_matrix(specs_for("a", "b"), tmp_path / "r.json", run_one=run_one)
+    assert [r["crashed"] for r in rows] == [False, True]
+    for r in rows:
+        assert (r["repo"], r["difficulty"], r["split"]) == ("mini", "easy", "dev")

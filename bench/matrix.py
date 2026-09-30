@@ -82,6 +82,9 @@ def _complete(row: dict, spec: RunSpec) -> dict:
     full = {
         "task_id": spec.task.task_id,
         "category": spec.task.category,
+        "repo": spec.task.repo,
+        "difficulty": spec.task.difficulty,
+        "split": spec.task.split,
         "system": spec.system,
         "preset": spec.preset,
         "repeat": spec.repeat,

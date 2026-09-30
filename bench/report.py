@@ -28,7 +28,11 @@ _DEFAULTS = {
     "audit": [],
     "infra_retries": 0,
     "crashed": False,
+    "repo": "unknown",
+    "difficulty": "unknown",
+    "split": "unknown",
 }
+_DIFFICULTY_ORDER = ("easy", "medium", "hard", "unknown")
 _NUMBERS = (
     "cost_usd",
     "duration_s",
@@ -74,6 +78,8 @@ class Summary:
     clean_resolve_rate_mean: float | None = None
     flagged_resolved: int = 0
     by_category: dict[str, tuple[int, int]] = field(default_factory=dict)
+    by_repo: dict[str, tuple[int, int]] = field(default_factory=dict)
+    by_difficulty: dict[str, tuple[int, int]] = field(default_factory=dict)
     # The six buckets below sum to `runs`.
     resolved: int = 0
     unresolved: int = 0  # counted, not resolved, failure_kind "none"
@@ -139,6 +145,8 @@ def _summarize_group(system: str, preset: str, rows: list[dict]) -> Summary:
         s.clean_resolve_rate_mean = statistics.fmean(clean_rates)
 
     cats: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    repos: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    diffs: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     reasons: dict[str, int] = defaultdict(int)
     for r in rows:
         bucket = _bucket(r)
@@ -158,8 +166,13 @@ def _summarize_group(system: str, preset: str, rows: list[dict]) -> Summary:
             s.crashed += 1
         if _counted(r):
             s.counted += 1
-            cats[r["category"]][1] += 1
-            cats[r["category"]][0] += bool(r["resolved"])
+            for table, key in (
+                (cats, r["category"]),
+                (repos, r.get("repo", "unknown")),
+                (diffs, r.get("difficulty", "unknown")),
+            ):
+                table[key][1] += 1
+                table[key][0] += bool(r["resolved"])
         if not r["resolved"]:
             s.not_resolved.append(
                 (run_id, bucket, _one_line(r.get("reason"), _REASON_CHARS))
@@ -167,6 +180,19 @@ def _summarize_group(system: str, preset: str, rows: list[dict]) -> Summary:
         if r["resolved"] and r["audit"]:
             s.flagged.append((run_id, list(r["audit"])))
     s.by_category = {c: (v[0], v[1]) for c, v in sorted(cats.items())}
+    s.by_repo = {c: (v[0], v[1]) for c, v in sorted(repos.items())}
+    s.by_difficulty = {
+        d: (diffs[d][0], diffs[d][1])
+        for d in sorted(
+            diffs,
+            key=lambda d: (
+                _DIFFICULTY_ORDER.index(d)
+                if d in _DIFFICULTY_ORDER
+                else len(_DIFFICULTY_ORDER),
+                d,
+            ),
+        )
+    }
     s.flagged_resolved = len(s.flagged)
     s.budget_reasons = dict(sorted(reasons.items(), key=lambda kv: (-kv[1], kv[0])))
 
@@ -304,21 +330,37 @@ def render_markdown(summaries: list[Summary], *, title: str, sources: list[str])
             "the sum, and $/resolved the total divided by resolved runs. Cost "
             "includes reruns after infra failures; crashed runs may record less "
             "than they spent.",
-            "",
-            "## By category",
-            "",
-            "Cells are resolved / counted, all repeats pooled; infra and crashed "
-            "runs excluded.",
-            "",
-            "| category | " + " | ".join(configs) + " |",
-            "|---|" + "---|" * len(summaries),
         ]
-        for c in sorted({c for s in summaries for c in s.by_category}):
-            cells = []
-            for s in summaries:
-                got, total = s.by_category.get(c, (0, 0))
-                cells.append(f"{got} / {total}" if total else "-")
-            lines.append(f"| {c} | " + " | ".join(cells) + " |")
+        for title, noun, attr, order in (
+            ("By category", "category", "by_category", None),
+            ("By repo", "repo", "by_repo", None),
+            ("By difficulty", "difficulty", "by_difficulty", _DIFFICULTY_ORDER),
+        ):
+            keys = {k for s in summaries for k in getattr(s, attr)}
+            keys = (
+                sorted(
+                    keys,
+                    key=lambda k: (order.index(k) if k in order else len(order), k),
+                )
+                if order
+                else sorted(keys)
+            )
+            lines += [
+                "",
+                f"## {title}",
+                "",
+                "Cells are resolved / counted, all repeats pooled; infra and crashed "
+                "runs excluded.",
+                "",
+                f"| {noun} | " + " | ".join(configs) + " |",
+                "|---|" + "---|" * len(summaries),
+            ]
+            for k in keys:
+                cells = []
+                for s in summaries:
+                    got, total = getattr(s, attr).get(k, (0, 0))
+                    cells.append(f"{got} / {total}" if total else "-")
+                lines.append(f"| {k} | " + " | ".join(cells) + " |")
 
         lines += ["", "## Runs that did not resolve", ""]
         if any(s.not_resolved for s in summaries):

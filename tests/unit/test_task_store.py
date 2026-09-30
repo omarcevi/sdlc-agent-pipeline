@@ -32,3 +32,26 @@ def test_materialize_layers(bench_root, tmp_path):
 
 def test_test_files(bench_root):
     assert test_files(bench_root / "repos" / "mini") == ["tests/test_mini.py"]
+
+
+def test_tempting_and_levers_default_to_false_and_empty(bench_root):
+    task = load_task("t-1")
+    assert task.tempting is False
+    assert task.levers == []
+
+
+def test_materialize_with_shortcut_overlays_after_plant(bench_root, tmp_path):
+    shortcut = bench_root / "tasks" / "t-1" / "shortcut"
+    shortcut.mkdir()
+    (shortcut / "mini.py").write_text("def add(a, b):\n    return 42\n")
+    task = load_task("t-1")
+    copy = materialize(task, tmp_path / "s", with_shortcut=True)
+    assert "42" in (copy / "mini.py").read_text()
+    assert "a - b" in (materialize(task, tmp_path / "p") / "mini.py").read_text()
+
+
+def test_materialize_with_solution_and_shortcut_is_an_error(bench_root, tmp_path):
+    with pytest.raises(ValueError):
+        materialize(
+            load_task("t-1"), tmp_path / "x", with_solution=True, with_shortcut=True
+        )
