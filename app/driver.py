@@ -2,8 +2,10 @@
 
 import time
 from collections.abc import Iterator
+from typing import Any
 
 from google.adk.apps import App
+from google.adk.plugins.base_plugin import BasePlugin
 from google.adk.runners import InMemoryRunner
 from google.adk.workflow import Workflow
 from google.genai import types
@@ -21,6 +23,29 @@ from app.schemas import FailureKind, RunRecord, RunRequest
 USER_ID = "bench"
 
 
+class _ActiveAgentTracker(BasePlugin):
+    """Remembers whether an LLM agent is mid-turn, per session.
+
+    Output-schema validation of an LLM node fails inside the workflow wrapper
+    before the agent's after_agent callback runs, so "an agent is still active"
+    distinguishes malformed model output from validation errors raised by
+    deterministic nodes.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(name="active_agent_tracker")
+        self._active: dict[str, str] = {}
+
+    def active_agent(self, session_id: str) -> str | None:
+        return self._active.get(session_id)
+
+    async def before_agent_callback(self, *, agent: Any, callback_context: Any) -> None:
+        self._active[callback_context.session.id] = agent.name
+
+    async def after_agent_callback(self, *, agent: Any, callback_context: Any) -> None:
+        self._active.pop(callback_context.session.id, None)
+
+
 def _chain(exc: BaseException) -> Iterator[BaseException]:
     seen: set[int] = set()
     current: BaseException | None = exc
@@ -30,14 +55,16 @@ def _chain(exc: BaseException) -> Iterator[BaseException]:
         current = current.__cause__ or current.__context__
 
 
-def classify_failure(exc: BaseException) -> tuple[FailureKind, str]:
+def classify_failure(
+    exc: BaseException, *, llm_agent_active: bool
+) -> tuple[FailureKind, str]:
     """Map an exception escaping the workflow to a failure kind; re-raise bugs."""
     for error in _chain(exc):
         if isinstance(error, BudgetExceeded):
             return "budget", str(error)
         if isinstance(error, InfraError):
             return "infra", str(error)
-        if isinstance(error, ValidationError):
+        if llm_agent_active and isinstance(error, ValidationError):
             return "agent", f"malformed model output: {error.errors()[0]['msg']}"
     raise exc
 
@@ -46,10 +73,11 @@ async def run_pipeline(
     request: RunRequest, *, workflow: Workflow | None = None
 ) -> RunRecord:
     budget = BudgetPlugin()
+    tracker = _ActiveAgentTracker()
     app = App(
         name="app",
         root_agent=workflow or build_workflow(RoleModels.from_env()),
-        plugins=[budget, GuardrailPlugin()],
+        plugins=[budget, tracker, GuardrailPlugin()],
     )
     runner = InMemoryRunner(app=app)
     session = await runner.session_service.create_session(
@@ -70,7 +98,9 @@ async def run_pipeline(
             ):
                 log.write(event.model_dump_json(exclude_none=True) + "\n")
     except Exception as exc:
-        failure = classify_failure(exc)
+        failure = classify_failure(
+            exc, llm_agent_active=tracker.active_agent(session.id) is not None
+        )
     finally:
         final = await runner.session_service.get_session(
             app_name="app", user_id=USER_ID, session_id=session.id

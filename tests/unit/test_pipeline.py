@@ -1,14 +1,16 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from app.driver import run_pipeline
+from app.budget import BudgetExceeded
+from app.driver import classify_failure, run_pipeline
 from app.environment.base import ExecResult, InfraError
 from app.models import RoleModels
 from app.nodes import intake
 from app.pipeline import build_workflow
 from app.schemas import PatchResult, Plan, Review, RunRequest
-from tests.fakes import FakeEnvironment, FakeLlm, call, json_out, make_bench_task
+from tests.fakes import FakeEnvironment, FakeLlm, call, json_out, make_bench_task, text
 
 DIFF = "diff --git a/mini.py b/mini.py\n--- a/mini.py\n+++ b/mini.py\n@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return a + b\n"
 PLAN = Plan(actionable=True, summary="fix add", files_to_inspect=["mini.py"])
@@ -142,3 +144,64 @@ async def test_infra_failure_is_classified(bench, monkeypatch):
     record = await run(FakeLlm([]), FakeLlm([]), FakeLlm([]))
     assert (record.outcome, record.failure_kind) == ("failed", "infra")
     assert "docker daemon down" in record.reason
+
+
+async def test_malformed_model_output_is_an_agent_failure(bench, monkeypatch):
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    record = await run(FakeLlm([text("this is not json")]), FakeLlm([]), FakeLlm([]))
+    assert (record.outcome, record.failure_kind) == ("failed", "agent")
+    assert "malformed model output" in record.reason
+    assert env.closed
+
+
+async def test_bad_task_data_is_reraised_not_blamed_on_agent(bench, monkeypatch):
+    use_env(monkeypatch, FakeEnvironment())
+    for task_yaml in (bench / "tasks").rglob("task.yaml"):
+        task_yaml.write_text("repo: mini\n")
+    with pytest.raises(ValidationError):
+        await run(FakeLlm([]), FakeLlm([]), FakeLlm([]))
+
+
+async def test_unclassified_bug_reraises_and_releases_sandbox(bench, monkeypatch):
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    with pytest.raises(AssertionError):
+        await run(FakeLlm([json_out(PLAN)]), FakeLlm([]), FakeLlm([]))
+    assert env.closed
+
+
+def _validation_error() -> ValidationError:
+    try:
+        Plan.model_validate({})
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("expected a ValidationError")
+
+
+def test_classify_budget_through_runtime_wrapper():
+    try:
+        try:
+            raise BudgetExceeded("over budget")
+        except BudgetExceeded as inner:
+            raise RuntimeError("plugin failed") from inner
+    except RuntimeError as exc:
+        assert classify_failure(exc, llm_agent_active=False) == (
+            "budget",
+            "over budget",
+        )
+
+
+def test_classify_infra():
+    kind, reason = classify_failure(InfraError("docker down"), llm_agent_active=False)
+    assert (kind, reason) == ("infra", "docker down")
+
+
+def test_classify_validation_error_with_active_agent_is_agent_failure():
+    kind, reason = classify_failure(_validation_error(), llm_agent_active=True)
+    assert kind == "agent" and "malformed model output" in reason
+
+
+def test_classify_validation_error_without_active_agent_reraises():
+    with pytest.raises(ValidationError):
+        classify_failure(_validation_error(), llm_agent_active=False)

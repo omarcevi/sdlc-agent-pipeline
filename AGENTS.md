@@ -7,7 +7,7 @@ Instructions for any coding agent (Claude Code, Gemini CLI, Codex, etc.) working
 A multi-agent system built on Google ADK 2.x that turns a GitHub issue into a tested pull request. A graph `Workflow` connects Planner, Coder and Reviewer LLM agents with deterministic function nodes. Code runs in hermetic sandboxes (local Docker or Agent Runtime Sandboxes). The system is measured with a hidden-test benchmark against a single-agent baseline.
 
 - **Design spec (source of truth):** `docs/superpowers/specs/2026-09-29-sdlc-agent-pipeline-design.md`
-- **Status:** design approved, implementation not started.
+- **Status:** Week 1 core loop implemented (bench mode only, local Docker sandbox). Live GitHub mode, the Agent Runtime sandbox backend and the web UI are not built yet.
 
 Read the spec before making architectural changes. If the code and the spec disagree, stop and ask. Do not quietly pick one.
 
@@ -24,6 +24,23 @@ Read the spec before making architectural changes. If the code and the spec disa
 6. **Keep the cost guards.** The budget plugin, sandbox TTLs and loop bounds stay on. Changing their defaults needs the owner's approval.
 7. **Don't change model names unless asked.** Models are configured through env vars (`PLANNER_MODEL`, `CODER_MODEL`, `REVIEWER_MODEL`, `BASELINE_MODEL`).
 8. **Never deploy, create cloud resources, or push to GitHub without explicit approval** from the owner, given in the current session.
+
+## Runtime wiring
+
+- `app/pipeline.py` builds the graph; `app/agent.py` exposes it to agents-cli as `root_agent` / `app`; `app/driver.py` (`run_pipeline`) is the entry point for bench runs and the only place that releases the sandbox.
+- Runner-wide plugins, in order: `BudgetPlugin` (cost and tool-call caps), `GuardrailPlugin` (shell and protected-path checks), plus the BigQuery analytics plugin when `GOOGLE_CLOUD_PROJECT` is set. The driver also adds an internal tracker used for failure classification.
+- Environment variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PLANNER_MODEL`, `CODER_MODEL`, `REVIEWER_MODEL` | `gemini-3.8-flash` | Model per role (`provider/model` strings go through LiteLLM) |
+| `RUN_BUDGET_USD` | `1.00` | Per-run cost cap |
+| `MAX_TOOL_CALLS_PER_RUN` | `75` | Per-run tool-call cap |
+| `MAX_TOOL_CALLS_PER_TURN` | `25` | Tool-call cap per coder turn |
+| `ENVIRONMENT_BACKEND` | `docker` | Sandbox backend |
+| `SANDBOX_IMAGE` | `issue-to-pr-sandbox:dev` | Docker image for the sandbox |
+| `BENCH_TASKS_DIR`, `BENCH_REPOS_DIR` | `bench/tasks`, `bench/repos` | Bench task and repo locations |
+| `RUNS_DIR` | `runs` | Per-run outputs (`events.jsonl`, `record.json`, `patch.diff`) |
 
 ## Workflow
 

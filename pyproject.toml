@@ -100,6 +100,7 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 pythonpath = "."
 testpaths = ["tests"]
+addopts = "--ignore=tests/load_test"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 filterwarnings = ["ignore:BaseAgentConfig is deprecated:DeprecationWarning"]
