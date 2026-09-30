@@ -7,7 +7,7 @@ Instructions for any coding agent (Claude Code, Gemini CLI, Codex, etc.) working
 A multi-agent system built on Google ADK 2.x that turns a GitHub issue into a tested pull request. A graph `Workflow` connects Planner, Coder and Reviewer LLM agents with deterministic function nodes. Code runs in hermetic sandboxes (local Docker or Agent Runtime Sandboxes). The system is measured with a hidden-test benchmark against a single-agent baseline.
 
 - **Design spec (source of truth):** `docs/superpowers/specs/2026-09-29-sdlc-agent-pipeline-design.md`
-- **Status:** Week 1 core loop implemented (bench mode only, local Docker sandbox). Live GitHub mode, the Agent Runtime sandbox backend and the web UI are not built yet.
+- **Status:** Core loop and measurement harness implemented (bench mode only, local Docker sandbox): the multi-agent pipeline, the single-agent baseline, the matrix runner and the report. First comparison: `docs/results/2026-09-30-week2a-comparison.md`. Live GitHub mode, the Agent Runtime sandbox backend and the web UI are not built yet.
 
 Read the spec before making architectural changes. If the code and the spec disagree, stop and ask. Do not quietly pick one.
 

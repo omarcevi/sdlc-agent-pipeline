@@ -382,3 +382,16 @@ Controls: the per-run budget cap, sandbox TTL plus sweeper, no always-on instanc
 2. Bench runs take their models from a preset (`flash`, `pro`, `mixed`) instead of the role env vars; `mixed` has no single-agent form.
 3. A model API `400` or `413` is recorded as an agent failure ("model rejected the request"); other model API and transport errors stay infra (amends item 6 of the Week 1 review block).
 4. `bench.run` runs a matrix: `--system multi|single`, `--preset`, `--repeats`, `--concurrency`. An infra failure is rerun up to twice with its cost summed; a crashed run is recorded and not rerun. Tasks are validated before any run starts, and held-out tasks need `--confirm-heldout`.
+
+**2026-09-30, from the Week 2A final review and the first comparison run.**
+
+1. A model reply with no usable answer (empty content, or no content at all, for example at the token limit or from a safety filter) from the planner, the reviewer or the single agent is an agent failure, "model returned no structured answer". It was a runner crash before, and so left out of the resolve rate (amends §6.4).
+2. `SoloResult.declined` is required, as `Plan.actionable` is (§6.1). The baseline returns a `SoloResult`, not a `PatchResult`.
+3. An unclassified exception raises `RunCrashed`, which carries the run's record, so a crashed row keeps its cost. Scoring retries an infra error twice before giving up (§9.1).
+4. New guard: `RUN_TIMEOUT_S` (default 1500 s, kept below the sandbox TTL) caps a run's wall-clock time. On expiry the driver cancels the run, records a budget failure ("run exceeded N s wall clock") and releases the sandbox. Before this, a model call that never returned hung the run forever; the caps counted dollars and tool calls only (amends §6.3). The cancellation is cooperative, not a hard kill.
+5. A rerun after an infra failure waits 30 s times the attempt number first, so a rate-limit window does not use up every attempt (amends §6.4).
+6. A sandbox that is still being provisioned is released on cancellation too (§7.3).
+7. There is no `BASELINE_MODEL` variable (§8): the baseline's model comes from the bench preset. Result files are named `results/<stamp>-<system>-<preset>.json` (§9.1).
+8. The baseline can take up to four turns (one plus three test-fix returns), not one as §6.3 says. The per-turn tool-call cap still names the `coder` agent only. The first comparison showed that this one difference accounts for the whole measured gap between the systems (3 of 15 multi-agent runs ended on it; the single agent used 30 to 38 calls on the same task). **Open decision for the owner:** apply the per-turn cap to both systems, to neither, or keep it and report it.
+9. The report (`bench/report.py`) puts every run in exactly one of six buckets (resolved, unresolved, agent, budget, infra, crashed), states each row's own sample, prints `n/a` when nothing was counted, lists budget failures by cap, and refuses duplicate rows (§9.1).
+10. Known and open: on `gemini-3.1-pro-preview` the reviewer's model call did not return in 2 of 2 runs that reached it. The cause is not known. The Pro comparison is not done.
