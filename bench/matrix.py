@@ -10,6 +10,7 @@ from google.adk.events import Event
 
 from app.driver import RunCrashed, run_pipeline
 from app.environment.base import InfraError
+from app.prompts import PROMPT_VERSION
 from app.schemas import RunRecord, RunRequest
 from app.task_store import TaskSpec
 from bench.audit import audit_patch
@@ -95,6 +96,7 @@ def _complete(row: dict, spec: RunSpec) -> dict:
         "preset": spec.preset,
         "repeat": spec.repeat,
         "run_id": spec.run_id,
+        "prompt_version": PROMPT_VERSION,
         **{k: list(v) if isinstance(v, list) else v for k, v in _DEFAULTS.items()},
     }
     if spec.variant:

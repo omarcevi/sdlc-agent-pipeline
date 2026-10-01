@@ -63,6 +63,19 @@ def _task_for(requested: str | None, record: RunRecord) -> TaskSpec:
     raise Refused(NOT_DEV)
 
 
+def _normalised(text: object) -> object:
+    if not isinstance(text, str):
+        return text
+    return text.replace("\r\n", "\n").rstrip()
+
+
+def same_issue_text(fetched: object, expected: object) -> bool:
+    """Whether the fetched issue text is the task's text. GitHub keeps what a web
+    form sent (CRLF line ends, often a trailing newline), so line-ending style and
+    trailing whitespace are not a difference."""
+    return _normalised(fetched) == _normalised(expected)
+
+
 def score_run(
     run_id: str, task_id: str | None, runs_dir: Path, out: Path
 ) -> tuple[Path, dict]:
@@ -95,7 +108,10 @@ def score_run(
     differs = (
         None
         if issue is None
-        else issue.get("title") != task.title or issue.get("body") != task.body
+        else not (
+            same_issue_text(issue.get("title"), task.title)
+            and same_issue_text(issue.get("body"), task.body)
+        )
     )
     audit: list[str] = []
     if record.patch_path:

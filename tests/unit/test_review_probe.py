@@ -289,3 +289,37 @@ def test_skip_validate_runs_without_validating(probe_store, monkeypatch):
     monkeypatch.setattr(review_probe, "validate_probe", never)
     args = ["--repeats", "1", "--out", str(probe_store / "o"), "--quiet"]
     assert review_probe.main([*args, "--skip-validate"]) == 0
+
+
+def _quick_probe_run(monkeypatch):
+    async def fake_run(spec, **kwargs):
+        return {"outcome": "patch_written", "failure_kind": "none", "kind": "bad"}
+
+    monkeypatch.setattr(review_probe, "run_probe_spec", fake_run)
+    monkeypatch.setattr(review_probe, "validate_probe", lambda probe: [])
+
+
+def test_the_runner_enables_tracing_and_flushes_it(probe_store, monkeypatch, capsys):
+    _quick_probe_run(monkeypatch)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        review_probe, "enable_cloud_trace", lambda: calls.append("enable") or True
+    )
+    monkeypatch.setattr(review_probe, "flush_traces", lambda: calls.append("flush"))
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "some-project")
+    args = ["--repeats", "1", "--out", str(probe_store / "o"), "--quiet"]
+    assert review_probe.main(args) == 0
+    assert calls == ["enable", "flush"]
+    assert "traces: " in capsys.readouterr().out
+
+
+def test_the_runner_does_not_flush_when_tracing_is_off(probe_store, monkeypatch):
+    _quick_probe_run(monkeypatch)
+    monkeypatch.setattr(review_probe, "enable_cloud_trace", lambda: False)
+
+    def never():
+        raise AssertionError("flushed")
+
+    monkeypatch.setattr(review_probe, "flush_traces", never)
+    args = ["--repeats", "1", "--out", str(probe_store / "o"), "--quiet"]
+    assert review_probe.main(args) == 0

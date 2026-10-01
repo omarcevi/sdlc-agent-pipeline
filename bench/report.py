@@ -31,6 +31,9 @@ _DEFAULTS = {
     "repo": "unknown",
     "difficulty": "unknown",
     "split": "unknown",
+    # Written by hand: this module stays free of app imports. A test keeps it equal
+    # to app.prompts.LEGACY_PROMPT_VERSION.
+    "prompt_version": "2a",
 }
 _DIFFICULTY_ORDER = ("easy", "medium", "hard", "unknown")
 _NUMBERS = (
@@ -225,6 +228,25 @@ def summarize(rows: list[dict]) -> list[Summary]:
     for r in rows:
         groups[(r["system"], r["preset"])].append(r)
     return [_summarize_group(sy, pr, groups[(sy, pr)]) for sy, pr in sorted(groups)]
+
+
+def check_prompt_versions(rows: list[dict]) -> None:
+    """Raise ValueError when one table (a system and preset) would pool rows of
+    different prompt versions: their numbers are not comparable."""
+    versions: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for r in rows:
+        versions[(r["system"], r["preset"])].add(r["prompt_version"])
+    mixed = [
+        f"{system}/{preset} has {', '.join(sorted(found))}"
+        for (system, preset), found in sorted(versions.items())
+        if len(found) > 1
+    ]
+    if mixed:
+        raise ValueError(
+            "rows of different prompt versions would be pooled ("
+            + "; ".join(mixed)
+            + "); pass --allow-mixed-prompts to pool them anyway"
+        )
 
 
 def _pct(x: float | None) -> str:
@@ -439,6 +461,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("results", nargs="+", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--title", default="Benchmark results")
+    parser.add_argument(
+        "--allow-mixed-prompts",
+        action="store_true",
+        help="pool rows of different prompt versions in one table",
+    )
     args = parser.parse_args(argv)
 
     missing = [p for p in args.results if not p.is_file()]
@@ -447,6 +474,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     rows = load_rows(args.results)
     try:
+        if not args.allow_mixed_prompts:
+            check_prompt_versions(rows)
         summaries = summarize(rows)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)

@@ -144,6 +144,51 @@ def test_cli_writes_the_file(tmp_path: Path):
     assert "# Hello" in text and "res.json" in text
 
 
+def test_rows_without_a_prompt_version_load_as_2a(tmp_path: Path):
+    src = tmp_path / "old.json"
+    src.write_text(json.dumps([row("a"), row("b", prompt_version="2c", repeat=2)]))
+    old, new = load_rows([src])
+    assert (old["prompt_version"], new["prompt_version"]) == ("2a", "2c")
+
+
+def test_the_reports_legacy_default_matches_the_prompt_module():
+    from app.prompts import LEGACY_PROMPT_VERSION
+
+    assert report._DEFAULTS["prompt_version"] == LEGACY_PROMPT_VERSION
+
+
+def _two_versions(tmp_path: Path, second: dict | None = None) -> list[str]:
+    old = tmp_path / "old.json"
+    new = tmp_path / "new.json"
+    old.write_text(json.dumps([row("a", resolved=True)]))  # no version: 2a
+    other = {"prompt_version": "2c", "repeat": 2, **(second or {})}
+    new.write_text(json.dumps([row("a", resolved=True, **other)]))
+    return [str(old), str(new)]
+
+
+def test_the_report_refuses_to_pool_prompt_versions(tmp_path: Path, capsys):
+    out = tmp_path / "out.md"
+    assert main([*_two_versions(tmp_path), "--out", str(out)]) == 2
+    err = capsys.readouterr().err
+    assert err.count("\n") == 1  # one line
+    assert "2a" in err and "2c" in err and "--allow-mixed-prompts" in err
+    assert not out.exists()
+
+
+def test_the_flag_allows_mixed_prompt_versions(tmp_path: Path):
+    out = tmp_path / "out.md"
+    args = [*_two_versions(tmp_path), "--out", str(out), "--allow-mixed-prompts"]
+    assert main(args) == 0
+    assert out.exists()
+
+
+def test_other_configurations_may_differ_in_prompt_version(tmp_path: Path):
+    # Different tables (system, preset): nothing is pooled across versions.
+    out = tmp_path / "out.md"
+    args = [*_two_versions(tmp_path, {"system": "single"}), "--out", str(out)]
+    assert main(args) == 0
+
+
 # ---- fix wave B: the report states its sample and buckets every run ----
 
 

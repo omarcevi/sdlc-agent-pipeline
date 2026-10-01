@@ -11,6 +11,7 @@ credits (planner and reviewer only).
 
 import argparse
 import asyncio
+import os
 import sys
 from collections import defaultdict
 from collections.abc import Callable
@@ -24,6 +25,7 @@ from google.adk.events import Event
 from app.driver import RunCrashed, run_pipeline
 from app.review_probe import build_review_probe_workflow
 from app.schemas import ProbeRequest
+from app.tracing import enable_cloud_trace, flush_traces, trace_explorer_url
 from bench.matrix import RunSpec, _complete, _crash_row, run_matrix
 from bench.presets import PRESETS, role_models
 from bench.probes import ProbeSpec, dev_task, list_probes, load_probe, validate_probe
@@ -269,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
         if problems:
             return _fail("invalid probes:\n  " + "\n  ".join(problems))
 
+    tracing_on = enable_cloud_trace()
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -292,6 +295,9 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.report).write_text(report)
     cost = sum(r["cost_usd"] for r in rows)
     print(f"total ${cost:.2f}  → {results_path}")
+    if tracing_on:
+        flush_traces()
+        print(f"traces: {trace_explorer_url(os.environ['GOOGLE_CLOUD_PROJECT'])}")
     return 0
 
 

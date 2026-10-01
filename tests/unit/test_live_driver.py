@@ -338,6 +338,35 @@ async def test_a_stalled_comment_is_cut_off(live, monkeypatch):
     assert record.comment_posted is False
 
 
+async def test_a_cancel_during_the_failure_comment_still_sets_the_span(
+    live, monkeypatch
+):
+    posting = asyncio.Event()
+
+    async def stalled(*args, **kwargs):
+        posting.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(driver, "post_failure_comment", stalled)
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    # No approver: the run ends at the gate as infra, and the driver comments.
+    task = asyncio.ensure_future(run_live(None, tracer=provider.get_tracer("test")))
+    await asyncio.wait_for(posting.wait(), timeout=10)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # The record was written before the comment.
+    assert (live.stored["outcome"], live.stored["failure_kind"]) == ("failed", "infra")
+    assert live.stored["comment_posted"] is False
+    [root] = [s for s in exporter.get_finished_spans() if s.name == "issue_to_pr.run"]
+    assert (root.attributes["outcome"], root.attributes["failure_kind"]) == (
+        "failed",
+        "infra",
+    )
+
+
 async def test_a_refused_live_run_never_comments(live, tmp_path):
     # The issue is fetched, then provisioning refuses the archive (it holds a link).
     live.server.archive = build(

@@ -747,7 +747,14 @@ async def _run(
         and not run_cancelled
         and not record.reason.endswith(PR_MAY_BE_OPEN)
     ):
-        if await _comment_on_failure(issue, state, record, crash is not None):
+        try:
+            posted = await _comment_on_failure(issue, state, record, crash is not None)
+        except asyncio.CancelledError as exc:
+            # Cancelled while posting: the record is already written, and the root
+            # span still gets its outcome before the cancellation is raised again.
+            cancelled = _withdraw(exc)
+            posted = False
+        if posted:
             record = record.model_copy(update={"comment_posted": True})
             _write_record(run_dir, record)
     if crash is not None:

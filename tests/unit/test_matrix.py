@@ -12,6 +12,7 @@ from app.models import RoleModels
 from app.nodes import intake
 from app.nodes.verify import TEST_CMD
 from app.pipeline import build_workflow
+from app.prompts import PROMPT_VERSION
 from app.task_store import TaskSpec, load_task
 from bench import matrix
 from bench.matrix import RunSpec, plan_runs, run_matrix, run_spec
@@ -282,6 +283,7 @@ async def test_every_row_carries_every_field(tmp_path):
         "infra_retries", "crashed", "model_stalls",
     }  # fmt: skip
     assert only["model_stalls"] == 0
+    assert only["prompt_version"] == PROMPT_VERSION == "2c"
 
 
 async def test_a_scoring_crash_keeps_the_record_numbers(bench, monkeypatch):

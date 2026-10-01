@@ -154,6 +154,28 @@ def test_score_run_flags_changed_issue_text(bench, scored):
     assert row(bench)["resolved"] is True
 
 
+def test_score_run_ignores_line_endings_and_trailing_whitespace(bench, scored):
+    tree = expected_tree_sha(load_task("t-1"))
+    # GitHub stores what a web form sent: CRLF line ends, a trailing newline.
+    write_run(
+        bench,
+        base_ref="demo/t-1",
+        tree=tree,
+        events=[issue_event("add is broken  ", "add subtracts \r\n\r\n")],
+    )
+    assert run(bench) == 0
+    assert row(bench)["issue_text_differs"] is False
+
+
+def test_the_text_comparison_normalises_both_sides():
+    same = score_run.same_issue_text
+    assert same("a\r\nb\r\n", "a\nb")  # CRLF and a missing trailing newline
+    assert same("a\nb \t\n\n", "a\nb")  # trailing whitespace
+    assert not same("a\nb", "a\nc")
+    assert not same(" a", "a")  # leading whitespace is content
+    assert not same(None, "a")
+
+
 def test_score_run_scores_a_bench_run_with_task(bench, scored, capsys):
     write_run(bench)
     assert run(bench) == 2

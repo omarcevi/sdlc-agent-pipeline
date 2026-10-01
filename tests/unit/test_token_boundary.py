@@ -37,12 +37,32 @@ TOKEN_VARIABLES = {
 }
 
 
+# Task data, not pipeline code: bench/tasks holds the sealed held-out tasks, which
+# no test may open, and bench/repos holds the repositories the tasks plant bugs in.
+SKIPPED_DATA = (ROOT / "bench" / "tasks", ROOT / "bench" / "repos")
+
+
+def _pipeline_files(package: str) -> list[Path]:
+    return [
+        path
+        for path in sorted((ROOT / package).rglob("*.py"))
+        if not any(data in path.parents for data in SKIPPED_DATA)
+    ]
+
+
 def _sources(*packages: str) -> list[tuple[str, str]]:
     return [
         (path.relative_to(ROOT).as_posix(), path.read_text())
         for package in packages
-        for path in sorted((ROOT / package).rglob("*.py"))
+        for path in _pipeline_files(package)
     ]
+
+
+def test_the_scan_skips_task_and_repo_data():
+    paths = [path for path, _ in _sources("app", "bench")]
+    assert paths  # it still scans the pipeline's own code
+    assert "bench/run.py" in paths
+    assert not [p for p in paths if p.startswith(("bench/tasks/", "bench/repos/"))]
 
 
 class _ClientUses(ast.NodeVisitor):
