@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -32,6 +33,9 @@ TEMPLATE_RESOURCES = {
     "limits": {"cpu": "2", "memory": "2Gi"},
     "requests": {"cpu": "2", "memory": "2Gi"},
 }
+# delete-engine waits for the delete as `make teardown`'s wait-clear does.
+ENGINE_DELETE_POLLS = 30
+ENGINE_DELETE_POLL_S = 10
 TERRAFORM_ROOT = Path("deployment/terraform/single-project")
 ENGINE_RE = re.compile(r"^projects/[^/]+/locations/[^/]+/reasoningEngines/[^/]+$")
 ENGINE_FORM_MESSAGE = (
@@ -300,6 +304,7 @@ class Context:
     run: Runner
     out: Callable[[str], None]
     now: datetime
+    sleep: Callable[[float], None] = time.sleep
     platform_factory: Callable[[str], Platform] | None = None
     _platform: Platform | None = None
     _outputs: dict[str, str] | None = None
@@ -322,7 +327,12 @@ class Context:
         return project
 
     def engine(self, flag: str | None) -> str:
-        engine = flag or self.environ.get("SANDBOX_ENGINE") or ""
+        """``--engine`` when given (an empty one is refused: teardown passes the
+        Terraform output, and an empty output must never fall back to another
+        engine), else SANDBOX_ENGINE, else the Terraform output."""
+        if flag is not None:
+            return check_engine_name(flag)
+        engine = self.environ.get("SANDBOX_ENGINE") or ""
         if not engine:
             engine = self.output("agent_runtime_resource_name")
         return check_engine_name(engine)
@@ -353,6 +363,29 @@ def check_engine_name(engine: str) -> str:
     if not ENGINE_RE.match(engine):
         raise UsageError(ENGINE_FORM_MESSAGE)
     return engine
+
+
+def is_not_found(error: BaseException) -> bool:
+    return (
+        getattr(error, "code", None) == 404
+        or getattr(error, "status", None) == "NOT_FOUND"
+    )
+
+
+def error_summary(error: BaseException) -> str:
+    """The error's type, then its HTTP code and status when they are a number and
+    an enum-style name: never its message, which names resources."""
+    parts = [type(error).__name__]
+    code = getattr(error, "code", None)
+    if code is None:
+        code = getattr(getattr(error, "response", None), "status_code", None)
+    if isinstance(code, int) and not isinstance(code, bool):
+        parts.append(str(int(code)))
+    status = getattr(error, "status", None)
+    status = getattr(status, "name", status)
+    if isinstance(status, str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", status):
+        parts.append(status)
+    return " ".join(parts)
 
 
 # ---- subcommands ------------------------------------------------------------
@@ -482,18 +515,49 @@ def cmd_sweep(ctx: Context, args: argparse.Namespace) -> int:
     return 0
 
 
+def _get_engine(platform: Platform, name: str) -> Engine | None:
+    """The engine, or None when it is not found."""
+    try:
+        return platform.get_engine(name)
+    except Exception as exc:
+        if is_not_found(exc):
+            return None
+        raise
+
+
 def cmd_delete_engine(ctx: Context, args: argparse.Namespace) -> int:
+    """Safe to rerun: an engine that is not found is done. The SDK's delete returns
+    before the engine is gone, so this polls until it is (bounded), and teardown's
+    next step never meets an engine that is still being deleted."""
     name = check_engine_name(args.name)
     platform = ctx.platform(name)
-    engine = platform.get_engine(name)
+    engine = _get_engine(platform, name)
+    if engine is None:
+        ctx.out("engine already gone")
+        return 0
     if engine.display_name != args.expect_display_name:
         raise Refused("engine display name does not match --expect-display-name")
     if args.dry_run:
         ctx.out(f"would delete engine {name} (force, children included)")
         return 0
-    platform.delete_engine(name, force=True)
-    ctx.out(f"deleted engine {name}")
-    return 0
+    try:
+        platform.delete_engine(name, force=True)
+    except Exception as exc:
+        if not is_not_found(exc):
+            raise
+        ctx.out("engine already gone")
+        return 0
+    for poll in range(ENGINE_DELETE_POLLS + 1):
+        if _get_engine(platform, name) is None:
+            ctx.out(f"deleted engine {name}")
+            return 0
+        if poll < ENGINE_DELETE_POLLS:
+            ctx.out(
+                "waiting for the engine to finish deleting "
+                f"({poll + 1}/{ENGINE_DELETE_POLLS})"
+            )
+            ctx.sleep(ENGINE_DELETE_POLL_S)
+    raise Refused(f"engine still there after {ENGINE_DELETE_POLLS} polls")
 
 
 def cmd_env(ctx: Context, args: argparse.Namespace) -> int:
@@ -548,6 +612,7 @@ def main(
     repo_root: Path = REPO_ROOT,
     now: datetime | None = None,
     out: Callable[[str], None] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> int:
     try:
         args = build_parser().parse_args(argv)
@@ -559,6 +624,7 @@ def main(
         run=run,
         out=out or (lambda line: print(line, flush=True)),
         now=now or datetime.now(UTC),
+        sleep=sleep,
         platform_factory=(lambda _engine: platform) if platform is not None else None,
     )
     try:
@@ -572,10 +638,10 @@ def main(
     except FileNotFoundError as exc:
         print(f"error: command not found: {exc.filename}", file=sys.stderr)
         return 2
-    except Exception as exc:  # SDK, credential and validation errors: type name only
+    except Exception as exc:  # SDK, credential and validation errors: no message text
         code = 2 if type(exc).__name__ == "DefaultCredentialsError" else 1
         print(
-            f"error: {type(exc).__name__} (see the operator's own credentials/API)",
+            f"error: {error_summary(exc)} (see the operator's own credentials/API)",
             file=sys.stderr,
         )
         return code

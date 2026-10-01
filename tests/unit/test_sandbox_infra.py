@@ -67,11 +67,23 @@ class FakeRun:
         return [c for c in self.calls if c[0] == "gcloud" and word in c]
 
 
+class NotFoundError(Exception):
+    """Shaped like the SDK's 404 (`code` and `status`)."""
+
+    code = 404
+    status = "NOT_FOUND"
+
+
 class FakePlatform:
-    def __init__(self, templates=(), sandboxes=(), engines=None):
+    """``delete_engine`` removes the engine, so the next ``get_engine`` is a 404;
+    ``engine_lingers`` keeps it listed for that many more gets."""
+
+    def __init__(self, templates=(), sandboxes=(), engines=None, engine_lingers=0):
         self.templates = list(templates)
         self.sandboxes = list(sandboxes)
         self.engines = engines or {}
+        self.engine_lingers = engine_lingers
+        self.engine_gets = 0
         self.created: list[tuple[str, dict]] = []
         self.deleted_templates: list[str] = []
         self.deleted_sandboxes: list[str] = []
@@ -100,10 +112,17 @@ class FakePlatform:
         self.deleted_sandboxes.append(name)
 
     def get_engine(self, name):
-        return self.engines[name]
+        self.engine_gets += 1
+        if name in self.engines:
+            return self.engines[name]
+        if self.deleted_engines and self.engine_lingers > 0:
+            self.engine_lingers -= 1
+            return infra.Engine(name, "issue-to-pr")
+        raise NotFoundError("engine not found")
 
     def delete_engine(self, name, *, force):
         self.deleted_engines.append((name, force))
+        self.engines.pop(name, None)
 
 
 def tmpl(name="t1", image=IMAGE, state="ACTIVE", **kw):
@@ -123,7 +142,9 @@ def sbx(name, state="STATE_RUNNING", age_s=0):
     )
 
 
-def invoke(argv, *, platform=None, run=None, environ=None, repo_root=Path("/repo")):
+def invoke(
+    argv, *, platform=None, run=None, environ=None, repo_root=Path("/repo"), sleep=None
+):
     lines: list[str] = []
     run = run or FakeRun()
     env = {"GOOGLE_CLOUD_PROJECT": "proj", **(environ or {})}
@@ -135,8 +156,13 @@ def invoke(argv, *, platform=None, run=None, environ=None, repo_root=Path("/repo
         repo_root=repo_root,
         now=NOW,
         out=lines.append,
+        sleep=sleep if sleep is not None else _no_sleep,
     )
     return code, lines, run
+
+
+def _no_sleep(seconds):
+    raise AssertionError("unexpected sleep")
 
 
 # ---- image ------------------------------------------------------------------
@@ -467,6 +493,72 @@ def test_delete_engine_checks_the_name_form():
     assert invoke(argv, platform=FakePlatform())[0] == 2
 
 
+DELETE_ENGINE = [
+    "delete-engine",
+    "--name",
+    ENGINE,
+    "--expect-display-name",
+    "issue-to-pr",
+]
+
+
+@pytest.mark.parametrize("dry_run", [[], ["--dry-run"]])
+def test_delete_engine_treats_a_missing_engine_as_done(dry_run, capsys):
+    platform = FakePlatform()
+    code, lines, _ = invoke([*DELETE_ENGINE, *dry_run], platform=platform)
+    assert code == 0
+    assert lines == ["engine already gone"]
+    assert platform.deleted_engines == []
+
+
+def test_delete_engine_treats_a_delete_that_finds_nothing_as_done():
+    class Raced(FakePlatform):
+        def delete_engine(self, name, *, force):
+            raise NotFoundError("gone meanwhile")
+
+    platform = Raced(engines={ENGINE: infra.Engine(ENGINE, "issue-to-pr")})
+    code, lines, _ = invoke(DELETE_ENGINE, platform=platform)
+    assert code == 0 and lines[-1] == "engine already gone"
+
+
+def test_delete_engine_waits_until_the_engine_is_gone():
+    platform = FakePlatform(
+        engines={ENGINE: infra.Engine(ENGINE, "issue-to-pr")}, engine_lingers=3
+    )
+    sleeps: list[float] = []
+    code, lines, _ = invoke(DELETE_ENGINE, platform=platform, sleep=sleeps.append)
+    assert code == 0
+    assert sleeps == [infra.ENGINE_DELETE_POLL_S] * 3
+    assert lines[-1] == f"deleted engine {ENGINE}"
+    assert platform.engine_gets == 1 + 4  # the display-name check, then the polls
+
+
+def test_delete_engine_gives_up_after_the_bound(capsys):
+    platform = FakePlatform(
+        engines={ENGINE: infra.Engine(ENGINE, "issue-to-pr")}, engine_lingers=10**6
+    )
+    sleeps: list[float] = []
+    code, _, _ = invoke(DELETE_ENGINE, platform=platform, sleep=sleeps.append)
+    assert code == 1
+    assert (infra.ENGINE_DELETE_POLLS, infra.ENGINE_DELETE_POLL_S) == (30, 10)
+    assert sleeps == [10] * 30
+    err = capsys.readouterr().err
+    assert err == "error: engine still there after 30 polls\n"
+
+
+def test_an_explicit_empty_engine_flag_never_falls_back(capsys):
+    """Teardown passes --engine "$(terraform output ...)": an empty output must stop
+    the step, never let SANDBOX_ENGINE or the default pick another engine."""
+    platform = FakePlatform(sandboxes=[sbx("a", age_s=99999)])
+    for argv in (
+        ["sweep", "--all", "--engine", ""],
+        ["prune-templates", "--all", "--engine", ""],
+    ):
+        code, _, _ = invoke(argv, platform=platform, environ={"SANDBOX_ENGINE": ENGINE})
+        assert code == 2
+    assert platform.deleted_sandboxes == [] and platform.deleted_templates == []
+
+
 # ---- env --------------------------------------------------------------------
 
 
@@ -637,6 +729,39 @@ def test_sdk_platform_engine_and_forced_delete():
 def test_a_sandbox_without_create_time_is_never_expired():
     box = infra.Sandbox("n", "STATE_RUNNING", None)
     assert infra.expired([box], now=NOW, ttl_s=1) == []
+
+
+class ApiError(Exception):
+    def __init__(self, message, code, status):
+        super().__init__(message)
+        self.code, self.status = code, status
+
+
+@pytest.mark.parametrize(
+    ("error", "shown"),
+    [
+        (
+            ApiError("denied on projects/1/x", 403, "PERMISSION_DENIED"),
+            "ApiError 403 PERMISSION_DENIED",
+        ),
+        (
+            ApiError("exists: projects/1/x", 409, "ALREADY_EXISTS"),
+            "ApiError 409 ALREADY_EXISTS",
+        ),
+        (ApiError("weird", "403 projects/1", "denied: projects/1"), "ApiError"),
+        (ApiError("bool", True, None), "ApiError"),
+    ],
+)
+def test_unexpected_api_errors_show_the_code_and_status_only(error, shown, capsys):
+    class Boom(FakePlatform):
+        def list_sandboxes(self, engine):
+            raise error
+
+    code, _, _ = invoke(["sweep"], platform=Boom())
+    err = capsys.readouterr().err
+    assert code == 1
+    assert err.startswith(f"error: {shown} (")
+    assert "projects/" not in err and str(error) not in err
 
 
 def test_unexpected_errors_exit_with_a_one_line_message(capsys):
