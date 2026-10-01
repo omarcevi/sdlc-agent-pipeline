@@ -1,5 +1,7 @@
+import gc
 import io
 import tarfile
+import warnings
 
 import pytest
 
@@ -193,6 +195,72 @@ def test_a_bomb_is_bounded_by_the_decompressed_size(tmp_path):
     assert path.stat().st_size < 100_000
     with pytest.raises(ArchiveError, match=archive.TOO_LARGE):
         extract_tarball(path, tmp_path / "repo", max_bytes=1_000_000)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["top/.g‌it/config", "top/.g️it/config", "top/.​git", "top/.ǴIT/x"],
+)
+def test_the_git_check_ignores_invisible_characters(tmp_path, name):
+    src = build(tmp_path / "g.tar.gz", [("top/ok", b"1"), (name, b"x")])
+    with pytest.raises(ArchiveError, match=archive.UNSAFE_PATH):
+        extract_tarball(src, tmp_path / "repo")
+
+
+@pytest.mark.parametrize("mode", ["w:bz2", "w:xz"])
+def test_only_gzip_and_plain_tar_are_accepted(tmp_path, mode):
+    path = tmp_path / "a.tar"
+    with tarfile.open(path, mode) as tar:
+        info = tarfile.TarInfo("top/f")
+        info.size = 1
+        tar.addfile(info, io.BytesIO(b"x"))
+    with pytest.raises(ArchiveError, match=archive.NOT_AN_ARCHIVE):
+        extract_tarball(path, tmp_path / "repo")
+
+
+def test_a_corrupt_xz_file_is_a_fixed_refusal(tmp_path):
+    path = tmp_path / "bad.tar.xz"
+    path.write_bytes(b"\xfd7zXZ\x00" + b"garbage" * 50)
+    with pytest.raises(ArchiveError, match=archive.NOT_AN_ARCHIVE):
+        extract_tarball(path, tmp_path / "repo")
+
+
+def test_a_plain_tar_is_accepted(tmp_path):
+    path = tmp_path / "a.tar"
+    with tarfile.open(path, "w") as tar:
+        info = tarfile.TarInfo("top/f")
+        info.size = 1
+        tar.addfile(info, io.BytesIO(b"x"))
+    assert (extract_tarball(path, tmp_path / "repo") / "f").read_text() == "x"
+
+
+def test_a_corrupted_gzip_checksum_is_refused(tmp_path):
+    src = build(tmp_path / "a.tar.gz", [("top/f", b"data" * 100)])
+    raw = bytearray(src.read_bytes())
+    raw[-8] ^= 0xFF  # the CRC32 in the gzip trailer
+    src.write_bytes(bytes(raw))
+    with pytest.raises(ArchiveError, match=archive.NOT_AN_ARCHIVE):
+        extract_tarball(src, tmp_path / "repo")
+    assert not (tmp_path / "repo").exists()
+
+
+def test_a_truncated_gzip_is_refused(tmp_path):
+    src = build(tmp_path / "a.tar.gz", [("top/f", b"data" * 100)])
+    src.write_bytes(src.read_bytes()[:-12])
+    with pytest.raises(ArchiveError, match=archive.NOT_AN_ARCHIVE):
+        extract_tarball(src, tmp_path / "repo")
+
+
+def test_no_file_handle_is_left_open(tmp_path):
+    good = build(tmp_path / "g.tar.gz", [("top/f", b"1")])
+    bad = build(tmp_path / "b.tar.gz", [("top/f", b"1"), ("top/.git/x", b"2")])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        extract_tarball(good, tmp_path / "r1")
+        with pytest.raises(ArchiveError):
+            extract_tarball(bad, tmp_path / "r2")
+        gc.collect()
+    assert [w for w in caught if issubclass(w.category, ResourceWarning)] == []
 
 
 def test_an_unreadable_archive_is_refused(tmp_path):

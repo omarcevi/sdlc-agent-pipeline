@@ -3,7 +3,6 @@
 import json
 import re
 import tempfile
-import unicodedata
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -18,6 +17,7 @@ from app.live_config import TRIGGER_LABEL, allowed_users, live_repos
 from app.nodes.finish import runs_dir
 from app.schemas import IssueTask, RunRequest
 from app.task_store import load_task, materialize, test_files
+from app.textfold import normalised
 
 # The pipeline's git directory lives outside the worktree, and every pipeline git
 # command names it explicitly. The worktree keeps a `.git` file so the coder's own
@@ -43,32 +43,20 @@ class RunRefused(Exception):
 MAX_TITLE_CHARS = 500
 MAX_BODY_CHARS = 20_000
 TRUNCATED = "\n[issue text truncated]"
-_OPEN, _CLOSE = r"(?:<|&lt;|&#0*60;|&#x0*3c;)", r"(?:>|&gt;|&#0*62;|&#x0*3e;)"
-# <issue>, </issue>, with spaces, attributes or a self-closing slash, as a raw tag
-# or as an HTML entity.
+# The opening fragment of an issue tag: `<`, or `&lt;` / `&#60;` / `&#x3c;` (also
+# escaped again, or without the semicolon), optional space, optional `/` (also
+# JSON-escaped as `\/`), the word `issue`. What follows (attributes, the closing
+# `>`) does not matter: without its opening fragment a tag is inert.
 _ISSUE_TAG = re.compile(
-    rf"{_OPEN}\s*(/?)\s*issue\b[^<>&]{{0,200}}?{_CLOSE}", re.IGNORECASE
+    r"(?:<|&(?:amp;)*(?:lt|#0*60|#x0*3c);?)\s*(\\?\s*/)?\s*issue\b", re.IGNORECASE
 )
 PLANNER_PROMPT = "Plan the change for the issue in your instructions."
 
 
-def _normalised(text: str) -> tuple[str, list[int]]:
-    """NFKC-folded text without invisible format characters, and for each of its
-    characters the index it came from in `text`."""
-    chars: list[str] = []
-    origin: list[int] = []
-    for index, char in enumerate(text):
-        if unicodedata.category(char) == "Cf":
-            continue
-        for folded in unicodedata.normalize("NFKC", char):
-            chars.append(folded)
-            origin.append(index)
-    return "".join(chars), origin
-
-
 def _defuse(text: str) -> str:
-    """Replace every issue tag in `text`, however it is spelled, by [issue] or [/issue]."""
-    folded, origin = _normalised(text)
+    """Replace the opening fragment of every issue tag in `text`, however it is
+    spelled, by `[issue` or `[/issue`."""
+    folded, origin = normalised(text)
     out: list[str] = []
     position = 0
     for match in _ISSUE_TAG.finditer(folded):
@@ -77,7 +65,7 @@ def _defuse(text: str) -> str:
         if start < position:
             continue
         out.append(text[position:start])
-        out.append(f"[{match.group(1)}issue]")
+        out.append("[/issue" if match.group(1) else "[issue")
         position = end
     out.append(text[position:])
     return "".join(out)
@@ -88,12 +76,12 @@ def _clip(text: str, limit: int) -> str:
 
 
 def format_issue_text(title: str, body: str) -> str:
-    """The issue as the agents see it: between <issue> tags, with any such tag
-    inside the title or body defused so the text cannot close the block early, and
-    with the length capped."""
-    title = _defuse(_clip(title, MAX_TITLE_CHARS))
-    body = _defuse(_clip(body, MAX_BODY_CHARS))
-    return f"<issue>\nTitle: {title}\n\n{body}\n</issue>"
+    """The issue as the agents see it: between <issue> tags, with the opening
+    fragment of any issue tag in the text neutralised so it cannot close the block,
+    and with the length capped. The neutralising runs once on the assembled text, so
+    a tag cannot be split across the title and the body."""
+    inner = f"Title: {_clip(title, MAX_TITLE_CHARS)}\n\n{_clip(body, MAX_BODY_CHARS)}"
+    return f"<issue>\n{_defuse(inner)}\n</issue>"
 
 
 def _initial_state(issue: IssueTask) -> dict:
@@ -185,7 +173,8 @@ async def fetch_live_issue(node_input: RunRequest):
             try:
                 base_sha, base_tree_sha = await client.branch_head(repo, base_ref)
             except json.JSONDecodeError:
-                raise  # a bad response, not a bad branch name
+                # A bad response, not a bad branch name. No body text in the error.
+                raise InfraError("GitHub sent a response that is not JSON") from None
             except ValueError:
                 raise RunRefused("base branch name is not valid") from None
             await client.download_tarball(repo, base_sha, archive)

@@ -2,19 +2,25 @@
 
 Host-side, so it only ever writes plain files and directories under `dest`: no
 links, no special files, no `.git` metadata, no path that leaves `dest`, no names
-that differ only by case, bounded file count and size. The decompressed stream is
-bounded while it is read, so extended headers cannot exhaust memory either. Error
-messages are fixed strings (no archive content in them).
+that differ only by case, bounded file count and size. Only gzip (what GitHub serves)
+and plain tar are read. The decompressed stream is bounded while it is read, so
+memory use is bounded too: tarfile reads an extended (long-name, pax) header whole,
+and such a header costs about 7 times its size in memory, so the worst case is about
+7 times the stream limit (roughly 400 MB for the default caps), not unbounded. The
+gzip checksum is verified. Error messages are fixed strings (no archive content in
+them).
 """
 
-import bz2
 import gzip
-import lzma
 import os
 import tarfile
-import unicodedata
+import zlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO
+
+from app.textfold import fold
 
 NOT_AN_ARCHIVE = "the archive cannot be read"
 UNSAFE_PATH = "the archive contains an unsafe path"
@@ -35,10 +41,12 @@ class ArchiveError(Exception):
 
 
 class _Limited:
-    """Reads from `source` and refuses to deliver more than `limit` bytes."""
+    """Reads from `source` and refuses to deliver more than `limit` bytes. As a
+    context manager it closes `source` and the `raw` file under it."""
 
-    def __init__(self, source: BinaryIO, limit: int) -> None:
+    def __init__(self, source: BinaryIO, raw: BinaryIO, limit: int) -> None:
         self._source = source
+        self._raw = raw
         self._left = limit
 
     def read(self, size: int = -1) -> bytes:
@@ -50,27 +58,26 @@ class _Limited:
             raise ArchiveError(TOO_LARGE)
         return data
 
-    def close(self) -> None:
-        self._source.close()
+    def __enter__(self) -> "_Limited":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        for handle in (self._source, self._raw):
+            handle.close()
 
 
 def _decompressed(archive: Path, limit: int) -> _Limited:
     raw = archive.open("rb")
     try:
-        magic = raw.read(6)
+        magic = raw.read(2)
         raw.seek(0)
-        if magic[:2] == b"\x1f\x8b":
-            source: BinaryIO = gzip.GzipFile(fileobj=raw)  # type: ignore[assignment]
-        elif magic[:3] == b"BZh":
-            source = bz2.BZ2File(raw)  # type: ignore[assignment]
-        elif magic[:6] == b"\xfd7zXZ\x00":
-            source = lzma.LZMAFile(raw)  # type: ignore[assignment]
-        else:
-            source = raw
+        source: BinaryIO = raw
+        if magic == b"\x1f\x8b":
+            source = gzip.GzipFile(fileobj=raw)
     except BaseException:
         raw.close()
         raise
-    return _Limited(source, limit)
+    return _Limited(source, raw, limit)
 
 
 def _parts(name: str) -> tuple[str, ...]:
@@ -82,16 +89,20 @@ def _parts(name: str) -> tuple[str, ...]:
         raise ArchiveError(UNSAFE_PATH)
     # Repository metadata: a `.git` directory could carry config that makes a later
     # host-side git command run a program.
-    if any(unicodedata.normalize("NFKC", part).casefold() == ".git" for part in parts):
+    if any(fold(part).casefold() == ".git" for part in parts):
         raise ArchiveError(UNSAFE_PATH)
     return parts
 
 
-def _open(archive: Path, limit: int) -> tarfile.TarFile:
-    try:
-        return tarfile.open(fileobj=_decompressed(archive, limit), mode="r|")  # ty: ignore[no-matching-overload]
-    except (tarfile.TarError, OSError, EOFError) as exc:
-        raise ArchiveError(NOT_AN_ARCHIVE) from exc
+@contextmanager
+def _open(archive: Path, limit: int) -> Iterator[tuple[tarfile.TarFile, _Limited]]:
+    with _decompressed(archive, limit) as stream:
+        try:
+            tar = tarfile.open(fileobj=stream, mode="r|")  # ty: ignore[no-matching-overload]
+        except (tarfile.TarError, OSError, EOFError, zlib.error) as exc:
+            raise ArchiveError(NOT_AN_ARCHIVE) from exc
+        with tar:
+            yield tar, stream
 
 
 def _check_member(member: tarfile.TarInfo) -> tuple[str, ...]:
@@ -122,7 +133,7 @@ def extract_tarball(
     archive, dest = Path(archive), Path(dest)
     limit = max_bytes + max_files * _PER_MEMBER_OVERHEAD + _STREAM_SLACK
     try:
-        with _open(archive, limit) as tar:
+        with _open(archive, limit) as (tar, stream):
             tops: set[str] = set()
             seen: set[str] = set()
             count = total = 0
@@ -135,7 +146,7 @@ def extract_tarball(
                 if member.isreg():
                     if len(parts) == 1:
                         raise ArchiveError(NO_SINGLE_TOP_DIR)
-                    key = unicodedata.normalize("NFC", "/".join(parts)).casefold()
+                    key = fold("/".join(parts)).casefold()
                     if key in seen:
                         raise ArchiveError(UNSAFE_PATH)
                     seen.add(key)
@@ -144,8 +155,10 @@ def extract_tarball(
                         raise ArchiveError(TOO_LARGE)
             if len(tops) != 1:
                 raise ArchiveError(NO_SINGLE_TOP_DIR)
+            while stream.read(65536):  # to the end, so the gzip checksum is checked
+                pass
         dest.mkdir(parents=True, exist_ok=True)
-        with _open(archive, limit) as tar:
+        with _open(archive, limit) as (tar, _stream):
             for member in tar:
                 parts = _check_member(member)
                 if len(parts) == 1:
@@ -154,7 +167,7 @@ def extract_tarball(
                 tar.extract(member.replace(name=relative), dest, filter="data")
         if _tree_bytes(dest) > max_bytes:
             raise ArchiveError(TOO_LARGE)
-    except (tarfile.TarError, OSError, EOFError) as exc:
+    except (tarfile.TarError, OSError, EOFError, zlib.error) as exc:
         raise ArchiveError(NOT_AN_ARCHIVE) from exc
     return dest
 

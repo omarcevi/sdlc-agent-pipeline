@@ -20,6 +20,7 @@ from bench import review_probe
 from bench.probes import list_probes
 from bench.review_probe import plan_probe_runs, run_probe_spec
 from tests.fakes import FakeEnvironment, FakeLlm, json_out
+from tests.unit.conftest import PROBE_NOTE
 from tests.unit.test_pipeline import (
     APPROVE,
     CHANGES,
@@ -31,7 +32,7 @@ from tests.unit.test_pipeline import (
     use_env,
 )
 
-NOTE = "zebra-marker"
+NOTE = PROBE_NOTE
 
 
 class RecordingLlm(FakeLlm):
@@ -47,18 +48,6 @@ class RecordingLlm(FakeLlm):
         self.seen.append("\n".join(parts))
         async for response in super().generate_content_async(llm_request, stream):
             yield response
-
-
-@pytest.fixture
-def probe_store(bench, monkeypatch):
-    monkeypatch.setenv("REVIEW_PROBES_DIR", str(bench / "probes"))
-    directory = bench / "probes" / "rp-01"
-    directory.mkdir(parents=True)
-    (directory / "probe.yaml").write_text(
-        f"task_id: t-1\nkind: bad\nsource: shortcut\nsource_run: null\nnote: {NOTE}\n"
-    )
-    (directory / "patch.diff").write_text(DIFF)
-    return bench
 
 
 def request(run_id: str = "t-1-review-flash-rp-01-r1-s") -> ProbeRequest:
