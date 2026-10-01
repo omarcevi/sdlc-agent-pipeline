@@ -34,6 +34,8 @@ def write_run(
     tree: str | None = None,
     events: list[dict] | None = None,
     outcome: str = "patch_written",
+    pr_url: str | None = None,
+    approval_wait_s: float = 0.0,
 ) -> None:
     run = root / "runs" / run_id
     run.mkdir(parents=True)
@@ -46,6 +48,8 @@ def write_run(
         mode="live" if base_ref else "bench",
         base_ref=base_ref,
         base_tree_sha=tree,
+        pr_url=pr_url,
+        approval_wait_s=approval_wait_s,
     )
     (run / "record.json").write_text(record.model_dump_json())
     if events is not None:
@@ -167,11 +171,32 @@ def test_score_run_scores_a_pr_opened_run_as_a_patch(bench, scored):
         base_ref="demo/t-1",
         tree=tree,
         outcome="pr_opened",
-        events=[
-            {"actions": {"state_delta": {"outcome": {"pr_url": "https://x/pull/1"}}}}
-        ],
+        pr_url="https://x/pull/1",
     )
     assert run(bench) == 0
     assert scored == [("t-1", "patch_written")]
     assert row(bench)["outcome"] == "pr_opened"
     assert row(bench)["pr_url"] == "https://x/pull/1"
+
+
+def test_score_run_reads_the_pr_url_and_the_wait_from_the_record(bench, scored):
+    # The driver measures the wait and keeps both in record.json; events.jsonl has
+    # no state_delta for the wait, and an old pr_url there must not win.
+    tree = expected_tree_sha(load_task("t-1"))
+    write_run(
+        bench,
+        base_ref="demo/t-1",
+        tree=tree,
+        outcome="pr_opened",
+        pr_url="https://x/pull/2",
+        approval_wait_s=12.5,
+        events=[
+            issue_event("add is broken", "add subtracts"),
+            {"actions": {"state_delta": {"outcome": {"pr_url": "https://x/pull/9"}}}},
+            {"actions": {"state_delta": {"approval_wait_s": 99.0}}},
+        ],
+    )
+    assert run(bench) == 0
+    result = row(bench)
+    assert (result["pr_url"], result["approval_wait_s"]) == ("https://x/pull/2", 12.5)
+    assert result["issue_text_differs"] is False

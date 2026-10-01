@@ -1,8 +1,11 @@
 import asyncio
 import re
+import shlex
 import shutil
 import subprocess
 import time
+import uuid
+from pathlib import Path
 
 import pytest
 
@@ -168,3 +171,27 @@ async def test_sandbox_has_no_credentials_from_the_host(monkeypatch):
     assert suspicious == {}
     for value in fakes.values():
         assert value not in result.stdout
+
+
+async def test_sandbox_cannot_see_the_token_file(monkeypatch):
+    # Under the host home: Docker Desktop shares it with its VM, so this is the
+    # place a careless mount would expose.
+    token = f"ghp_CANARY_{uuid.uuid4().hex}"
+    path = Path.home() / f".issue-to-pr-canary-{uuid.uuid4().hex}"
+    path.write_text(token + "\n")
+    path.chmod(0o600)
+    monkeypatch.setenv("GITHUB_TOKEN_FILE", str(path))
+    try:
+        environment = await DockerEnvironment.start()
+        try:
+            variables = await environment.exec("env")
+            read = await environment.exec(f"cat {shlex.quote(str(path))}")
+        finally:
+            await environment.close()
+    finally:
+        path.unlink(missing_ok=True)
+    assert variables.exit_code == 0
+    assert "GITHUB_TOKEN_FILE" not in variables.stdout
+    assert str(path) not in variables.stdout and token not in variables.stdout
+    assert read.exit_code != 0
+    assert token not in read.stdout + read.stderr

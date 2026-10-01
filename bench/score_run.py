@@ -30,27 +30,21 @@ class Refused(Exception):
     pass
 
 
-def _events(events_path: Path) -> tuple[dict | None, dict]:
-    """The fetched issue, the PR url and the approval wait, from events.jsonl."""
-    issue: dict | None = None
-    extras: dict = {}
+def _fetched_issue(events_path: Path) -> dict | None:
+    """The issue as the run fetched it, from events.jsonl. The pull request URL and
+    the approval wait are in record.json."""
     try:
         lines = events_path.read_text().splitlines()
     except OSError:
-        return None, extras
+        return None
     for line in lines:
         try:
             delta = (json.loads(line).get("actions") or {}).get("state_delta") or {}
         except (ValueError, AttributeError):
             continue
-        if issue is None and isinstance(delta.get("issue"), dict):
-            issue = delta["issue"]
-        outcome = delta.get("outcome")
-        if isinstance(outcome, dict) and outcome.get("pr_url"):
-            extras["pr_url"] = outcome["pr_url"]
-        if "approval_wait_s" in delta:
-            extras["approval_wait_s"] = delta["approval_wait_s"]
-    return issue, extras
+        if isinstance(delta.get("issue"), dict):
+            return delta["issue"]
+    return None
 
 
 def _task_for(requested: str | None, record: RunRecord) -> TaskSpec:
@@ -97,7 +91,7 @@ def score_run(
         else record
     )
     resolved = asyncio.run(is_resolved(task, scored))
-    issue, extras = _events(run_dir / "events.jsonl")
+    issue = _fetched_issue(run_dir / "events.jsonl")
     differs = (
         None
         if issue is None
@@ -129,8 +123,8 @@ def score_run(
         "review_rounds": record.review_rounds,
         "audit": audit,
         "mode": record.mode,
-        "pr_url": extras.get("pr_url"),
-        "approval_wait_s": extras.get("approval_wait_s"),
+        "pr_url": record.pr_url,
+        "approval_wait_s": record.approval_wait_s,
         "issue_text_differs": differs,
     }
     Path(out).mkdir(parents=True, exist_ok=True)

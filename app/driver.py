@@ -3,6 +3,10 @@
 A live run pauses at the approval gate: the first pass ends with a pending
 `adk_request_input` call. The driver then releases the sandbox, asks the approver,
 and resumes the same session with the decision as that call's function response.
+
+A live run that ends on a cap, an infra error or a crash never reaches the graph's
+`report_failure`, so the driver posts its failure comment (decision 10A), through
+the same `post_failure_comment`.
 """
 
 import asyncio
@@ -30,7 +34,7 @@ from app.approval import ApprovalDecision, ApprovalRequest, Approver
 from app.budget import BudgetExceeded, BudgetPlugin
 from app.environment import registry
 from app.environment.base import InfraError
-from app.github_client import GitHubError
+from app.github_client import GitHubError, GitHubUnavailable
 from app.guardrails import GuardrailPlugin
 from app.models import (
     RUN_STALLS,
@@ -39,7 +43,7 @@ from app.models import (
     StallCount,
     model_call_timeout_s,
 )
-from app.nodes.finish import runs_dir
+from app.nodes.finish import post_failure_comment, runs_dir
 from app.nodes.intake import RunRefused
 from app.pipeline import build_workflow
 from app.schemas import FailureKind, Plan, Review, RunRecord, RunRequest, SoloResult
@@ -52,9 +56,16 @@ logger = logging.getLogger(__name__)
 # pins it on a minimal workflow.
 REQUEST_INPUT = "adk_request_input"
 RESUME_TIMEOUT_S = 300.0  # the cap on the pass after the approval (delivery only)
+COMMENT_TIMEOUT_S = 120.0  # the cap on the driver's own failure comment
 APPROVAL_TIMED_OUT = ApprovalDecision(
     approved=False, approver="", patch_sha256="", note="approval timed out"
 )
+# Ctrl-C at the prompt, or any cancellation while waiting for the approver.
+APPROVAL_CANCELLED = ApprovalDecision(
+    approved=False, approver="", patch_sha256="", note="approval cancelled"
+)
+# A GitHubUnavailable from open_pr carries GitHub's own text; the record does not.
+GITHUB_UNAVAILABLE_AT_DELIVERY = "GitHub was unavailable while opening the pull request"
 
 
 def _positive_seconds(name: str, raw: str) -> float:
@@ -416,6 +427,21 @@ async def _ask(
         return APPROVAL_TIMED_OUT
 
 
+def _outer_cancellation(exc: BaseException) -> asyncio.CancelledError | None:
+    """`exc` when it is a cancellation of the run itself (a cancel request on this
+    task), to be raised again once the record is written; None when it came from
+    inside the ask (Ctrl-C at the prompt). The run's cancel requests are withdrawn
+    meanwhile, so the resumed pass runs as for any rejection."""
+    task = asyncio.current_task()
+    if not isinstance(exc, asyncio.CancelledError) or task is None:
+        return None
+    if not task.cancelling():
+        return None
+    while task.uncancel():
+        pass
+    return exc
+
+
 async def _resume(
     runner: InMemoryRunner,
     session_id: str,
@@ -443,11 +469,51 @@ async def _resume(
         if cap.expired():
             # No model runs after the gate: a stalled delivery is infra, not spend.
             reason = f"resumed run exceeded {RESUME_TIMEOUT_S:g} s wall clock"
+            if decision.approved:
+                # open_pr may have stalled after GitHub created the pull request.
+                reason += "; the pull request may have been opened"
             return ("infra", reason), None
         return _classify_or_crash(exc, tracker, session_id)
     except Exception as exc:
+        if any(isinstance(error, GitHubUnavailable) for error in _chain(exc)):
+            # Only open_pr lets one escape here (the failure comment logs its own).
+            return ("infra", GITHUB_UNAVAILABLE_AT_DELIVERY), None
         return _classify_or_crash(exc, tracker, session_id)
     return None, None
+
+
+def _driver_comments(issue: dict, record: RunRecord, crashed: bool) -> bool:
+    """Decision 10A: a live run whose issue was fetched and that ended on a cap, an
+    infra error or a crash, where the graph's report_failure never ran. Refused,
+    declined, rejected and agent-failed runs are not the driver's to comment on."""
+    if issue.get("mode") != "live":
+        return False
+    if crashed:
+        return True
+    return record.outcome == "failed" and record.failure_kind in ("budget", "infra")
+
+
+async def _comment_on_failure(issue: dict, state: dict, record: RunRecord) -> bool:
+    """Post the run's failure comment; True when it is on the issue. A failure to
+    post is logged (its type only: the text could hold GitHub's) and never raised."""
+    try:
+        async with asyncio.timeout(COMMENT_TIMEOUT_S):
+            return await post_failure_comment(
+                issue,
+                run_id=issue["run_id"],
+                outcome=record.outcome,
+                reason=record.reason,
+                plan=state.get("plan"),
+                test_report=state.get("test_report"),
+                budget=state.get("budget"),
+            )
+    except Exception as exc:
+        logger.warning("could not post the failure comment: %s", type(exc).__name__)
+        return False
+
+
+def _write_record(run_dir: Path, record: RunRecord) -> None:
+    (run_dir / "record.json").write_text(record.model_dump_json(indent=2))
 
 
 async def _run(
@@ -486,6 +552,9 @@ async def _run(
     failure: tuple[FailureKind, str] | None = None
     refused: str | None = None
     crash: Exception | None = None
+    # A cancellation of the whole run while it waited for the approver: raised again
+    # once the rejection is delivered and the record written.
+    cancelled: asyncio.CancelledError | None = None
     try:
         events: list[Event] = []
         try:
@@ -519,6 +588,11 @@ async def _run(
                 decision: ApprovalDecision | None = None
                 try:
                     decision = await _ask(approver, call, approval_limit_s)
+                except (KeyboardInterrupt, asyncio.CancelledError) as exc:
+                    # Ctrl-C at the prompt rejects: the model budget is spent, so
+                    # the run still gets its record and the issue its one comment.
+                    decision = APPROVAL_CANCELLED
+                    cancelled = _outer_cancellation(exc)
                 except Exception as exc:
                     failure, crash = _classify_or_crash(exc, tracker, session.id)
                 waited_s = time.monotonic() - asked
@@ -583,7 +657,14 @@ async def _run(
         comment_posted=bool(outcome.get("comment_posted", False)),
         model_stalls=stalls.value,
     )
-    (run_dir / "record.json").write_text(record.model_dump_json(indent=2))
+    # Written before the comment, so a stalled or cancelled post loses nothing.
+    _write_record(run_dir, record)
+    if _driver_comments(issue, record, crashed=crash is not None):
+        if await _comment_on_failure(issue, state, record):
+            record = record.model_copy(update={"comment_posted": True})
+            _write_record(run_dir, record)
+    if cancelled is not None:
+        raise cancelled
     if crash is not None:
         raise RunCrashed(record) from crash
     return record

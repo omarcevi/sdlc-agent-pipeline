@@ -1032,7 +1032,8 @@ async def test_no_approver_is_an_infra_failure_not_a_hang(live):
     assert record.reason == "approval needed but no approver"
     assert record.patch_path is None and record.approval_wait_s == 0
     assert live.env.closed
-    assert live.github.pulls == [] and live.github.comments == []
+    # An infra failure after intake: the driver comments once (decision 10A).
+    assert live.github.pulls == [] and len(live.github.comments) == 1
     assert live.stored["reason"] == "approval needed but no approver"
 
 
@@ -1088,7 +1089,9 @@ async def test_a_stalled_delivery_is_cut_off_by_the_resume_cap(live, monkeypatch
     monkeypatch.setattr(live.github, "open_pull_request", stalled, raising=False)
     record = await run_live(FakeApprover(approve))
     assert (record.outcome, record.failure_kind) == ("failed", "infra")
-    assert record.reason == "resumed run exceeded 0.2 s wall clock"
+    assert record.reason == (
+        "resumed run exceeded 0.2 s wall clock; the pull request may have been opened"
+    )
     assert live.github.pulls == []
 
 
