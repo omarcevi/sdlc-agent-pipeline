@@ -32,7 +32,13 @@ from app.environment import registry
 from app.environment.base import InfraError
 from app.github_client import GitHubError
 from app.guardrails import GuardrailPlugin
-from app.models import RoleModels
+from app.models import (
+    RUN_STALLS,
+    ModelCallStalled,
+    RoleModels,
+    StallCount,
+    model_call_timeout_s,
+)
 from app.nodes.finish import runs_dir
 from app.nodes.intake import RunRefused
 from app.pipeline import build_workflow
@@ -85,6 +91,17 @@ def run_timeout_s() -> float:
             "driver releases the sandbox before it expires"
         )
     return value
+
+
+def check_model_call_timeout(run_timeout: float) -> None:
+    """MODEL_CALL_TIMEOUT_S must be valid and stay below the run's wall-clock cap:
+    a call timeout at or above the cap could never fire before the cap does."""
+    value = model_call_timeout_s()
+    if value >= run_timeout:
+        raise ValueError(
+            f"MODEL_CALL_TIMEOUT_S ({value:g}) must stay below RUN_TIMEOUT_S "
+            f"({run_timeout:g}), or a stalled model call is never retried"
+        )
 
 
 class RunCrashed(Exception):
@@ -227,6 +244,10 @@ def classify_failure(
             # Only open_pr lets one escape (live intake turns them into refusals, the
             # failure comment logs them). A fixed reason: no response text.
             return "infra", "GitHub refused the pull request"
+        if isinstance(error, ModelCallStalled):
+            # A provider stall that outlasted one retry. It is not a TimeoutError,
+            # so the driver never takes it for the wall-clock cap.
+            return "infra", str(error)
         if isinstance(error, genai_errors.ClientError) and error.code in (400, 413):
             # The agent built a request the model cannot take, e.g. a context overflow.
             return "agent", f"model rejected the request: {error.code} {error.message}"
@@ -437,6 +458,7 @@ async def _run(
 ) -> RunRecord:
     timeout_s = run_timeout_s()
     approval_limit_s = approval_timeout_s()
+    check_model_call_timeout(timeout_s)
     budget = BudgetPlugin()
     tracker = _ActiveAgentTracker()
     app = App(
@@ -455,6 +477,9 @@ async def _run(
         role="user", parts=[types.Part.from_text(text=request.model_dump_json())]
     )
 
+    # Model calls in this run (and the tasks it starts) count their stalls here.
+    stalls = StallCount()
+    stalls_token = RUN_STALLS.set(stalls)
     started = time.monotonic()
     waited_s = 0.0
     paused = False
@@ -502,6 +527,7 @@ async def _run(
                         runner, session.id, call.id, decision, log, tracker
                     )
     finally:
+        RUN_STALLS.reset(stalls_token)
         state = await _session_state(runner, session.id)
         # Already released at the gate when the run paused; releasing is idempotent.
         await _release_sandbox(state.get("sandbox_id"))
@@ -555,6 +581,7 @@ async def _run(
         pr_url=outcome.get("pr_url"),
         approval_wait_s=round(waited_s, 2),
         comment_posted=bool(outcome.get("comment_posted", False)),
+        model_stalls=stalls.value,
     )
     (run_dir / "record.json").write_text(record.model_dump_json(indent=2))
     if crash is not None:

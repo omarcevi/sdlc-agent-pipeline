@@ -29,10 +29,13 @@ from app.nodes.verify import DIFF_CMD, NUMSTAT_CMD, TEST_CMD
 from app.pipeline import build_workflow
 from app.schemas import PatchResult, Plan, Review, RunRequest, SoloResult
 from tests.fakes import (
+    STALL,
     FakeEnvironment,
     FakeLlm,
     call,
     empty_response,
+    fake_gemini,
+    gemini_reply,
     json_out,
     malformed_call,
     no_content_response,
@@ -611,6 +614,7 @@ class HangingLlm(FakeLlm):
 
 async def test_run_exceeding_the_wall_clock_cap_is_a_budget_failure(bench, monkeypatch):
     monkeypatch.setenv("RUN_TIMEOUT_S", "0.3")
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_S", "0.1")  # must stay below the cap
     env = FakeEnvironment()
     use_env(monkeypatch, env)
     record = await run(HangingLlm([]), FakeLlm([]), FakeLlm([]))
@@ -622,6 +626,7 @@ async def test_run_exceeding_the_wall_clock_cap_is_a_budget_failure(bench, monke
 
 async def test_wall_clock_failure_keeps_the_runs_spend(bench, monkeypatch):
     monkeypatch.setenv("RUN_TIMEOUT_S", "0.5")
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_S", "0.1")
     use_env(
         monkeypatch,
         FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS}),
@@ -669,6 +674,7 @@ async def test_outer_cancellation_still_propagates_and_releases_the_sandbox(
     bench, monkeypatch
 ):
     monkeypatch.setenv("RUN_TIMEOUT_S", "60")
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_S", "30")
     env = FakeEnvironment()
     use_env(monkeypatch, env)
     task = asyncio.create_task(run(HangingLlm([]), FakeLlm([]), FakeLlm([])))
@@ -691,6 +697,7 @@ async def test_wall_clock_cap_during_provisioning_releases_the_sandbox(
     bench, monkeypatch
 ):
     monkeypatch.setenv("RUN_TIMEOUT_S", "0.3")
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_S", "0.1")
     env = BlockedUploadEnvironment()
     use_env(monkeypatch, env)
     record = await run(FakeLlm([]), FakeLlm([]), FakeLlm([]))
@@ -700,6 +707,7 @@ async def test_wall_clock_cap_during_provisioning_releases_the_sandbox(
 
 async def test_cancelling_during_provisioning_releases_the_sandbox(bench, monkeypatch):
     monkeypatch.setenv("RUN_TIMEOUT_S", "60")
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_S", "30")
     env = BlockedUploadEnvironment()
     use_env(monkeypatch, env)
     task = asyncio.create_task(run(FakeLlm([]), FakeLlm([]), FakeLlm([])))
@@ -757,6 +765,122 @@ def test_bench_graph_edges_are_unchanged():
         assert edges == BENCH_EDGES
         fetch = next(n for n in workflow.graph.nodes if n.name == "fetch_issue")
         assert fetch._func is intake.fetch_issue
+
+
+# --- per-call model timeout (MODEL_CALL_TIMEOUT_S) ---
+
+
+def gemini_answer(value) -> dict:
+    """A Gemini reply that gives the agent's final answer through set_model_response."""
+    return gemini_reply(
+        {
+            "functionCall": {
+                "name": "set_model_response",
+                "args": value.model_dump(mode="json"),
+            }
+        }
+    )
+
+
+async def test_gemini_models_that_reply_promptly_run_normally(bench, monkeypatch):
+    monkeypatch.setenv("RUN_TIMEOUT_S", "5")  # a guard, so a regression fails fast
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_S", "2")
+    use_env(
+        monkeypatch,
+        FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS}),
+    )
+    (planner, p), (coder, c), (reviewer, r) = (
+        fake_gemini([gemini_answer(PLAN)]),
+        fake_gemini([gemini_answer(PATCH)]),
+        fake_gemini([gemini_answer(APPROVE)]),
+    )
+    record = await run(planner, coder, reviewer)
+    assert (record.outcome, record.failure_kind) == ("patch_written", "none")
+    assert [len(t.requests) for t in (p, c, r)] == [1, 1, 1]
+    assert record.model_stalls == 0
+
+
+async def test_a_model_call_that_stalls_once_is_retried_and_the_run_is_normal(
+    bench, monkeypatch
+):
+    monkeypatch.setenv("RUN_TIMEOUT_S", "5")  # a guard, never reached when it works
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_S", "0.2")
+    env = FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
+    use_env(monkeypatch, env)
+    planner, transport = fake_gemini([STALL, gemini_answer(PLAN)])
+    record = await run(
+        planner, FakeLlm([json_out(PATCH)]), FakeLlm([json_out(APPROVE)])
+    )
+    assert (record.outcome, record.failure_kind) == ("patch_written", "none")
+    assert len(transport.requests) == 2
+    assert record.tokens_in == 3000  # the abandoned request returned no usage
+    assert record.model_stalls == 1
+    assert _record_on_disk(bench)["model_stalls"] == 1
+    assert env.closed
+
+
+async def test_a_model_call_that_stalls_twice_is_an_infra_failure_that_keeps_spend(
+    bench, monkeypatch
+):
+    monkeypatch.setenv("RUN_TIMEOUT_S", "5")
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_S", "0.2")
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    coder, transport = fake_gemini([STALL, STALL])
+    record = await run(FakeLlm([json_out(PLAN)]), coder, FakeLlm([]))
+    assert (record.outcome, record.failure_kind) == ("failed", "infra")
+    assert record.reason == (
+        "model call stalled twice: no reply from gemini-3.8-flash within 0.2 s"
+    )
+    assert len(transport.requests) == 2
+    assert record.tokens_in == 1000 and record.cost_usd > 0  # the planner's spend
+    assert record.model_stalls == 2
+    assert env.closed
+    assert _record_on_disk(bench)["failure_kind"] == "infra"
+
+
+async def test_the_cap_expiring_during_a_retry_is_still_the_wall_clock_budget(
+    bench, monkeypatch
+):
+    # The first call times out at about 0.5 s and is sent again; the retry would
+    # time out at about 1.0 s, but the cap expires first, at 0.9 s.
+    monkeypatch.setenv("RUN_TIMEOUT_S", "0.9")
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_S", "0.5")
+    env = FakeEnvironment()
+    use_env(monkeypatch, env)
+    planner, transport = fake_gemini([STALL, STALL])
+    record = await run(planner, FakeLlm([]), FakeLlm([]))
+    assert (record.outcome, record.failure_kind) == ("failed", "budget")
+    assert record.reason == "run exceeded 0.9 s wall clock"
+    assert len(transport.requests) == 2  # the cap expired during the retry
+    assert record.model_stalls == 1  # so this budget failure traces to a stall
+    assert env.closed
+
+
+@pytest.mark.parametrize(
+    ("value", "run_timeout"),
+    [
+        *[(bad, "1500") for bad in ("0", "-1", "abc", "", "nan", "inf")],
+        ("1500", "1500"),  # not below the cap
+        ("600", "300"),
+    ],
+)
+async def test_bad_model_call_timeout_fails_before_anything_runs(
+    bench, monkeypatch, value, run_timeout
+):
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_S", value)
+    monkeypatch.setenv("RUN_TIMEOUT_S", run_timeout)
+    started = []
+
+    async def fake_start():
+        started.append(1)
+        return FakeEnvironment()
+
+    monkeypatch.setattr(intake, "start_environment", fake_start)
+    with pytest.raises(ValueError, match="MODEL_CALL_TIMEOUT_S"):
+        await run(FakeLlm([]), FakeLlm([]), FakeLlm([]))
+    assert started == []
+    assert not (bench / "runs" / "r-1").exists()
 
 
 @pytest.mark.parametrize(

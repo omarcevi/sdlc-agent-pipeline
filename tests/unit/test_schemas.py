@@ -90,3 +90,14 @@ def test_test_report_fields_are_unchanged():
         "output_tail",
         "duration_s",
     ]
+
+
+def test_run_record_counts_model_stalls_and_old_records_still_load():
+    old = (
+        '{"task_id": "t", "run_id": "r", "outcome": "failed", "failure_kind": "infra"}'
+    )
+    assert RunRecord.model_validate_json(old).model_stalls == 0
+    record = RunRecord(
+        task_id="t", run_id="r", outcome="failed", failure_kind="infra", model_stalls=2
+    )
+    assert RunRecord.model_validate_json(record.model_dump_json()).model_stalls == 2

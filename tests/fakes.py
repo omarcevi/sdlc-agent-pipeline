@@ -1,5 +1,6 @@
 """Deterministic stand-ins for LLMs, sandboxes and tool contexts. Tests only."""
 
+import asyncio
 import json
 import shlex
 import uuid
@@ -8,6 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
+from google import genai
 from google.adk.models._capabilities import LlmCapabilities
 from google.adk.models.base_llm import BaseLlm
 from google.adk.models.llm_request import LlmRequest
@@ -17,6 +20,7 @@ from pydantic import BaseModel, PrivateAttr
 
 from app.environment import registry
 from app.environment.base import DEFAULT_TIMEOUT_S, WORKDIR, ExecResult
+from app.models import ResponseToolGemini
 from app.nodes.intake import BASELINE_SHA_CMD
 
 BASELINE_SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -131,6 +135,69 @@ class FakeLlm(BaseLlm):
                 prompt_token_count=1000, candidates_token_count=100
             ),
         )
+
+
+# A scripted Gemini reply that never comes: the provider took the request and
+# went silent.
+STALL = None
+
+
+def gemini_reply(part: dict) -> dict:
+    """A generateContent response body with one part, e.g. {"text": "..."} or
+    {"functionCall": {"name": "...", "args": {...}}}."""
+    return {
+        "candidates": [
+            {"content": {"role": "model", "parts": [part]}, "finishReason": "STOP"}
+        ],
+        "usageMetadata": {"promptTokenCount": 1000, "candidatesTokenCount": 100},
+    }
+
+
+class GeminiTransport:
+    """Fake HTTP transport under a real google-genai client: request n gets reply
+    n. A STALL reply never answers; an exception reply is raised, as a failing
+    transport would. No network is involved."""
+
+    def __init__(self, replies: list[dict | Exception | None]) -> None:
+        self._replies = list(replies)
+        self.requests: list[httpx.Request] = []
+
+    async def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if not self._replies:
+            raise AssertionError(f"script exhausted at request {len(self.requests)}")
+        reply = self._replies.pop(0)
+        if reply is STALL:
+            await asyncio.Event().wait()
+        if isinstance(reply, Exception):
+            raise reply
+        return httpx.Response(200, json=reply)
+
+
+def gemini_client(transport: GeminiTransport) -> genai.Client:
+    """A google-genai client over `transport`. It keeps the SDK's retry layer in
+    the call path, as make_model does."""
+    return genai.Client(
+        api_key="test-key",
+        vertexai=False,
+        http_options=types.HttpOptions(
+            retry_options=types.HttpRetryOptions(attempts=3),
+            httpx_async_client=httpx.AsyncClient(
+                transport=httpx.MockTransport(transport)
+            ),
+        ),
+    )
+
+
+def fake_gemini(
+    replies: list[dict | Exception | None],
+) -> tuple[ResponseToolGemini, GeminiTransport]:
+    """The production Gemini model class over a scripted transport."""
+    transport = GeminiTransport(replies)
+    model = ResponseToolGemini(
+        model="gemini-3.8-flash", client=gemini_client(transport)
+    )
+    return model, transport
 
 
 class FakeEnvironment:

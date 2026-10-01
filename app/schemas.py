@@ -155,3 +155,6 @@ class RunRecord(BaseModel):
     # Time spent waiting for the approver of a live run; duration_s excludes it.
     approval_wait_s: float = 0.0
     comment_posted: bool = False
+    # Model call timeouts (MODEL_CALL_TIMEOUT_S, app/models.py): each counts, so a
+    # call that stalled twice counts 2. Older records load as 0.
+    model_stalls: int = 0

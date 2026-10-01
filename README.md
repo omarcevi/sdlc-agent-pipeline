@@ -6,6 +6,27 @@ Status: under construction. Design: `docs/superpowers/specs/2026-09-29-sdlc-agen
 
 ## Results so far
 
+### 15 tasks on three repositories (2026-10-01)
+
+The multi-agent pipeline (planner, coder, reviewer) against a single agent with the same tools, sandbox, guardrails, test-fix loop and caps. Fifteen development tasks on three demo repositories (bugs, features, a refactor and traps that should be declined), three repeats each, Gemini 3.8 Flash, scored by hidden tests the agents never see.
+
+| System | Resolved | Cost per run | Cost per resolved | Median time |
+|---|---|---|---|---|
+| Multi-agent | 34 of 45 | $0.43 | $0.57 | 319 s |
+| Single agent | 36 of 45 | $0.38 | $0.47 | 171 s |
+
+Read this with its caveats:
+
+- **The same three tasks failed for both systems, for the same reason.** The three multi-file features ran out of the $1.00 per-run budget in every run, nine times each, with the change mostly written. The planner did not make them cheaper: the coder's context still grew past a million input tokens.
+- **The rest of the gap is two stalled model calls.** Two multi-agent runs on easy tasks waited on a model reply that never came, and the wall-clock cap ended them. Without those two runs, the multi-agent pipeline resolves 34 of 43 (79%) against the single agent's 36 of 45 (80%). The harness now gives up on a stalled call after 8 minutes and retries it once, instead of waiting for the run's cap.
+- **The planner and the reviewer changed no outcome.** No test-fix or review loop was entered in 90 runs; the reviewer approved all 28 patches it saw. On two tasks built to tempt a narrow fix, both systems fixed the root cause in all 12 runs.
+- **The extra agents cost more.** On the resolved tasks that need a patch, the multi-agent pipeline used about 42 tool calls per run against 23, and $0.35 against $0.26.
+- **Fifteen tasks is a small sample.** One task is 6.7 points of resolve rate. Five more tasks are held out, sealed, and run once at the end of the project.
+
+Report, including every failed run and what was checked by hand: [comparison](docs/results/2026-10-01-2b-comparison.md). How the run went, with costs: [run log](docs/results/2026-10-01-2b-run-log.md). How the tasks were checked before it: [pilot log](docs/results/2026-09-30-2b-pilot-log.md).
+
+### 5 tasks on one repository (2026-09-30)
+
 Two runs on 2026-09-30 compare the multi-agent pipeline (planner, coder, reviewer) with a single agent that has the same tools, sandbox, guardrails and test-fix loop. Five tasks on one demo repository, three repeats each, Gemini 3.8 Flash, scored by hidden tests the agents never see.
 
 | Run | System | Resolved | Cost per run | Median time |
@@ -24,4 +45,4 @@ Read this with its caveats:
 
 Reports, including every failed run and what was checked by hand: [equal caps](docs/results/2026-09-30-equal-caps-comparison.md), [first run](docs/results/2026-09-30-week2a-comparison.md). How the runs went, step by step, with costs: [run log](docs/results/2026-09-30-week2a-run-log.md).
 
-Next: more repositories and harder tasks that leave headroom, and a held-out split.
+Next: live mode on real GitHub issues with a human approval step, and quality evals for the plan and the pull request text.

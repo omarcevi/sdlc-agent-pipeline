@@ -79,6 +79,7 @@ _DEFAULTS: dict = {
     "audit": [],
     "infra_retries": 0,
     "crashed": False,
+    "model_stalls": 0,
 }
 
 
@@ -218,7 +219,8 @@ async def run_matrix(
 
     async def run_with_retries(spec: RunSpec) -> dict:
         row = await attempt(spec)
-        cost = row["cost_usd"]
+        # Cost and model stalls add up over the reruns; the rest is the last run's.
+        cost, stalls = row["cost_usd"], row["model_stalls"]
         retries = 0
         while (
             row["failure_kind"] == "infra"
@@ -229,8 +231,10 @@ async def run_matrix(
             await asyncio.sleep(INFRA_RETRY_PAUSE_S * retries)
             row = await attempt(replace(spec, attempt=retries))
             cost += row["cost_usd"]
+            stalls += row["model_stalls"]
         row["infra_retries"] = retries
         row["cost_usd"] = cost
+        row["model_stalls"] = stalls
         return row
 
     async def worker(spec: RunSpec) -> None:

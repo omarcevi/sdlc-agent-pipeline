@@ -16,13 +16,14 @@ from app.task_store import TaskSpec, load_task
 from bench import matrix
 from bench.matrix import RunSpec, plan_runs, run_matrix, run_spec
 from bench.presets import workflow_for
-from tests.fakes import FakeEnvironment, FakeLlm, json_out
+from tests.fakes import STALL, FakeEnvironment, FakeLlm, fake_gemini, json_out
 from tests.unit.test_pipeline import (
     APPROVE,
     PASS,
     PATCH,
     PLAN,
     diff_responses,
+    gemini_answer,
     use_env,
 )
 
@@ -188,6 +189,18 @@ async def test_infra_failures_are_retried_then_recorded(tmp_path):
     assert only["crashed"] is False
 
 
+async def test_model_stalls_add_up_over_infra_reruns_like_cost(tmp_path):
+    stalled = {**row(0.1, "infra"), "reason": "model call stalled twice: ..."}
+    outcomes = [{**stalled, "model_stalls": 2}, {**row(0.3), "model_stalls": 1}]
+
+    async def flaky(s: RunSpec) -> dict:
+        return outcomes.pop(0)
+
+    (only,) = await run_matrix(specs_for("a"), tmp_path / "r.json", run_one=flaky)
+    assert only["infra_retries"] == 1 and only["resolved"] is True
+    assert only["model_stalls"] == 3
+
+
 async def test_infra_reruns_wait_a_growing_pause_first(tmp_path, monkeypatch):
     monkeypatch.setattr(matrix, "INFRA_RETRY_PAUSE_S", 30.0)
     events: list = []
@@ -266,8 +279,9 @@ async def test_every_row_carries_every_field(tmp_path):
         "task_id", "category", "system", "preset", "repeat", "run_id", "resolved",
         "outcome", "failure_kind", "reason", "cost_usd", "duration_s", "tool_calls",
         "tokens_in", "tokens_out", "test_attempts", "review_rounds", "audit",
-        "infra_retries", "crashed",
+        "infra_retries", "crashed", "model_stalls",
     }  # fmt: skip
+    assert only["model_stalls"] == 0
 
 
 async def test_a_scoring_crash_keeps_the_record_numbers(bench, monkeypatch):
@@ -361,6 +375,36 @@ async def test_a_pipeline_crash_after_spending_shows_the_spend(bench, monkeypatc
     assert result["reason"].startswith("unhandled AssertionError: ")
     assert (result["outcome"], result["failure_kind"]) == ("failed", "infra")
     assert result["cost_usd"] > 0 and result["tokens_in"] > 0
+
+
+async def test_a_row_carries_the_runs_model_stalls(bench, monkeypatch):
+    monkeypatch.setenv("RUN_TIMEOUT_S", "5")
+    monkeypatch.setenv("MODEL_CALL_TIMEOUT_S", "0.2")
+
+    async def resolved(task, record):
+        return True
+
+    monkeypatch.setattr(matrix, "is_resolved", resolved)
+    use_env(
+        monkeypatch, FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
+    )
+
+    def stalling_workflow(system: str, preset: str):
+        planner, _ = fake_gemini([STALL, gemini_answer(PLAN)])
+        return build_workflow(
+            RoleModels(
+                planner=planner,
+                coder=FakeLlm([json_out(PATCH)]),
+                reviewer=FakeLlm([json_out(APPROVE)]),
+            )
+        )
+
+    result = await run_spec(
+        RunSpec(load_task("t-1"), "multi", "flash", 1, "s"),
+        workflow_factory=stalling_workflow,
+    )
+    assert result["resolved"] and result["failure_kind"] == "none"
+    assert result["model_stalls"] == 1
 
 
 # --- A4: scoring retries infra errors ---
