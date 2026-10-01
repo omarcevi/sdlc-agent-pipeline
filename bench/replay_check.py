@@ -7,7 +7,8 @@ and nothing printed, raised or returned contains the matched text.
 Documented limits (not detected): lower-case 32-hex secrets, upper-case 64-hex
 or 12-hex container ids, URL-encoded paths and addresses, look-alike
 (homoglyph) letters, and a secret diluted below 4.0 bits per character by a
-long low-entropy run next to it. A file with a repeated JSON key is refused.
+long low-entropy run next to it. A file with a repeated JSON key is refused. The invisible-character second
+scan covers Cf (format) characters only.
 """
 
 from __future__ import annotations
@@ -47,10 +48,9 @@ EXACT_RULES_OFF = (
 DEFAULT_DIR = Path("web/public/replays")
 
 _HOST_PATH = re.compile(
-    r"[/\\]{1,2}(?:users|home|root)[/\\]{1,2}"
+    r"[/\\]{1,2}(?:Users|home|root)[/\\]{1,2}"
     r"|[/\\]{1,2}var[/\\]{1,2}folders[/\\]{1,2}"
-    r"|[A-Za-z]:[/\\]{1,2}users[/\\]{1,2}",
-    re.IGNORECASE,
+    r"|[A-Za-z]:[/\\]{1,2}(?i:users)[/\\]{1,2}"
 )
 _GITHUB = re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}|github_pat_")
 _GOOGLE = re.compile(r"AIza[0-9A-Za-z_-]{35}|ya29\.")
@@ -290,10 +290,15 @@ def _read_allow(index_path: Path) -> dict[str, frozenset[tuple[str, str]]]:
     return allow
 
 
-def _expand(paths: Sequence[Path]) -> list[Path]:
-    files: list[Path] = []
+def _expand(paths: Sequence[Path]) -> list[tuple[Path, str]]:
+    """(file, name shown in reports): relative to the scanned directory."""
+    files: list[tuple[Path, str]] = []
     for p in paths:
-        files.extend(sorted(p.rglob("*.json")) if p.is_dir() else [p])
+        if p.is_dir():
+            found = sorted(p.rglob("*.json"))
+            files.extend((f, f.relative_to(p).as_posix()) for f in found)
+        else:
+            files.append((p, p.name))
     return files
 
 
@@ -302,20 +307,23 @@ def check_paths(paths: Sequence[Path], *, exact: Sequence[str] = ()) -> list[Hit
 
     ``allow`` comes from the ``index.json`` beside each file, when there is one.
     Each file is decoded and every string scanned, then its raw text is scanned
-    with the unclearable rules only, under path ``$``.
+    with the unclearable rules only, under path ``$``. Hits name the file
+    relative to the scanned directory. No file at all is an error.
     """
+    files = _expand(paths)
+    if not files:
+        raise ReplayFileError("no replay files found")
     hits: list[Hit] = []
     allow_by_dir: dict[Path, dict[str, frozenset[tuple[str, str]]]] = {}
-    for path in _expand(paths):
+    for path, shown in files:
         index = path.parent / "index.json"
         if path.parent not in allow_by_dir:
             allow_by_dir[path.parent] = _read_allow(index) if index.is_file() else {}
         text, data = _load_json(path)
         allow = allow_by_dir[path.parent].get(path.name, frozenset())
-        hits += scan_value(data, file=path.name, exact=exact, allow=allow)
+        hits += scan_value(data, file=shown, exact=exact, allow=allow)
         hits += [
-            Hit(path.name, "$", rule)
-            for rule in scan_text(text, exact, only=_RAW_RULES)
+            Hit(shown, "$", rule) for rule in scan_text(text, exact, only=_RAW_RULES)
         ]
     return hits
 
@@ -327,14 +335,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not exact:
         print(EXACT_RULES_OFF)
     try:
-        files = _expand(paths)
         hits = check_paths(paths, exact=exact)
+        count = len(_expand(paths))
     except ReplayFileError as err:
         print(err, file=sys.stderr)
         return 2
     for hit in hits:
         print(hit)
-    print(f"{len(files)} files checked, {len(hits)} problems")
+    print(f"{count} files checked, {len(hits)} problems")
     return 1 if hits else 0
 
 

@@ -335,7 +335,6 @@ def test_duplicate_keys_are_refused(tmp_path, capsys):
         "c:\\users\\bob",
         "c:\\Users\\bob",
         "D:\\Users\\bob",
-        "/users/omar/x",
         "\\/var\\/folders\\/ab",
     ],
 )
@@ -376,7 +375,7 @@ def test_deep_nesting_does_not_escape_main(tmp_path):
 def test_directories_are_scanned_recursively(tmp_path):
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "x.json").write_text(json.dumps({"a": SAMPLES["sandbox"]}))
-    assert [h.file for h in check_paths([tmp_path])] == ["x.json"]
+    assert [h.file for h in check_paths([tmp_path])] == ["sub/x.json"]
 
 
 def test_key_hits_are_numbered_per_key():
@@ -399,3 +398,49 @@ def test_split_tokens_are_caught_after_stripping_invisibles():
     assert "github-token" in scan_text(token[:3] + "\u200b" + token[3:])
     assert "github-token" in scan_text(token[:3] + "<U+200B>" + token[3:])
     assert "private-key" in scan_text("-----BEGIN PGP PRIVATE KEY BLOCK-----")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "GET /users/42",
+        "src/users/models.py",
+        "tests\\users\\test_x.py",
+        "docs/Home/index.md",
+    ],
+)
+def test_host_path_has_no_false_positives_on_ordinary_paths(text):
+    assert "host-path" not in scan_text(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "/Users/omar/x",
+        "/home/runner/x",
+        "/root/.ssh",
+        "/var/folders/ab/c",
+        "C:\\users\\b",
+    ],
+)
+def test_host_path_real_paths_still_hit(text):
+    assert "host-path" in scan_text(text)
+
+
+def test_nothing_to_check_is_exit_2(tmp_path, capsys):
+    assert main([str(tmp_path)]) == 2
+    assert "no replay files found" in capsys.readouterr().err
+    (tmp_path / "notes.txt").write_text("x")
+    assert main([str(tmp_path)]) == 2
+    with pytest.raises(rc.ReplayFileError, match="no replay files found"):
+        check_paths([tmp_path])
+
+
+def test_hit_file_is_relative_to_the_scanned_root(tmp_path):
+    for d in ("a", "b"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "x.json").write_text(json.dumps({"k": SAMPLES["sandbox"]}))
+    files = sorted(h.file for h in check_paths([tmp_path]))
+    assert files == ["a/x.json", "b/x.json"]
+    (single,) = check_paths([tmp_path / "a" / "x.json"])
+    assert single.file == "x.json"
