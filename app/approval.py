@@ -76,8 +76,10 @@ def _load_termios() -> Any:
 termios: Any = _load_termios()
 
 # Shown escaped besides newline and tab: categories Cc (controls), Cf (format:
-# bidi overrides, zero-width characters, tags), Zl and Zp (U+2028, U+2029).
-_ESCAPED_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+# bidi overrides, zero-width characters, tags), Zl and Zp (U+2028, U+2029), and Cs
+# (lone surrogates: a stdout with surrogateescape writes U+DC80..U+DCFF as raw
+# bytes, U+DC9B as 0x9B, the C1 control sequence introducer).
+_ESCAPED_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp", "Cs"})
 # The Default_Ignorable_Code_Point characters outside category Cf (Unicode 15.1,
 # DerivedCoreProperties.txt). They render as nothing, so text can hide in them.
 _IGNORABLE_RANGES = (
@@ -206,6 +208,14 @@ class TerminalApprover:
         self._show(
             f"Run so far: ${request.cost_usd:.4f}, {request.tool_calls} tool calls"
         )
+        self._show()
+        # Repeated last, so the decision's context is on screen even when the
+        # patch and the body have scrolled past.
+        self._show("Deciding on:")
+        self._show(f"  Repository: {request.repo}")
+        self._show(f"  Planned branch: {request.branch}")
+        self._show(f"  Files: {len(request.files)}")
+        self._show(f"  Patch SHA-256: {shown_sha256}")
         self._stdout.flush()
         _discard_type_ahead(self._stdin)
         print(_visible(PROMPT), end="", file=self._stdout, flush=True)

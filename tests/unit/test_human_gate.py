@@ -535,6 +535,52 @@ async def test_a_long_file_list_is_cut(tmp_path):
     assert "Diff: 5000 files" in shown
 
 
+async def test_a_lone_surrogate_is_shown_escaped(tmp_path):
+    # Written to a stdout with surrogateescape, U+DC9B would be the raw byte 0x9B,
+    # the C1 control sequence introducer of an 8-bit terminal.
+    surrogate = chr(0xDC9B)
+    escaped = f"\\u{{{ord(surrogate):04x}}}"
+    shown = await _shown(
+        tmp_path,
+        pr_title=f"[issue-to-pr] Parser{surrogate}loses rows",
+        pr_body=f"body{surrogate}text\n",
+        files=[f"pkg/mod{surrogate}.py"],
+    )
+    assert surrogate not in shown
+    assert f"Planned title: [issue-to-pr] Parser{escaped}loses rows" in shown
+    assert f"body{escaped}text" in shown and f"  pkg/mod{escaped}.py" in shown
+
+
+async def test_the_decision_is_recapped_right_before_the_prompt(tmp_path):
+    files = [f"pkg/module_{n:04d}.py" for n in range(150)]
+    patch = "".join(f"+line {n}\n" for n in range(1, 451))
+    shown = await _shown(tmp_path, patch=patch, files=files)
+    shown_sha256 = hashlib.sha256(patch.encode()).hexdigest()
+    recap = (
+        "Deciding on:\n"
+        f"  Repository: {REPO}\n"
+        "  Planned branch: issue-to-pr/7-run-7\n"
+        "  Files: 150\n"
+        f"  Patch SHA-256: {shown_sha256}\n"
+    )
+    # Last thing before the prompt, after the run's spend: on screen even when the
+    # patch and the body have scrolled past.
+    assert shown.endswith(recap + PROMPT)
+    assert shown.index("Run so far") < shown.rindex(recap)
+
+
+async def test_the_recap_names_the_patch_the_decision_binds_to(tmp_path):
+    request = _request(tmp_path)
+    (tmp_path / "patch.diff").write_text(DIFF + "+sneaked in\n")
+    out = io.StringIO()
+    decision = await TerminalApprover(
+        "octocat", stdin=io.StringIO("approve\n"), stdout=out
+    )(request)
+    recap = out.getvalue()[out.getvalue().rindex("Deciding on:") :]
+    assert f"  Patch SHA-256: {decision.patch_sha256}\n" in recap
+    assert request.patch_sha256 not in recap
+
+
 class FakeTerminal(io.StringIO):
     """A stdin that says it is a terminal, on a made-up file descriptor."""
 
