@@ -90,6 +90,17 @@ def test_run_ids_and_labels_are_unique_per_spec():
     assert replace(first, attempt=2).run_id == "a-multi-flash-r1-s-retry2"
 
 
+def test_variant_makes_run_ids_unique_and_leaves_old_ids_unchanged():
+    base = specs_for("a")[0]
+    assert (base.label, base.run_id) == ("a/multi/flash/r1", "a-multi-flash-r1-s")
+    one = replace(base, system="review", variant="rp-01")
+    two = replace(base, system="review", variant="rp-02")
+    assert one.label == "a/review/flash/rp-01/r1"
+    assert one.run_id == "a-review-flash-rp-01-r1-s"
+    assert one.run_id != two.run_id and one.label != two.label
+    assert replace(one, attempt=2).run_id == "a-review-flash-rp-01-r1-s-retry2"
+
+
 def test_workflow_for_rejects_an_unknown_system():
     with pytest.raises(ValueError, match="unknown system"):
         workflow_for("triple", "flash")

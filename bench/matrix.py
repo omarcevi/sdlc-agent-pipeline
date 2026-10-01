@@ -35,17 +35,22 @@ class RunSpec:
     repeat: int
     stamp: str
     attempt: int = 0
+    # Tells apart runs of one task that differ in something else (a reviewer probe).
+    variant: str = ""
 
     @property
     def label(self) -> str:
-        return f"{self.task.task_id}/{self.system}/{self.preset}/r{self.repeat}"
+        parts = [self.task.task_id, self.system, self.preset]
+        if self.variant:
+            parts.append(self.variant)
+        return "/".join([*parts, f"r{self.repeat}"])
 
     @property
     def run_id(self) -> str:
-        base = (
-            f"{self.task.task_id}-{self.system}-{self.preset}-r{self.repeat}-"
-            f"{self.stamp}"
-        )
+        head = f"{self.task.task_id}-{self.system}-{self.preset}"
+        if self.variant:
+            head += f"-{self.variant}"
+        base = f"{head}-r{self.repeat}-{self.stamp}"
         return f"{base}-retry{self.attempt}" if self.attempt > 0 else base
 
 
@@ -91,6 +96,8 @@ def _complete(row: dict, spec: RunSpec) -> dict:
         "run_id": spec.run_id,
         **{k: list(v) if isinstance(v, list) else v for k, v in _DEFAULTS.items()},
     }
+    if spec.variant:
+        full["variant"] = spec.variant
     full.update(row)
     return full
 
@@ -169,7 +176,10 @@ def _print_progress(label: str) -> OnEvent:
 
 
 def _status_line(row: dict) -> str:
-    label = f"{row['task_id']}/{row['system']}/{row['preset']}/r{row['repeat']}"
+    parts = [row["task_id"], row["system"], row["preset"]]
+    if row.get("variant"):
+        parts.append(row["variant"])
+    label = "/".join([*parts, f"r{row['repeat']}"])
     if row["crashed"]:
         return f"{label}: crashed ({row['reason']})"
     verdict = "resolved" if row["resolved"] else "unresolved"
@@ -228,7 +238,7 @@ async def run_matrix(
             row = await run_with_retries(spec)
         async with lock:
             rows.append(row)
-            rows.sort(key=lambda r: (r["repeat"], r["task_id"]))
+            rows.sort(key=lambda r: (r["repeat"], r["task_id"], r.get("variant", "")))
             try:
                 results_path.write_text(json.dumps(rows, indent=2))
             finally:

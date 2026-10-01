@@ -15,6 +15,12 @@ class RunRequest(BaseModel):
     run_id: str
 
 
+class ProbeRequest(RunRequest):
+    """Input of the reviewer-probe graph: a run of one prepared patch (bench/probes.py)."""
+
+    probe_id: str
+
+
 class IssueTask(BaseModel):
     task_id: str
     run_id: str
