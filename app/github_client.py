@@ -18,6 +18,7 @@ import os
 import posixpath
 import random
 import re
+import stat
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -39,6 +40,11 @@ _MAX_PAGES = 10
 _MAX_WAIT_S = 60.0
 _MESSAGE_LIMIT = 200
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
+_REF_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+_TOKEN_RE = re.compile(r"^[A-Za-z0-9_]+$")
+_TOKEN_FILE_MAX_BYTES = 4096
+_SECONDARY_BACKOFF_S = 60.0
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +64,27 @@ class _RedactFilter(logging.Filter):
     """Replaces every registered token value with *** in a log record."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if _secrets:
+        # Never raise out of a logging call: an unformattable record is replaced.
+        if not _secrets:
+            return True
+        try:
             record.msg = _scrub(record.getMessage())
-            record.args = None
+        except Exception:
+            record.msg = "<unformattable log record>"
+        record.args = None
+        try:
+            if record.exc_info:
+                record.exc_text = _scrub(
+                    logging.Formatter().formatException(record.exc_info)
+                )
+                record.exc_info = None
+            elif record.exc_text:
+                record.exc_text = _scrub(record.exc_text)
+            if record.stack_info:
+                record.stack_info = _scrub(record.stack_info)
+        except Exception:
+            record.exc_info = None
+            record.exc_text = "<unformattable traceback>"
         return True
 
 
@@ -80,7 +104,9 @@ class GitHubError(Exception):
         self.method = method
         self.path = path
         self.message = message
-        super().__init__(f"{method} {path}: {status} {message}")
+        where = f"{method} {path}: " if method else ""
+        code = f"{status} " if status is not None else ""
+        super().__init__(f"{where}{code}{message}")
 
 
 class GitHubConfigError(GitHubError):
@@ -114,7 +140,7 @@ class _Transient(Exception):
 
 
 def _config_error(message: str) -> GitHubConfigError:
-    return GitHubConfigError(None, "", "token", message)
+    return GitHubConfigError(None, "", "", message)
 
 
 # --- data ----------------------------------------------------------------------
@@ -163,27 +189,48 @@ def load_token() -> str:
     """Read the token from the file named by GITHUB_TOKEN_FILE.
 
     Reads nothing else: not GITHUB_TOKEN, not GH_TOKEN, not the gh CLI's config.
-    The value is never placed in os.environ.
+    The value is never placed in os.environ. The file is opened once and checked
+    through its descriptor (a regular file, no group or other permission bits, a
+    few KiB at most); no error text contains the file's contents.
     """
     path = Path(os.environ.get(TOKEN_FILE_ENV) or DEFAULT_TOKEN_FILE).expanduser()
     try:
-        mode = path.stat().st_mode
+        # O_NONBLOCK: opening a FIFO must not hang; the S_ISREG check rejects it.
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
     except OSError as exc:
         raise _config_error(
             f"GitHub token file {path} is not readable ({type(exc).__name__})"
         ) from None
-    if mode & 0o077:
-        raise _config_error(
-            f"GitHub token file {path} must not be readable by group or others (chmod 600)"
-        )
     try:
-        token = path.read_text().strip()
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise _config_error(f"GitHub token file {path} is not a regular file")
+        if info.st_mode & 0o077:
+            raise _config_error(
+                f"GitHub token file {path} must not be readable or writable by group "
+                "or others (chmod 600)"
+            )
+        raw = os.read(fd, _TOKEN_FILE_MAX_BYTES + 1)
     except OSError as exc:
         raise _config_error(
             f"GitHub token file {path} is not readable ({type(exc).__name__})"
         ) from None
+    finally:
+        os.close(fd)
+    if len(raw) > _TOKEN_FILE_MAX_BYTES:
+        raise _config_error(f"GitHub token file {path} is too large")
+    # Not decoded inside an except block: UnicodeDecodeError holds the file's bytes
+    # and would stay reachable as the error's __context__.
+    if not raw.isascii():
+        raise _config_error(f"GitHub token file {path} is not ASCII text")
+    token = raw.decode("ascii").strip()
     if not token:
         raise _config_error(f"GitHub token file {path} is empty")
+    if not _TOKEN_RE.fullmatch(token):
+        raise _config_error(
+            f"GitHub token file {path} does not hold a token (letters, digits and "
+            "underscores only)"
+        )
     return token
 
 
@@ -191,9 +238,31 @@ def load_token() -> str:
 
 
 def _check_repo(repo: str) -> str:
-    if not _REPO_RE.fullmatch(repo):
+    if not _REPO_RE.fullmatch(repo) or any(
+        part in (".", "..") for part in repo.split("/")
+    ):
         raise ValueError(f"repository must be 'owner/name', got {repo!r}")
     return repo
+
+
+def _check_sha(sha: str) -> str:
+    if not _SHA_RE.fullmatch(sha):
+        raise ValueError(f"not a commit SHA: {sha!r}")
+    return sha
+
+
+def _check_ref(branch: str) -> str:
+    """A conservative subset of git's ref-name rules."""
+    parts = branch.split("/")
+    if (
+        not _REF_RE.fullmatch(branch)
+        or ".." in branch
+        or "" in parts
+        or any(part.startswith(".") or part.endswith(".lock") for part in parts)
+        or branch.endswith(".")
+    ):
+        raise ValueError(f"not a valid branch name: {branch!r}")
+    return branch
 
 
 def _branch_path(branch: str) -> str:
@@ -251,10 +320,16 @@ class GitHubClient:
     ) -> None:
         if not token or any(ch.isspace() or ord(ch) < 32 for ch in token):
             raise _config_error("GitHub token is empty or contains whitespace")
+        base = httpx.URL(base_url)
+        # https only, so the token never travels in cleartext; a test transport
+        # never touches the network, so it may use any base URL.
+        if base.scheme != "https" and transport is None:
+            raise ValueError("base_url must use https")
         _secrets.add(token)
         self._max_attempts = max(1, max_attempts)
         self._sleep = sleep
-        self._base_host = httpx.URL(base_url).host
+        self._origin = (base.scheme, base.host, base.port or 443)
+        self._me: str | None = None
         self._http = httpx.AsyncClient(
             base_url=base_url,
             transport=transport,
@@ -285,16 +360,20 @@ class GitHubClient:
     async def _attempts(self, operation: Callable[[], Awaitable[Any]]) -> Any:
         """Run `operation`, retrying while it raises _Transient."""
         for attempt in range(1, self._max_attempts + 1):
+            transient: _Transient | None = None
             try:
                 return await operation()
-            except _Transient as transient:
-                if attempt == self._max_attempts:
-                    raise transient.error from None
-                delay = transient.delay
-                if delay is None:
-                    base = 0.5 * 2 ** (attempt - 1)
-                    delay = base + random.uniform(0, base / 2)
-                await self._sleep(delay)
+            except _Transient as caught:
+                transient = caught
+            # Raised outside the except block so the error keeps no __context__
+            # (and so no reference to a request carrying the Authorization header).
+            if attempt == self._max_attempts:
+                raise transient.error
+            delay = transient.delay
+            if delay is None:
+                base = 0.5 * 2 ** (attempt - 1)
+                delay = base + random.uniform(0, base / 2)
+            await self._sleep(delay)
         raise AssertionError("unreachable")  # pragma: no cover
 
     def _message(self, response: httpx.Response) -> str:
@@ -314,12 +393,22 @@ class GitHubClient:
         return _scrub(message)[:_MESSAGE_LIMIT]
 
     def _rate_limit_delay(
-        self, response: httpx.Response, method: str, path: str
+        self, response: httpx.Response, method: str, path: str, secondary: bool
     ) -> float | None:
         """Seconds to wait, or raise GitHubUnavailable when the wait is too long."""
         retry_after = _parse_float(response.headers.get("retry-after"))
         if retry_after is not None:
-            return min(max(retry_after, 0.0), _MAX_WAIT_S)
+            if retry_after > _MAX_WAIT_S:
+                raise GitHubUnavailable(
+                    f"rate limited: retry after {int(retry_after)} s",
+                    status=response.status_code,
+                    method=method,
+                    path=path,
+                )
+            retry_after = max(retry_after, 0.0)
+            return max(retry_after, _SECONDARY_BACKOFF_S) if secondary else retry_after
+        if secondary:
+            return _SECONDARY_BACKOFF_S
         reset = _parse_float(response.headers.get("x-ratelimit-reset"))
         if reset is not None:
             wait = reset - time.time()
@@ -347,17 +436,21 @@ class GitHubClient:
         """One attempt. Returns the response (unread when `stream`) or raises."""
         request = self._http.build_request(method, url, json=json, params=params)
         path = request.url.path
+        failure: str | None = None
         try:
             response = await self._http.send(request, stream=stream)
         except httpx.TransportError as exc:
-            logger.warning("%s %s transport error %s", method, path, type(exc).__name__)
+            failure = type(exc).__name__
+        if failure is not None:
+            # Built outside the except block: no __context__ keeps the request.
+            logger.warning("%s %s transport error %s", method, path, failure)
             raise _Transient(
                 GitHubUnavailable(
-                    f"{method} {path}: transport error {type(exc).__name__}",
+                    f"{method} {path}: transport error {failure}",
                     method=method,
                     path=path,
                 )
-            ) from None
+            )
         status = response.status_code
         logger.info("%s %s %s", method, path, status)
         if status < 400 or (status == 404 and allow_404):
@@ -368,15 +461,20 @@ class GitHubClient:
         finally:
             await response.aclose()
         message = self._message(response)
-        rate_limited = status == 429 or (
-            status == 403
-            and (
-                "retry-after" in response.headers
-                or response.headers.get("x-ratelimit-remaining") == "0"
+        secondary = status in (403, 429) and "secondary rate limit" in message.lower()
+        rate_limited = (
+            secondary
+            or status == 429
+            or (
+                status == 403
+                and (
+                    "retry-after" in response.headers
+                    or response.headers.get("x-ratelimit-remaining") == "0"
+                )
             )
         )
         if rate_limited:
-            delay = self._rate_limit_delay(response, method, path)
+            delay = self._rate_limit_delay(response, method, path, secondary)
             raise _Transient(
                 GitHubUnavailable(
                     f"{method} {path}: {status} {message}",
@@ -414,23 +512,37 @@ class GitHubClient:
             )
         )
 
+    def _same_origin(self, url: str) -> bool:
+        parsed = httpx.URL(url)
+        return (parsed.scheme, parsed.host, parsed.port or 443) == self._origin
+
     async def _paginate(
-        self, path: str, params: dict[str, Any] | None = None
+        self, path: str, params: dict[str, Any] | None = None, *, retry: bool = True
     ) -> list[Any]:
+        """All items of a listing. Raises when more than _MAX_PAGES pages exist.
+
+        `retry=False` sends each page once and lets _Transient escape, for callers
+        that retry a larger unit themselves.
+        """
         items: list[Any] = []
         url, query = path, params
         for _ in range(_MAX_PAGES):
-            response = await self._request("GET", url, params=query)
+            if retry:
+                response = await self._request("GET", url, params=query)
+            else:
+                response = await self._send("GET", url, params=query)
             items.extend(response.json())
             next_link = response.links.get("next")
             if not next_link:
-                break
+                return items
             url, query = next_link["url"], None
-            if httpx.URL(url).host != self._base_host:
+            if not self._same_origin(url):
                 raise GitHubError(
-                    None, "GET", path, "pagination link leaves the API host"
+                    None, "GET", path, "pagination link leaves the API origin"
                 )
-        return items
+        raise GitHubError(
+            None, "GET", path, f"more than {_MAX_PAGES} pages; refusing a partial list"
+        )
 
     # -- reads --------------------------------------------------------------------
 
@@ -473,14 +585,14 @@ class GitHubClient:
         return data["default_branch"]
 
     async def branch_head(self, repo: str, branch: str) -> tuple[str, str]:
-        path = f"/repos/{_check_repo(repo)}/commits/{_branch_path(branch)}"
+        path = f"/repos/{_check_repo(repo)}/commits/{_branch_path(_check_ref(branch))}"
         data = (await self._request("GET", path)).json()
         return data["sha"], data["commit"]["tree"]["sha"]
 
     async def download_tarball(
         self, repo: str, sha: str, dest: Path, *, max_bytes: int = 50_000_000
     ) -> Path:
-        path = f"/repos/{_check_repo(repo)}/tarball/{sha}"
+        path = f"/repos/{_check_repo(repo)}/tarball/{_check_sha(sha)}"
         dest = Path(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
 
@@ -496,6 +608,7 @@ class GitHubClient:
                         f"archive exceeds {max_bytes} bytes",
                     )
                 size = 0
+                failure: str | None = None
                 try:
                     with dest.open("wb") as out:
                         async for chunk in response.aiter_bytes():
@@ -509,13 +622,15 @@ class GitHubClient:
                                 )
                             out.write(chunk)
                 except httpx.TransportError as exc:
+                    failure = type(exc).__name__
+                if failure is not None:
                     raise _Transient(
                         GitHubUnavailable(
-                            f"GET {path}: transport error {type(exc).__name__}",
+                            f"GET {path}: transport error {failure}",
                             method="GET",
                             path=path,
                         )
-                    ) from None
+                    )
             except BaseException:
                 dest.unlink(missing_ok=True)
                 raise
@@ -532,7 +647,16 @@ class GitHubClient:
         items = await self._paginate(
             f"/repos/{_check_repo(repo)}/pulls", {"state": "open", "per_page": 100}
         )
-        return [pr for pr in map(_pull_request, items) if pr.head.startswith(prefix)]
+        # Only branches of this repository: a fork PR cannot block runs.
+        same_repo = [
+            item
+            for item in items
+            if ((item["head"].get("repo") or {}).get("full_name") or "").lower()
+            == repo.lower()
+        ]
+        return [
+            pr for pr in map(_pull_request, same_repo) if pr.head.startswith(prefix)
+        ]
 
     # -- idempotent writes -------------------------------------------------------------
 
@@ -591,6 +715,7 @@ class GitHubClient:
                 f"branch must start with {BRANCH_PREFIX!r}, got {branch!r}"
             )
         _check_repo(repo)
+        _check_ref(branch)
         ref_path = f"/repos/{repo}/git/ref/heads/{_branch_path(branch)}"
 
         async def check() -> bool:
@@ -657,15 +782,28 @@ class GitHubClient:
 
         return await self._attempts(unit)
 
+    async def _whoami(self) -> str:
+        if self._me is None:
+            response = await self._send("GET", "/user")
+            self._me = response.json()["login"]
+        return self._me
+
     async def comment_once(
         self, repo: str, number: int, *, body: str, marker: str
     ) -> Comment:
+        """Post `body` unless the token's own user already posted `marker`.
+
+        Comments by anyone else never count: anyone can post a marker on a public
+        issue, and that must not suppress the pipeline's comment.
+        """
         path = f"/repos/{_check_repo(repo)}/issues/{number}/comments"
 
         async def unit() -> Comment:
-            response = await self._send("GET", path, params={"per_page": 100})
-            for item in response.json():
-                if marker in (item.get("body") or ""):
+            me = await self._whoami()
+            comments = await self._paginate(path, {"per_page": 100}, retry=False)
+            for item in comments:
+                author = (item.get("user") or {}).get("login", "")
+                if author == me and marker in (item.get("body") or ""):
                     return _comment(item)
             created = await self._send("POST", path, json={"body": body})
             return _comment(created.json())

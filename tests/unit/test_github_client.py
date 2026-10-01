@@ -8,6 +8,7 @@ import base64
 import json
 import logging
 import os
+import stat as stat_module
 import time
 from pathlib import Path
 
@@ -157,7 +158,7 @@ async def test_redirect_to_another_host_drops_authorization(tmp_path):
 
     client, _ = make_client(handler)
     async with client:
-        dest = await client.download_tarball(REPO, "abc", tmp_path / "src.tgz")
+        dest = await client.download_tarball(REPO, "abc1234", tmp_path / "src.tgz")
     assert dest.read_bytes() == b"tarbytes"
     assert seen["api.github.com"] == f"Bearer {TOKEN}"
     assert seen["codeload.github.com"] is None
@@ -221,19 +222,6 @@ async def test_429_waits_for_retry_after():
     async with client:
         assert await client.default_branch(REPO) == "main"
     assert sleeps == [7.0]
-
-
-async def test_retry_after_is_capped_at_60_seconds():
-    answers = iter(
-        [
-            reply(429, {"message": "slow"}, {"retry-after": "500"}),
-            reply(body={"default_branch": "main"}),
-        ]
-    )
-    client, sleeps = make_client(lambda request: next(answers))
-    async with client:
-        await client.default_branch(REPO)
-    assert sleeps == [60.0]
 
 
 async def test_403_with_remaining_zero_waits_for_a_near_reset():
@@ -405,9 +393,53 @@ async def test_tarball_over_the_cap_is_refused_and_removed(tmp_path):
     )
     async with client:
         with pytest.raises(GitHubError, match="archive exceeds 1000 bytes"):
-            await client.download_tarball(REPO, "abc", dest, max_bytes=1000)
+            await client.download_tarball(REPO, "abc1234", dest, max_bytes=1000)
     assert not dest.exists()
     assert sleeps == []
+
+
+async def test_tarball_streamed_over_the_cap_is_refused_and_removed(tmp_path):
+    """No Content-Length: the streaming counter, not the declared length, must trip."""
+    dest = tmp_path / "src.tgz"
+
+    async def body():
+        for _ in range(10):
+            yield b"x" * 500
+
+    def handler(request):
+        response = httpx.Response(200, content=body())
+        assert "content-length" not in response.headers
+        return response
+
+    client, sleeps = make_client(handler)
+    async with client:
+        with pytest.raises(GitHubError, match="archive exceeds 1000 bytes"):
+            await client.download_tarball(REPO, "abc1234", dest, max_bytes=1000)
+    assert not dest.exists()
+    assert sleeps == []
+
+
+async def test_tarball_streamed_under_the_cap_is_written(tmp_path):
+    dest = tmp_path / "out" / "src.tgz"
+
+    async def body():
+        for _ in range(4):
+            yield b"y" * 100
+
+    client, _ = make_client(lambda request: httpx.Response(200, content=body()))
+    async with client:
+        result = await client.download_tarball(REPO, "abc1234", dest, max_bytes=1000)
+    assert result == dest and dest.read_bytes() == b"y" * 400
+
+
+@pytest.mark.parametrize("sha", ["../../x", "main", "abc", "abc1234/../../user", ""])
+async def test_tarball_refuses_a_non_sha(sha, tmp_path):
+    calls = []
+    client, _ = make_client(lambda request: calls.append(request) or reply())
+    async with client:
+        with pytest.raises(ValueError):
+            await client.download_tarball(REPO, sha, tmp_path / "x.tgz")
+    assert calls == []
 
 
 async def test_open_pipeline_prs_filters_by_head_prefix():
@@ -422,6 +454,18 @@ async def test_open_pipeline_prs_filters_by_head_prefix():
         found = await client.open_pipeline_prs(REPO, 12)
     assert [pr.number for pr in found] == [1, 4]
     assert found[0].head == "issue-to-pr/12-fix-parser" and found[0].base == "main"
+
+
+async def test_open_pipeline_prs_ignores_pull_requests_from_forks():
+    fork = _pr(2, "issue-to-pr/12-from-a-fork")
+    fork["head"]["repo"] = {"full_name": "stranger/demo"}
+    gone = _pr(3, "issue-to-pr/12-deleted-fork")
+    gone["head"]["repo"] = None
+    prs = [_pr(1, "issue-to-pr/12-mine"), fork, gone]
+    client, _ = make_client(lambda request: reply(body=prs))
+    async with client:
+        found = await client.open_pipeline_prs(REPO, 12)
+    assert [pr.number for pr in found] == [1]
 
 
 async def test_last_label_actor_takes_the_latest_labeled_event():
@@ -482,7 +526,7 @@ async def test_pagination_follows_next_links():
     assert len(seen) == 3
 
 
-async def test_pagination_stops_after_ten_pages():
+async def test_pagination_past_ten_pages_raises_instead_of_truncating():
     calls = []
 
     def handler(request):
@@ -496,27 +540,65 @@ async def test_pagination_stops_after_ten_pages():
 
     client, _ = make_client(handler)
     async with client:
-        await client.open_pipeline_prs(REPO, 9)
+        with pytest.raises(GitHubError, match="more than 10 pages"):
+            await client.open_pipeline_prs(REPO, 9)
     assert len(calls) == 10
 
 
-async def test_pagination_refuses_a_next_link_to_another_host():
+async def test_last_label_actor_fails_closed_when_the_events_are_too_many():
     def handler(request):
         return reply(
-            body=[], headers={"link": '<https://evil.example/pulls?page=2>; rel="next"'}
+            body=[],
+            headers={
+                "link": f'<https://api.github.com/repos/{REPO}/issues/5/events?page=2>; rel="next"'
+            },
         )
 
     client, _ = make_client(handler)
     async with client:
         with pytest.raises(GitHubError):
+            await client.last_label_actor(REPO, 5, "issue-to-pr")
+
+
+@pytest.mark.parametrize(
+    "next_url",
+    [
+        "https://evil.example/pulls?page=2",
+        "http://api.github.com/pulls?page=2",
+        "https://api.github.com:8443/pulls?page=2",
+        "https://api.github.com.evil.example/pulls?page=2",
+    ],
+)
+async def test_pagination_refuses_a_next_link_to_another_origin(next_url):
+    hosts = []
+
+    def handler(request):
+        hosts.append((request.url.scheme, request.url.host, request.url.port))
+        return reply(body=[], headers={"link": f'<{next_url}>; rel="next"'})
+
+    client, _ = make_client(handler)
+    async with client:
+        with pytest.raises(GitHubError, match="origin"):
             await client.open_pipeline_prs(REPO, 9)
+    assert hosts == [("https", "api.github.com", None)]
+
+
+def test_a_non_https_base_url_is_refused_without_a_mock_transport():
+    with pytest.raises(ValueError):
+        GitHubClient(TOKEN, base_url="http://api.github.com")
+    # A mock transport never touches the network, so any base URL is fine there.
+    GitHubClient(
+        TOKEN,
+        base_url="http://localhost",
+        transport=httpx.MockTransport(lambda request: reply()),
+    )
 
 
 def _pr(number, head, base="main", state="open"):
     return {
         "number": number,
         "html_url": f"https://github.com/{REPO}/pull/{number}",
-        "head": {"ref": head},
+        "head": {"ref": head, "repo": {"full_name": REPO}},
         "base": {"ref": base},
         "state": state,
         "body": "body",
@@ -535,6 +617,9 @@ class Api:
         self.comments: list[dict] = []
         self.log: list[tuple[str, str]] = []
         self.fail_next_create: str | None = None
+        self.page_size = 100
+        self.ref_lost = False  # POST creates the ref, then answers 502
+        self.ref_race = False  # the first GET misses a ref that then exists
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         method, path = request.method, request.url.path
@@ -542,12 +627,24 @@ class Api:
         prefix = f"/repos/{REPO}"
         if path.startswith(f"{prefix}/git/ref/heads/"):
             name = path.removeprefix(f"{prefix}/git/ref/heads/")
+            if self.ref_race:
+                self.ref_race = False
+                return reply(404, {"message": "Not Found"})
             if name in self.refs:
                 return reply(body={"object": {"sha": self.refs[name]}})
             return reply(404, {"message": "Not Found"})
         if method == "POST" and path == f"{prefix}/git/refs":
             data = json.loads(request.content)
-            self.refs[data["ref"].removeprefix("refs/heads/")] = data["sha"]
+            name = data["ref"].removeprefix("refs/heads/")
+            if name in self.refs:
+                return reply(
+                    422,
+                    {"message": "Reference already exists"},
+                )
+            self.refs[name] = data["sha"]
+            if self.ref_lost:
+                self.ref_lost = False
+                return reply(502, {"message": "Bad Gateway"})
             return reply(201, {"ref": data["ref"]})
         if path == f"{prefix}/pulls" and method == "GET":
             head = request.url.params.get("head", "")
@@ -577,8 +674,18 @@ class Api:
             pr["body"] = data["body"]
             self.prs.append(pr)
             return reply(201, pr)
+        if path == "/user":
+            return reply(body={"login": "bot"})
         if "/issues/" in path and path.endswith("/comments") and method == "GET":
-            return reply(body=self.comments)
+            page = int(request.url.params.get("page", "1"))
+            size = self.page_size
+            chunk = self.comments[(page - 1) * size : page * size]
+            headers = {}
+            if page * size < len(self.comments):
+                headers["link"] = (
+                    f'<https://api.github.com{path}?per_page=100&page={page + 1}>; rel="next"'
+                )
+            return reply(body=chunk, headers=headers)
         if "/issues/" in path and path.endswith("/comments") and method == "POST":
             data = json.loads(request.content)
             if self.fail_next_create == "lost":
@@ -620,6 +727,62 @@ async def test_ensure_branch_refuses_another_sha():
             await client.ensure_branch(REPO, "issue-to-pr/7-fix", "def")
     assert api.refs["issue-to-pr/7-fix"] == "abc"
     assert all(method == "GET" for method, _ in api.log)
+
+
+async def test_ensure_branch_survives_a_lost_response():
+    api = Api()
+    api.ref_lost = True
+    client, sleeps = make_client(api)
+    async with client:
+        await client.ensure_branch(REPO, "issue-to-pr/7-fix", "abc")
+    assert api.refs == {"issue-to-pr/7-fix": "abc"}
+    assert len(sleeps) == 1
+    assert [m for m, _ in api.log].count("POST") == 1
+
+
+async def test_ensure_branch_rechecks_after_a_422_on_create():
+    api = Api()
+    api.refs["issue-to-pr/7-fix"] = "abc"
+    api.ref_race = True  # the check misses it, the create then says it exists
+    client, sleeps = make_client(api)
+    async with client:
+        await client.ensure_branch(REPO, "issue-to-pr/7-fix", "abc")
+    assert sleeps == []
+    assert api.refs == {"issue-to-pr/7-fix": "abc"}
+
+
+async def test_ensure_branch_422_with_another_sha_raises():
+    api = Api()
+    api.refs["issue-to-pr/7-fix"] = "zzz"
+    api.ref_race = True
+    client, _ = make_client(api)
+    async with client:
+        with pytest.raises(GitHubError, match="another commit"):
+            await client.ensure_branch(REPO, "issue-to-pr/7-fix", "abc")
+    assert api.refs["issue-to-pr/7-fix"] == "zzz"
+
+
+@pytest.mark.parametrize(
+    "branch",
+    [
+        "issue-to-pr/../main",
+        "issue-to-pr/a..b",
+        "issue-to-pr/a b",
+        "issue-to-pr/a?x=1",
+        "issue-to-pr/a//b",
+        "issue-to-pr/.hidden",
+        "issue-to-pr/x.lock",
+        "issue-to-pr/end.",
+        "issue-to-pr/x/",
+    ],
+)
+async def test_ensure_branch_refuses_malformed_refs(branch):
+    calls = []
+    client, _ = make_client(lambda request: calls.append(request) or reply())
+    async with client:
+        with pytest.raises(ValueError):
+            await client.ensure_branch(REPO, branch, "abc")
+    assert calls == []
 
 
 async def test_ensure_branch_refuses_branches_outside_the_prefix():
@@ -818,3 +981,209 @@ async def test_create_commit_allows_a_file_that_merely_starts_with_github():
             author_name="n",
             author_email="e@example.invalid",
         )
+
+
+async def test_comment_once_ignores_a_marker_posted_by_someone_else():
+    api = Api()
+    spoof = _comment(3, "hello MARK")
+    spoof["user"] = {"login": "stranger"}
+    api.comments.append(spoof)
+    client, _ = make_client(api)
+    async with client:
+        comment = await client.comment_once(REPO, 7, body="a MARK", marker="MARK")
+    assert comment.id == 9 and comment.author == "bot"
+    assert len(api.comments) == 2
+
+
+async def test_comment_once_finds_a_marker_beyond_the_first_page():
+    api = Api()
+    api.page_size = 2
+    for n in range(5):
+        spoof = _comment(100 + n, "chatter")
+        spoof["user"] = {"login": "someone"}
+        api.comments.append(spoof)
+    api.comments.append(_comment(3, "mine MARK"))
+    client, _ = make_client(api)
+    async with client:
+        comment = await client.comment_once(REPO, 7, body="a MARK", marker="MARK")
+    assert comment.id == 3
+    assert not any(method == "POST" for method, _ in api.log)
+
+
+# --- token file hardening ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "content",
+    [b"\xff\xfe\x00garbage", "t\u00f6ken_abc".encode(), b"has space", b"a" * 5000],
+)
+def test_load_token_rejects_a_non_token_file_without_echoing_it(
+    content, tmp_path, monkeypatch
+):
+    path = tmp_path / "token"
+    path.write_bytes(content)
+    path.chmod(0o600)
+    monkeypatch.setenv(TOKEN_FILE_ENV, str(path))
+    with pytest.raises(GitHubConfigError) as error:
+        load_token()
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+    text = content.decode("latin-1")
+    assert text[:20] not in str(error.value)
+
+
+def test_load_token_refuses_a_fifo_without_hanging(tmp_path, monkeypatch):
+    path = tmp_path / "fifo"
+    os.mkfifo(path, 0o600)
+    monkeypatch.setenv(TOKEN_FILE_ENV, str(path))
+    with pytest.raises(GitHubConfigError, match="regular file"):
+        load_token()
+
+
+def test_load_token_refuses_a_directory(tmp_path, monkeypatch):
+    path = tmp_path / "dir"
+    path.mkdir(mode=0o700)
+    monkeypatch.setenv(TOKEN_FILE_ENV, str(path))
+    with pytest.raises(GitHubConfigError):
+        load_token()
+
+
+def test_load_token_refuses_a_group_writable_file(tmp_path, monkeypatch):
+    path = _token_file(tmp_path, mode=0o620)
+    assert path.stat().st_mode & stat_module.S_IWGRP
+    monkeypatch.setenv(TOKEN_FILE_ENV, str(path))
+    with pytest.raises(GitHubConfigError, match="readable or writable"):
+        load_token()
+
+
+def test_a_config_error_for_the_token_reads_cleanly(monkeypatch):
+    with pytest.raises(GitHubConfigError) as error:
+        load_token()
+    text = str(error.value)
+    assert text.startswith("GitHub token file ")
+    assert "None" not in text
+
+
+# --- no request kept in exception chains ------------------------------------
+
+
+async def test_unavailable_errors_keep_no_exception_context():
+    def handler(request):
+        raise httpx.ConnectError("boom", request=request)
+
+    client, _ = make_client(handler)
+    async with client:
+        with pytest.raises(GitHubUnavailable) as error:
+            await client.default_branch(REPO)
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+
+
+async def test_http_errors_keep_no_exception_context():
+    client, _ = make_client(lambda request: reply(500, {"message": "x"}))
+    async with client:
+        with pytest.raises(GitHubUnavailable) as error:
+            await client.default_branch(REPO)
+    assert error.value.__context__ is None
+    client, _ = make_client(lambda request: reply(422, {"message": "x"}))
+    async with client:
+        with pytest.raises(GitHubError) as error:
+            await client.default_branch(REPO)
+    assert error.value.__context__ is None
+
+
+# --- repo and sha validation --------------------------------------------------
+
+
+@pytest.mark.parametrize("repo", ["../..", "./x", "x/..", "a/b/c", "a", "a b/c", ""])
+async def test_bad_repo_names_are_refused_before_any_request(repo):
+    calls = []
+    client, _ = make_client(lambda request: calls.append(request) or reply())
+    async with client:
+        with pytest.raises(ValueError):
+            await client.default_branch(repo)
+    assert calls == []
+
+
+async def test_branch_head_refuses_a_malformed_branch():
+    calls = []
+    client, _ = make_client(lambda request: calls.append(request) or reply())
+    async with client:
+        with pytest.raises(ValueError):
+            await client.branch_head(REPO, "../../user")
+    assert calls == []
+
+
+# --- secondary rate limits and long retry-after ------------------------------
+
+
+async def test_retry_after_above_60_seconds_raises_at_once():
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return reply(429, {"message": "slow"}, {"retry-after": "120"})
+
+    client, sleeps = make_client(handler)
+    async with client:
+        with pytest.raises(GitHubUnavailable, match="rate limited"):
+            await client.default_branch(REPO)
+    assert len(calls) == 1 and sleeps == []
+
+
+@pytest.mark.parametrize("status", [403, 429])
+async def test_secondary_rate_limit_backs_off_at_least_60_seconds(status):
+    answers = iter(
+        [
+            reply(
+                status,
+                {"message": "You have exceeded a secondary rate limit. Please wait."},
+            ),
+            reply(body={"default_branch": "main"}),
+        ]
+    )
+    client, sleeps = make_client(lambda request: next(answers))
+    async with client:
+        assert await client.default_branch(REPO) == "main"
+    assert sleeps == [60.0]
+
+
+async def test_secondary_rate_limit_is_unavailable_not_a_config_error():
+    client, sleeps = make_client(
+        lambda request: reply(403, {"message": "secondary rate limit"})
+    )
+    async with client:
+        with pytest.raises(GitHubUnavailable):
+            await client.default_branch(REPO)
+    assert sleeps == [60.0, 60.0]
+
+
+async def test_secondary_rate_limit_with_a_short_retry_after_still_waits_60():
+    answers = iter(
+        [
+            reply(403, {"message": "secondary rate limit"}, {"retry-after": "5"}),
+            reply(body={"default_branch": "main"}),
+        ]
+    )
+    client, sleeps = make_client(lambda request: next(answers))
+    async with client:
+        await client.default_branch(REPO)
+    assert sleeps == [60.0]
+
+
+# --- logging filter robustness ------------------------------------------------
+
+
+def test_the_redaction_filter_never_raises_and_scrubs_tracebacks(caplog):
+    client = GitHubClient(TOKEN, transport=httpx.MockTransport(lambda r: reply()))
+    log = logging.getLogger("app.github_client")
+    with caplog.at_level(logging.DEBUG, logger="app.github_client"):
+        log.info("bad format %d", "not a number")  # must not raise
+        try:
+            raise RuntimeError(f"failed with {TOKEN}")
+        except RuntimeError:
+            log.exception("boom")
+        log.info("stack", stack_info=True)
+    assert caplog.records
+    assert TOKEN not in caplog.text
+    del client
