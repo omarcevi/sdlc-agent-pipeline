@@ -1409,3 +1409,29 @@ async def test_control_plane_errors_carry_provider_text_only_redacted(
             f"sandbox {action} failed: ClientError 403 PERMISSION_DENIED: "
         )
         _assert_redacted(raised.value)
+
+
+def test_redact_also_removes_the_project_it_is_given(monkeypatch):
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    assert agent_runtime.redact("in my-demo-proj now", project="My-Demo-Proj") == (
+        "in <project> now"
+    )
+
+
+async def test_errors_redact_the_configured_project_without_the_environment(
+    rig, sdk, control, monkeypatch
+):
+    """Under make test-cloud the conftest scrubs GOOGLE_CLOUD_PROJECT; the backend's
+    own settings still name the project."""
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    body = f"bucket gs://{LEAKY_PROJECT}_cloudbuild in {LEAKY_PROJECT} port 8080"
+    env = await rig.start(settings=fake_settings(project=LEAKY_PROJECT))
+    rig.shim.queue("/exec", httpx.Response(403, text=body))
+    with pytest.raises(InfraError) as raised:
+        await env.exec("true")
+    assert LEAKY_PROJECT not in str(raised.value) and "<project>" in str(raised.value)
+    sdk.sandboxes.errors["delete"] = api_error(403, "PERMISSION_DENIED", body)
+    named = SdkSandboxControl(fake_settings(project=LEAKY_PROJECT), client=sdk)
+    with pytest.raises(InfraError) as raised:
+        await named.delete(f"{ENGINE}/sandboxEnvironments/1")
+    assert LEAKY_PROJECT not in str(raised.value) and "<project>" in str(raised.value)

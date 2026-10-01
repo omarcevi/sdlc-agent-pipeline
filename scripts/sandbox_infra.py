@@ -533,6 +533,9 @@ def cmd_delete_engine(ctx: Context, args: argparse.Namespace) -> int:
     platform = ctx.platform(name)
     engine = _get_engine(platform, name)
     if engine is None:
+        if args.dry_run:  # a typo must not look like success
+            ctx.out("not found (already gone, or a wrong name)")
+            return 1
         ctx.out("engine already gone")
         return 0
     if engine.display_name != args.expect_display_name:

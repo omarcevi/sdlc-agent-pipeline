@@ -220,27 +220,28 @@ _PROJECT_PATH = re.compile(r"projects/[^/\s'\"]+")
 _LONG_NUMBER = re.compile(r"\d{9,}")  # project numbers have 12 digits; ports stay
 
 
-def redact(text: str) -> str:
+def redact(text: str, project: str = "") -> str:
     """`text` without project paths (`projects/<project>`), service-account emails
-    (`<service-account>`), the `GOOGLE_CLOUD_PROJECT` value when it is set (whole
-    word, any case: `<project>`) or runs of 9 or more digits (`<number>`)."""
+    (`<service-account>`), the `GOOGLE_CLOUD_PROJECT` value and `project` (the
+    backend's configured project) when set (whole word, any case: `<project>`) or
+    runs of 9 or more digits (`<number>`)."""
     text = _URL_TAIL.sub("", text)
     text = _SERVICE_ACCOUNT.sub("<service-account>", text)
     text = _PROJECT_PATH.sub("projects/<project>", text)
-    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip()
-    if project:
-        whole_word = rf"(?<![A-Za-z0-9]){re.escape(project)}(?![A-Za-z0-9])"
+    named = {os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip(), project.strip()}
+    for name in sorted(named - {""}, key=len, reverse=True):
+        whole_word = rf"(?<![A-Za-z0-9]){re.escape(name)}(?![A-Za-z0-9])"
         text = re.sub(whole_word, "<project>", text, flags=re.IGNORECASE)
     return _LONG_NUMBER.sub("<number>", text)
 
 
-def _provider_text(text: str) -> str:
+def _provider_text(text: str, project: str = "") -> str:
     """At most 200 characters of redacted provider text (redacted first, so a cut
     never leaves part of a number or an email behind)."""
-    return redact(text)[:_BODY_CHARS]
+    return redact(text, project)[:_BODY_CHARS]
 
 
-def _control_error(action: str, exc: BaseException) -> InfraError:
+def _control_error(action: str, exc: BaseException, project: str = "") -> InfraError:
     """The SDK's error as an InfraError: the action, the error type, its code and
     status, and at most 200 characters of its redacted message. Raise it
     `from None`, so no traceback carries the SDK's own text."""
@@ -248,7 +249,7 @@ def _control_error(action: str, exc: BaseException) -> InfraError:
     if code is None:
         code = getattr(getattr(exc, "response", None), "status_code", None)
     status = getattr(exc, "status", None)
-    message = _provider_text(str(getattr(exc, "message", None) or exc))
+    message = _provider_text(str(getattr(exc, "message", None) or exc), project)
     detail = " ".join(str(part) for part in (code, status) if part)
     kind = f"{type(exc).__name__} {detail}".strip()
     return InfraError(f"sandbox {action} failed: {kind}: {message}")
@@ -284,7 +285,7 @@ class SdkSandboxControl:
         try:
             return await asyncio.to_thread(call)
         except Exception as exc:
-            raise _control_error(action, exc) from None
+            raise _control_error(action, exc, self._settings.project) from None
 
     async def check_template(self, template: str) -> None:
         try:
@@ -294,7 +295,9 @@ class SdkSandboxControl:
         except Exception as exc:
             if _is_not_found(exc):
                 raise InfraError(TEMPLATE_NOT_USABLE) from None
-            raise _control_error("template check", exc) from None
+            raise _control_error(
+                "template check", exc, self._settings.project
+            ) from None
         if not template_is_usable(found):
             raise InfraError(TEMPLATE_NOT_USABLE)
 
@@ -353,7 +356,7 @@ class SdkSandboxControl:
         except Exception as exc:
             if _is_not_found(exc):
                 return
-            raise _control_error("delete", exc) from None
+            raise _control_error("delete", exc, self._settings.project) from None
 
 
 _SDK_CONTROLS: dict[SandboxSettings, SdkSandboxControl] = {}
@@ -468,8 +471,10 @@ class AgentRuntimeEnvironment:
         *,
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        project: str = "",
     ) -> None:
         self.env_id = env_id
+        self._project = project  # redacted from error text, with the env's value
         self._handle = handle
         self._control = control
         self._sleep = sleep
@@ -513,7 +518,15 @@ class AgentRuntimeEnvironment:
         env_id = f"itp-{uuid.uuid4().hex[:12]}"
         handle = await _create(control, settings, env_id)
         try:
-            env = cls(env_id, handle, token, control, transport=transport, sleep=sleep)
+            env = cls(
+                env_id,
+                handle,
+                token,
+                control,
+                transport=transport,
+                sleep=sleep,
+                project=settings.project,
+            )
         except Exception as exc:  # the platform gave an address httpx refuses
             await _delete_logged(control, handle.name, env_id)
             raise InfraError(
@@ -604,7 +617,7 @@ class AgentRuntimeEnvironment:
         except httpx.HTTPError as exc:
             raise InfraError(
                 f"sandbox {self.env_id}: {method} {label} failed: "
-                f"{type(exc).__name__}: {_provider_text(str(exc))}"
+                f"{type(exc).__name__}: {_provider_text(str(exc), self._project)}"
             ) from None
 
     def _status_error(
@@ -612,7 +625,7 @@ class AgentRuntimeEnvironment:
     ) -> InfraError:
         return InfraError(
             f"sandbox {self.env_id}: {method} {label} returned HTTP "
-            f"{response.status_code}: {_provider_text(response.text)}"
+            f"{response.status_code}: {_provider_text(response.text, self._project)}"
         )
 
     def _body_error(
@@ -620,7 +633,7 @@ class AgentRuntimeEnvironment:
     ) -> InfraError:
         return InfraError(
             f"sandbox {self.env_id}: {method} {label} returned an unreadable body: "
-            f"{_provider_text(response.text)}"
+            f"{_provider_text(response.text, self._project)}"
         )
 
     @staticmethod

@@ -137,6 +137,7 @@ infra-apply: require-project require-same-project-infra
 
 budget-plan: require-project require-budget-try require-same-project-budget
 	@echo "will: init and plan the budget root (read-only); budget $(BUDGET_TRY) TRY; saves the plan for budget-apply"
+	@rm -f $(TF_BUDGET_DIR)/$(BUDGET_PLAN)
 	$(TF_BUDGET) init -input=false
 	$(TF_BUDGET) plan -input=false -out=$(BUDGET_PLAN) $(BUDGET_VARS)
 
@@ -145,23 +146,24 @@ budget-apply: require-project require-same-project-budget require-budget-plan
 	@echo "will: CREATE OR CHANGE the budget, its topic and the billing-disabling function as in the saved plan (owner approval)"
 	@$(TF_BACKUP)
 	$(TF_BUDGET) apply -input=false $(BUDGET_PLAN); $(TF_BACKUP_AFTER)
+	@rm -f $(TF_BUDGET_DIR)/$(BUDGET_PLAN)
 
-budget-guard-test: require-project
+budget-guard-test: require-project require-same-project-budget
 	@echo "will: publish one dry-run message to the budget topic and read the function's log (owner approval; never disables billing)"
 	$(WITH_PROJECT) uv run python scripts/budget_guard_check.py
 
 # ---- Sandboxes ----
 
-sandbox-cloud: require-project
+sandbox-cloud: require-project require-same-project-infra
 	@echo "will: build the sandbox image if it is new and create the sandbox template if there is none (owner approval)"
 	$(SI) image
 	$(SI) template
 
-test-cloud: require-project
+test-cloud: require-project require-same-project-infra
 	@echo "will: start real Agent Runtime sandboxes (spends credits; owner approval)"
 	ITP_CLOUD_TESTS=1 $(WITH_PROJECT) uv run --env-file .env pytest -m "cloud or cloud_slow" -q -rP
 
-sweep-sandboxes: require-project
+sweep-sandboxes: require-project require-same-project-infra
 	@echo "will: delete sandboxes older than SANDBOX_TTL_S under SANDBOX_ENGINE"
 	$(SI) sweep
 
@@ -173,11 +175,11 @@ deploy-stage:
 deploy-check: deploy-stage
 	docker build -t issue-to-pr-agent:check build/deploy
 
-deploy: require-project
+deploy: require-project require-same-project-infra
 	@echo "will: stage build/deploy and DEPLOY the bench graph to Agent Runtime (owner approval)"
 	$(WITH_PROJECT) uv run python scripts/stage_deploy.py deploy
 
-smoke-deployed: require-project
+smoke-deployed: require-project require-same-project-infra
 	@echo "will: run one task on the deployed agent (calls a model; owner approval)"
 	$(WITH_PROJECT) uv run python scripts/stage_deploy.py smoke
 

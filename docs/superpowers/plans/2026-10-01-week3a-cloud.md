@@ -679,10 +679,10 @@ Controller and owner task. Implements decisions 8 to 12. Estimated cost: cents.
 - Modify: Terraform files only if `validate` finds errors
 
 - [ ] **Step 1 [OWNER APPROVAL: installs software, $0]:** `brew install hashicorp/tap/terraform`. Record `terraform version` in the run log; it must be 1.11 or newer.
-- [ ] **Step 2:** `terraform fmt -check -recursive deployment/terraform`. Then `terraform -chdir=deployment/terraform/single-project init -input=false && terraform -chdir=deployment/terraform/single-project validate`, and the same for `deployment/terraform/budget`. `init` downloads providers and creates no resource. Fix and commit any finding: `fix(infra): terraform fmt and validate`.
+- [ ] **Step 2:** `make tf-fmt-check`. Then `terraform -chdir=deployment/terraform/single-project init -input=false && terraform -chdir=deployment/terraform/single-project validate`, and the same for `deployment/terraform/budget`. `init` downloads providers and creates no resource. Fix and commit any finding: `fix(infra): terraform fmt and validate`.
 - [ ] **Step 3:** Open the run log: decisions 8 to 12 with their date; the running total (the owner reads the project's cost before credits from the billing report; the log records it, its date and its currency).
 - [ ] **Step 4:** The owner names the rate source. Record the USD/TRY rate, its source, the date and `BUDGET_TRY = floor(500 × rate)`.
-- [ ] **Step 5 [OWNER APPROVAL: creates the budget, topic, function, service accounts and bucket; cents]:** Spend rule check. `make budget-plan BUDGET_TRY=<n>`; the owner reads the plan. Then `make budget-apply BUDGET_TRY=<n>`; the owner types `yes`.
+- [ ] **Step 5 [OWNER APPROVAL: creates the budget, topic, function, service accounts and bucket; cents]:** Spend rule check. `make budget-plan BUDGET_TRY=<n>`; the owner reads the saved plan and approves it. Then `make budget-apply`, which applies that file without a prompt. Run the plan immediately before the apply.
 - [ ] **Step 6 [OWNER APPROVAL: one Pub/Sub message, $0]:** `make budget-guard-test`. It must print `dry_run`, `billing_enabled: true` and both permissions true.
   - If `get` is false, add `google_project_iam_member.guard_browser` (`roles/browser`) to `guard.tf`, re-apply (Step 5), test again, and commit.
   - If the apply named a missing Eventarc or build grant, add it to the budget root, never by hand.

@@ -211,6 +211,12 @@ PINS = {
     "budget-plan": "require-same-project-budget",
     "budget-apply": "require-same-project-budget",
     "teardown-budget": "require-same-project-budget",
+    "budget-guard-test": "require-same-project-budget",
+    "sandbox-cloud": "require-same-project-infra",
+    "test-cloud": "require-same-project-infra",
+    "sweep-sandboxes": "require-same-project-infra",
+    "deploy": "require-same-project-infra",
+    "smoke-deployed": "require-same-project-infra",
 }
 
 
@@ -545,6 +551,18 @@ def _dry_run(*args: str) -> list[str]:
 
 def _first(lines: list[str], text: str) -> int:
     return next(i for i, line in enumerate(lines) if text in line)
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="make is not installed")
+def test_a_saved_budget_plan_never_outlives_its_use():
+    """Terraform refuses a saved plan only once the state changed, so an old file
+    left by a failed or rejected re-plan could otherwise be applied."""
+    rm = "rm -f deployment/terraform/budget/budget.tfplan"
+    plan = _dry_run("budget-plan", "BUDGET_TRY=5")
+    assert _first(plan, rm) < _first(plan, "-out=budget.tfplan")
+    assert _first(plan, "output -raw project_id") < _first(plan, rm)
+    apply = _dry_run("budget-apply")
+    assert _first(apply, "apply -input=false budget.tfplan") < _first(apply, rm)
 
 
 @pytest.mark.skipif(shutil.which("make") is None, reason="make is not installed")

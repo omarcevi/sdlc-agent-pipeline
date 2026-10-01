@@ -502,12 +502,20 @@ DELETE_ENGINE = [
 ]
 
 
-@pytest.mark.parametrize("dry_run", [[], ["--dry-run"]])
-def test_delete_engine_treats_a_missing_engine_as_done(dry_run, capsys):
+def test_delete_engine_treats_a_missing_engine_as_done():
     platform = FakePlatform()
-    code, lines, _ = invoke([*DELETE_ENGINE, *dry_run], platform=platform)
+    code, lines, _ = invoke(DELETE_ENGINE, platform=platform)
     assert code == 0
     assert lines == ["engine already gone"]
+    assert platform.deleted_engines == []
+
+
+def test_delete_engine_dry_run_does_not_pass_a_name_it_cannot_find():
+    """A dry run that looks like success on a typo would hide a wrong name."""
+    platform = FakePlatform()
+    code, lines, _ = invoke([*DELETE_ENGINE, "--dry-run"], platform=platform)
+    assert code == 1
+    assert lines == ["not found (already gone, or a wrong name)"]
     assert platform.deleted_engines == []
 
 
