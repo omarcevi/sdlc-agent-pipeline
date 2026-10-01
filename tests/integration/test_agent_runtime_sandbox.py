@@ -19,7 +19,11 @@ import pytest
 
 from app.environment.agent_runtime import AgentRuntimeEnvironment, SandboxSettings
 from app.environment.base import WORKDIR, InfraError
-from tests.integration.sandbox_helpers import credential_like_variables
+from tests.integration.sandbox_helpers import (
+    credential_like_variables,
+    delete_template_with_retry,
+    is_not_found,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 ECHO_SERVER = Path(__file__).with_name("header_echo_server.py")
@@ -63,12 +67,6 @@ def _settings(cloud_settings) -> SandboxSettings:
 def _platform(settings: SandboxSettings):
     """Task 4's control-plane client: template create and delete, sandbox get."""
     return _infra().SdkPlatform(settings.project, settings.location)
-
-
-def _is_not_found(error: Exception) -> bool:
-    return getattr(error, "code", None) == 404 or "NOT_FOUND" in str(
-        getattr(error, "status", "")
-    )
 
 
 @pytest.fixture
@@ -141,9 +139,10 @@ async def test_authorization_header_does_not_reach_the_container(
         assert seen["authorization"] is False
     finally:
         try:
-            await started.close_all()  # the sandbox must go before its template
+            await started.close_all()
         finally:
-            await asyncio.to_thread(platform.delete_template, template)
+            # close() does not wait for the sandbox delete, which holds the template
+            await delete_template_with_retry(platform, template)
 
 
 async def _wait_until_active(platform, template: str) -> None:
@@ -196,7 +195,8 @@ async def test_root_filesystem_writability_is_recorded(started):
     mounts = await env.exec("grep -E '^[^ ]+ / ' /proc/mounts")
     assert not mounts.timed_out and mounts.exit_code in (0, 1), "the probe did not run"
     options = mounts.stdout.split()[3].split(",") if mounts.stdout.split() else []
-    print(f"root filesystem writable: {'rw' in options}")
+    writable = ("rw" in options) if options else "unknown"
+    print(f"root filesystem writable: {writable}")
 
 
 @pytest.mark.cloud_slow
@@ -204,14 +204,16 @@ async def test_sandbox_is_gone_after_its_ttl(started, cloud_settings):
     """A sandbox created with ttl 120 s is deleted, or gone, within 10 minutes."""
     platform = _platform(_settings(cloud_settings))
     env = await started(ttl_s=120)
-    name = env._handle.name  # the control-plane name; only this test needs it
+    # Private on purpose: the name holds the project number, so the backend offers no
+    # public accessor. If `_handle` is renamed, this test breaks (found in Task 13).
+    name = env._handle.name
     terminal = _infra().TERMINAL_STATES
     deadline = time.monotonic() + SANDBOX_GONE_TIMEOUT_S
     while True:
         try:
             state = (await asyncio.to_thread(platform.get_sandbox, name)).state
         except Exception as error:
-            if not _is_not_found(error):
+            if not is_not_found(error):
                 raise
             return
         if state in terminal:

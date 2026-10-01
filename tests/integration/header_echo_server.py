@@ -28,7 +28,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    do_GET = do_POST = do_PUT = do_DELETE = do_HEAD = _answer
+    do_GET = do_POST = do_PUT = do_DELETE = _answer
 
     def log_message(self, format: str, *args: object) -> None:
         pass  # request lines carry no secret, but nothing needs them

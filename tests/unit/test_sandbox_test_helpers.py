@@ -8,7 +8,13 @@ import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from tests.integration.sandbox_helpers import credential_like_variables
+import pytest
+
+from tests.integration.sandbox_helpers import (
+    TEMPLATE_LEFT_BEHIND,
+    credential_like_variables,
+    delete_template_with_retry,
+)
 
 _SPEC = importlib.util.spec_from_file_location(
     "header_echo_server",
@@ -69,3 +75,42 @@ def test_the_echo_server_never_echoes_a_value():
     )
     assert b"canary" not in raw
     assert echo.PORT == 8081
+
+
+class _Platform:
+    def __init__(self, refusals, error=None):
+        self.refusals, self.calls = refusals, 0
+        self.error = error or RuntimeError("refused projects/123")
+
+    def delete_template(self, name):
+        self.calls += 1
+        if self.refusals is None or self.calls <= self.refusals:
+            raise self.error
+
+
+async def _no_sleep(_):
+    pass
+
+
+async def test_template_delete_retries_until_the_platform_accepts():
+    platform = _Platform(refusals=2)
+    await delete_template_with_retry(platform, "t", sleep=_no_sleep)
+    assert platform.calls == 3
+
+
+async def test_template_delete_is_bounded_and_fails_with_a_fixed_message():
+    platform = _Platform(refusals=None)
+    with pytest.raises(AssertionError) as caught:
+        await delete_template_with_retry(
+            platform, "t", interval_s=10, timeout_s=50, sleep=_no_sleep
+        )
+    assert str(caught.value) == TEMPLATE_LEFT_BEHIND
+    assert "123" not in str(caught.value)
+    assert platform.calls == 6
+
+
+async def test_template_delete_treats_not_found_as_done():
+    error = type("E", (Exception,), {"code": 404})()
+    platform = _Platform(refusals=None, error=error)
+    await delete_template_with_retry(platform, "t", sleep=_no_sleep)
+    assert platform.calls == 1
