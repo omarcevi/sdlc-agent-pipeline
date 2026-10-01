@@ -1187,3 +1187,120 @@ def test_the_redaction_filter_never_raises_and_scrubs_tracebacks(caplog):
     assert caplog.records
     assert TOKEN not in caplog.text
     del client
+
+
+# --- fix round 2: the last leaks on the credential path -----------------------
+
+
+def test_a_direct_non_ascii_token_is_a_config_error_without_the_token():
+    with pytest.raises(GitHubConfigError) as error:
+        GitHubClient("ghp_éx")
+    assert "ghp_" not in str(error.value) and "é" not in str(error.value)
+    assert error.value.__context__ is None
+    with pytest.raises(GitHubConfigError):
+        GitHubClient("has-dash")
+
+
+async def test_too_many_redirects_is_unavailable_without_a_request_context():
+    def handler(request):
+        return httpx.Response(302, headers={"location": "/loop"})
+
+    client, _ = make_client(handler)
+    async with client:
+        with pytest.raises(GitHubUnavailable) as error:
+            await client.default_branch(REPO)
+    assert error.value.__context__ is None and error.value.__cause__ is None
+    assert TOKEN not in repr(error.value)
+
+
+async def test_a_decoding_error_is_unavailable_without_a_request_context():
+    def handler(request):
+        return httpx.Response(
+            200, content=b"not gzip at all", headers={"content-encoding": "gzip"}
+        )
+
+    client, _ = make_client(handler)
+    async with client:
+        with pytest.raises(GitHubUnavailable) as error:
+            await client.default_branch(REPO)
+    assert error.value.__context__ is None
+
+
+async def test_a_read_error_while_reading_an_error_body_is_unavailable(tmp_path):
+    async def body():
+        yield b"partial"
+        raise httpx.ReadError("connection reset")
+
+    client, sleeps = make_client(lambda request: httpx.Response(500, content=body()))
+    async with client:
+        with pytest.raises(GitHubUnavailable) as error:
+            await client.download_tarball(REPO, "abc1234", tmp_path / "x.tgz")
+    assert error.value.__context__ is None
+    assert len(sleeps) == 2  # retried like any transport error
+
+
+@pytest.mark.parametrize("value", ["inf", "-inf", "nan", "Infinity"])
+async def test_a_non_finite_retry_after_falls_back_to_backoff(value):
+    answers = iter(
+        [
+            reply(429, {"message": "slow"}, {"retry-after": value}),
+            reply(body={"default_branch": "main"}),
+        ]
+    )
+    client, sleeps = make_client(lambda request: next(answers))
+    async with client:
+        assert await client.default_branch(REPO) == "main"
+    assert len(sleeps) == 1 and 0.5 <= sleeps[0] < 0.75
+
+
+def test_a_real_transport_does_not_unlock_a_non_https_base_url():
+    with pytest.raises(ValueError):
+        GitHubClient(
+            TOKEN, base_url="http://localhost", transport=httpx.AsyncHTTPTransport()
+        )
+
+
+async def test_http_base_urls_use_port_80_for_the_origin_check():
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        if request.url.params.get("page") == "2":
+            return reply(body=[])
+        return reply(
+            body=[],
+            headers={
+                "link": '<http://localhost/repos/octo/demo/pulls?page=2>; rel="next"'
+            },
+        )
+
+    async def fake_sleep(seconds):
+        return None
+
+    client = GitHubClient(
+        TOKEN,
+        base_url="http://localhost",
+        transport=httpx.MockTransport(handler),
+        sleep=fake_sleep,
+    )
+    async with client:
+        await client.open_pipeline_prs(REPO, 9)
+    assert len(seen) == 2
+
+    for link in (
+        "https://localhost/repos/octo/demo/pulls?page=2",
+        "http://localhost:443/repos/octo/demo/pulls?page=2",
+    ):
+
+        def other_handler(request, link=link):
+            return reply(body=[], headers={"link": f'<{link}>; rel="next"'})
+
+        client = GitHubClient(
+            TOKEN,
+            base_url="http://localhost",
+            transport=httpx.MockTransport(other_handler),
+            sleep=fake_sleep,
+        )
+        async with client:
+            with pytest.raises(GitHubError, match="origin"):
+                await client.open_pipeline_prs(REPO, 9)

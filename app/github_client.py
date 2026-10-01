@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import math
 import os
 import posixpath
 import random
@@ -299,10 +300,19 @@ def _comment(data: dict[str, Any]) -> Comment:
 
 
 def _parse_float(value: str | None) -> float | None:
+    """A finite float, or None: `inf` and `nan` are not usable header values."""
     try:
-        return float(value) if value is not None else None
+        number = float(value) if value is not None else None
     except ValueError:
         return None
+    return number if number is not None and math.isfinite(number) else None
+
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin_of(url: httpx.URL) -> tuple[str, str, int | None]:
+    return (url.scheme, url.host, url.port or _DEFAULT_PORTS.get(url.scheme))
 
 
 # --- client ------------------------------------------------------------------------
@@ -318,17 +328,20 @@ class GitHubClient:
         max_attempts: int = 3,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
-        if not token or any(ch.isspace() or ord(ch) < 32 for ch in token):
-            raise _config_error("GitHub token is empty or contains whitespace")
+        if not _TOKEN_RE.fullmatch(token or ""):
+            raise _config_error(
+                "GitHub token is empty or has characters other than letters, digits "
+                "and underscores"
+            )
         base = httpx.URL(base_url)
-        # https only, so the token never travels in cleartext; a test transport
-        # never touches the network, so it may use any base URL.
-        if base.scheme != "https" and transport is None:
+        # https only, so the token never travels in cleartext; httpx.MockTransport
+        # never touches the network, so only it may be used with another base URL.
+        if base.scheme != "https" and not isinstance(transport, httpx.MockTransport):
             raise ValueError("base_url must use https")
         _secrets.add(token)
         self._max_attempts = max(1, max_attempts)
         self._sleep = sleep
-        self._origin = (base.scheme, base.host, base.port or 443)
+        self._origin = _origin_of(base)
         self._me: str | None = None
         self._http = httpx.AsyncClient(
             base_url=base_url,
@@ -439,7 +452,7 @@ class GitHubClient:
         failure: str | None = None
         try:
             response = await self._http.send(request, stream=stream)
-        except httpx.TransportError as exc:
+        except httpx.RequestError as exc:
             failure = type(exc).__name__
         if failure is not None:
             # Built outside the except block: no __context__ keeps the request.
@@ -455,11 +468,22 @@ class GitHubClient:
         logger.info("%s %s %s", method, path, status)
         if status < 400 or (status == 404 and allow_404):
             return response
+        read_failure: str | None = None
         try:
             if stream:
                 await response.aread()
+        except httpx.RequestError as exc:
+            read_failure = type(exc).__name__
         finally:
             await response.aclose()
+        if read_failure is not None:
+            raise _Transient(
+                GitHubUnavailable(
+                    f"{method} {path}: transport error {read_failure}",
+                    method=method,
+                    path=path,
+                )
+            )
         message = self._message(response)
         secondary = status in (403, 429) and "secondary rate limit" in message.lower()
         rate_limited = (
@@ -514,7 +538,7 @@ class GitHubClient:
 
     def _same_origin(self, url: str) -> bool:
         parsed = httpx.URL(url)
-        return (parsed.scheme, parsed.host, parsed.port or 443) == self._origin
+        return _origin_of(parsed) == self._origin
 
     async def _paginate(
         self, path: str, params: dict[str, Any] | None = None, *, retry: bool = True
@@ -621,7 +645,7 @@ class GitHubClient:
                                     f"archive exceeds {max_bytes} bytes",
                                 )
                             out.write(chunk)
-                except httpx.TransportError as exc:
+                except httpx.RequestError as exc:
                     failure = type(exc).__name__
                 if failure is not None:
                     raise _Transient(
