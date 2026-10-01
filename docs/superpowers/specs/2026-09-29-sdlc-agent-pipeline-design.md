@@ -415,3 +415,12 @@ Controls: the per-run budget cap, sandbox TTL plus sweeper, no always-on instanc
 
 1. The one-time held-out run (§9.1, §15) is not part of Week 3, and §15's "never cut: the held-out split" no longer holds. Reason: this is a demo repository, and prompts were never tuned on benchmark results (frozen through Weeks 2A and 2B; the Week 2C change only delimits issue text), so the dev-split numbers are not tuned to the tasks they measure.
 2. The five held-out tasks stay sealed and unrun until the owner decides otherwise. If the repository is published first, they are published as they are, and the README says they were written sealed and never run.
+
+**2026-10-02, from Week 3B (replay site).** Design: `2026-10-01-week3b-replay-ui-design.md`.
+
+1. §11: replay mode is a static site in `web/` (Vite, React, TypeScript, Tailwind, React Flow, `react-diff-view`) built from a curated set of replay files. `bench/replay.py` converts them from `events.jsonl`, `record.json` and the results row, built from an allowlist of fields, scrubbed and checked for leaks by `bench/replay_check.py`; the `record` flag is not needed. The site is hosted on GitHub Pages from this repository by `.github/workflows/pages.yaml`. Live mode (the FastAPI proxy behind IAP with Approve/Reject) is not built in Week 3B.
+2. §5.2: `web/` holds the static viewer only; there is no FastAPI live proxy.
+3. §2 criterion 3 is met when the repository is on GitHub with Pages enabled (design §8.1).
+4. §9.3 and §13: the replay tests (pytest, Vitest, one Playwright smoke test) and the Pages workflow.
+5. §18: ADR 7 ("Replay-first public demo") is written from this design (`docs/adr/0007-replay-first-public-demo.md`).
+6. Design §5.4's size estimate was low: the seven replays are 10 to 145 KB each, about 0.6 MB with `index.json`, all under the 300 KB warning.
