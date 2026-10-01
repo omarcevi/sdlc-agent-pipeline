@@ -22,7 +22,7 @@ As in Week 2A, this plan fixes what must be exact: names, fields, IDs, commands,
 - Cost guards keep their defaults and apply to both systems: `RUN_BUDGET_USD=1.00`, `MAX_TOOL_CALLS_PER_RUN=75`, `RUN_TIMEOUT_S=1500`, `SANDBOX_TTL_S=1800`, 3 test-fix returns, 2 review returns.
 - No credentials or network in any sandbox. Model-written code never runs on the host.
 - Benchmark integrity: hidden tests are never in the agents' sandbox; never weaken a hidden test or a validation check; run `uv run python -m bench.validate` after touching `bench/repos` or `bench/tasks`.
-- **Held-out tasks are sealed.** Only the sealed author and the sealed checker (Task 7) may open anything under `bench/tasks/*-h[0-9][0-9]/`. Every other agent and the main session never open, print, diff or `git show` those paths. Review diffs exclude them with the pathspec `':(exclude)bench/tasks/*-h[0-9][0-9]'`.
+- **Held-out tasks are sealed.** Only the sealed author and the sealed checker (Task 7) may open anything under `bench/tasks/*-h[0-9][0-9]/`. Every other agent and the main session never open, print, diff or `git show` those paths. Review diffs exclude them with the pathspec `':(exclude,glob)bench/tasks/*-h[0-9][0-9]/**'` (a pattern without `/**` matches only the directory name, not the files inside, and does not exclude them; check with `git diff --name-only <range> -- . '<pathspec>' | grep -c -- '-h[0-9][0-9]/'`, which must print 0).
 - pytest never calls a real model or GCP. Only Tasks 6 and 8 do, and only with the owner's approval.
 - Any step that spends credits is marked **[OWNER APPROVAL]**.
 - Commits: plain messages, owner identity only, no `Co-Authored-By` or other AI attribution. Never bypass commit signing.
