@@ -54,6 +54,7 @@ Read the spec before making architectural changes. If the code and the spec disa
 | `REVIEW_PROBES_DIR` | `bench/review_probes` | Reviewer probe location |
 | `RUNS_DIR` | `runs` | Per-run outputs (`events.jsonl`, `record.json`, `patch.diff`) |
 | `TRACE_TO_CLOUD` | unset | `1` exports each local run's spans to Cloud Trace in `GOOGLE_CLOUD_PROJECT` (needs the Cloud Trace API and credentials). Spans include prompt and tool content |
+| `GITHUB_TOKEN_FILE` | `~/.config/issue-to-pr/github-token` | File holding the GitHub token, read only by `app/github_client.py` (`load_token`); refused unless mode 600. Never `GITHUB_TOKEN`, `GH_TOKEN` or the `gh` CLI's login; the token is never put in the environment |
 | `BQ_ANALYTICS_ENABLED` | unset | `1` enables the BigQuery analytics plugin and creates its dataset (also needs `GOOGLE_CLOUD_PROJECT`). Owner approval required |
 
 ## Workflow

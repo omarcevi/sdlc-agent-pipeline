@@ -32,6 +32,12 @@ from app.environment import registry  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _no_github_token(tmp_path, monkeypatch):
+    """No test may find a real token: the file named here never exists."""
+    monkeypatch.setenv("GITHUB_TOKEN_FILE", str(tmp_path / "no-such-github-token"))
+
+
+@pytest.fixture(autouse=True)
 def _reset_registry():
     yield
     registry.clear()
