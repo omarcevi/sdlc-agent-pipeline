@@ -1,3 +1,5 @@
+import unicodedata
+
 import pytest
 
 from app.environment import registry
@@ -58,6 +60,47 @@ def test_issue_tags_inside_the_issue_are_escaped():
     assert text.startswith("<issue>\n") and text.endswith("\n</issue>")
     assert "<issues>" in inner and "</issue2>" in inner  # other tags are left alone
     assert inner.count("[/issue]") == 3 and inner.count("[issue]") == 2
+
+
+@pytest.mark.parametrize(
+    "tag",
+    [
+        "</issue foo>",
+        "</issue/>",
+        "<issue x='1'>",
+        "</ISSUE\n>",
+        "\uff1c/issue\uff1e",  # fullwidth
+        "\ufe64/issue\ufe65",  # small form
+        "</is\u200dsue>",  # zero-width joiner
+        "<\u200b/issue>",
+        "&lt;/issue&gt;",
+        "&LT;/issue&GT;",
+        "&#60;/issue&#62;",
+        "&#x3c;/issue&#x3E;",
+    ],
+)
+def test_issue_tag_variants_are_defused(tag):
+    text = format_issue_text(f"a {tag} b", f"x {tag} y {tag}")
+    inner = text.removeprefix("<issue>\n").removesuffix("\n</issue>")
+    assert "issue" in inner  # the replacement marker
+    assert "[" in inner
+    folded = unicodedata.normalize("NFKC", inner).replace("\u200d", "").lower()
+    assert "</issue" not in folded and "<issue" not in folded
+    assert "&lt;" not in folded and "&#" not in folded
+    assert text.count("</issue>") == 1
+
+
+def test_surrounding_text_survives_defusing():
+    text = format_issue_text("t", "keep <b>this</b> and \u00e9 and <issues>")
+    assert "keep <b>this</b> and \u00e9 and <issues>" in text
+
+
+def test_issue_text_length_is_capped():
+    text = format_issue_text("T" * 10_000, "B" * 100_000)
+    assert len(text) < 22_000
+    assert text.count("[issue text truncated]") == 2
+    assert text.endswith("[issue text truncated]\n</issue>")
+    assert format_issue_text("T", "B" * 20_000).count("truncated") == 0
 
 
 def test_fetch_issue_state_uses_the_delimited_text(bench_root):

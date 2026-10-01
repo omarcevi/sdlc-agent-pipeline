@@ -34,7 +34,6 @@ from tests.fakes import (
     call,
     empty_response,
     json_out,
-    make_bench_task,
     malformed_call,
     no_content_response,
     raises,
@@ -57,15 +56,6 @@ def diff_responses(diffs=(DIFF,), numstats=("1\t1\tmini.py\n",)):
         DIFF_CMD: [ExecResult(exit_code=0, stdout=d, stderr="") for d in diffs],
         NUMSTAT_CMD: [ExecResult(exit_code=0, stdout=n, stderr="") for n in numstats],
     }
-
-
-@pytest.fixture
-def bench(tmp_path, monkeypatch):
-    monkeypatch.setenv("BENCH_TASKS_DIR", str(tmp_path / "tasks"))
-    monkeypatch.setenv("BENCH_REPOS_DIR", str(tmp_path / "repos"))
-    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
-    make_bench_task(tmp_path)
-    return tmp_path
 
 
 def use_env(monkeypatch, env):

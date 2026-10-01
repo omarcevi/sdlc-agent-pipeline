@@ -1,7 +1,5 @@
 """Live intake: preconditions, pinned base, archive, and how agents see the issue."""
 
-# ruff: noqa: F811  (fixtures are imported, then named as test parameters)
-
 import io
 import json
 import tarfile
@@ -14,9 +12,10 @@ from pydantic import Field
 from app import github_client
 from app.agents import build_coder, build_planner, build_reviewer
 from app.baseline import build_baseline_workflow
-from app.driver import run_pipeline
+from app.driver import RunCrashed, run_pipeline
 from app.github_client import (
     GitHubConfigError,
+    GitHubError,
     GitHubUnavailable,
     Issue,
     PullRequest,
@@ -46,16 +45,15 @@ from app.schemas import (
     SoloResult,
 )
 from tests.fakes import BASELINE_SHA, FakeEnvironment, FakeLlm, json_out
-from tests.unit.test_pipeline import (  # noqa: F401  (bench is a fixture)
+from tests.unit.test_pipeline import (
     APPROVE,
+    DIFF,
     PASS,
     PATCH,
     PLAN,
-    bench,
     diff_responses,
     use_env,
 )
-from tests.unit.test_review_probe import probe_store  # noqa: F401  (a fixture)
 
 REPO = "acme/widgets"
 BODY = "zebra-body-marker the parser drops the last row"
@@ -354,6 +352,38 @@ async def test_a_missing_issue_is_a_refusal_but_a_missing_repo_is_a_github_refus
     assert [c[0] for c in live.calls] == ["default_branch"]
 
 
+async def test_a_repo_or_owner_named_pull_is_not_a_pull_request(live):
+    live.issue = Issue(
+        **{**live.issue.__dict__, "html_url": "https://github.com/acme/pull/issues/7"}
+    )
+    record = await run_live(
+        FakeLlm([json_out(Plan(actionable=False, decline_reason="x", summary="x"))])
+    )
+    assert record.outcome == "declined"  # got past every precondition
+
+
+async def test_an_oversized_archive_has_its_own_reason(live):
+    live.errors["download_tarball"] = GitHubError(
+        200, "GET", "/x", "archive exceeds 50000000 bytes"
+    )
+    await assert_refused("source archive is too large")
+
+
+async def test_a_listing_over_the_page_limit_is_worded_as_such(live):
+    live.errors["open_pipeline_prs"] = GitHubError(
+        None, "GET", "/x", "more than 10 pages; refusing a partial list"
+    )
+    await assert_refused("GitHub response could not be read safely")
+
+
+async def test_a_bad_json_response_is_not_a_bad_branch_name(live):
+    live.errors["branch_head"] = json.JSONDecodeError("bad", "", 0)
+    with pytest.raises(RunCrashed) as crashed:  # a bug-class failure, not a refusal
+        await run_live()
+    assert crashed.value.record.outcome == "failed"
+    assert "base branch name" not in crashed.value.record.reason
+
+
 async def test_a_revoked_token_is_a_github_refusal(live):
     live.errors["get_issue"] = GitHubConfigError(401, "GET", "/x", "Bad credentials")
     await assert_refused("GitHub refused the request: 401")
@@ -559,6 +589,7 @@ async def test_agents_see_the_issue_only_between_delimiters(
             assert BODY in block and "Title: Parser loses rows" in block
             assert BODY not in rest and "r-secret-run-id" not in system
             assert BODY not in contents and "r-secret-run-id" not in contents
+            assert "Parser loses rows" not in contents
 
 
 async def test_a_hostile_issue_cannot_close_the_block(
@@ -583,12 +614,18 @@ async def test_a_hostile_issue_cannot_close_the_block(
 
 async def test_no_agent_request_carries_the_run_id_or_a_probe_id(
     bench,
-    probe_store,
     monkeypatch,
 ):
     """Gates the paid reviewer-probe runs: the run id of a probe run names the probe
     and the system, so no model may be shown it."""
     run_id = "t-1-review-flash-rp-01-r1-s"
+    monkeypatch.setenv("REVIEW_PROBES_DIR", str(bench / "probes"))
+    probe = bench / "probes" / "rp-01"
+    probe.mkdir(parents=True)
+    (probe / "probe.yaml").write_text(
+        "task_id: t-1\nkind: bad\nsource: shortcut\nsource_run: null\nnote: n\n"
+    )
+    (probe / "patch.diff").write_text(DIFF)
     forbidden = (run_id, "rp-", "-review-", "rp-01")
 
     def check(*llms: RecordingLlm):
@@ -656,5 +693,24 @@ async def test_bench_agents_see_the_issue_only_between_delimiters(
         system, contents = agent.system[0], agent.contents[0]
         block, rest = _inside_issue_block(system)
         assert "add subtracts" in block and "add subtracts" not in rest
-        assert "add subtracts" not in contents
+        assert "add subtracts" not in contents and "add is broken" not in contents
         assert "r-secret" not in system + contents
+
+
+async def test_the_solo_agent_sees_the_issue_only_between_delimiters(
+    bench, monkeypatch
+):
+    env = FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
+    use_env(monkeypatch, env)
+    solo = RecordingLlm([json_out(SOLO)])
+    record = await run_pipeline(
+        RunRequest(task_id="t-1", run_id="r-secret"),
+        workflow=build_baseline_workflow(solo),
+    )
+    assert record.outcome == "patch_written"
+    system, contents = solo.system[0], solo.contents[0]
+    block, rest = _inside_issue_block(system)
+    assert "add subtracts" in block and "Title: add is broken" in block
+    assert "add subtracts" not in rest and "add is broken" not in rest
+    assert "add subtracts" not in contents and "add is broken" not in contents
+    assert "r-secret" not in system + contents

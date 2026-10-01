@@ -118,10 +118,6 @@ class TestReport(BaseModel):
     failed_tests: list[str] = Field(default_factory=list)
     output_tail: str = ""
     duration_s: float = 0.0
-    mode: str = "bench"
-    base_ref: str | None = None
-    base_sha: str | None = None
-    base_tree_sha: str | None = None
 
 
 class ReviewComment(BaseModel):
@@ -151,10 +147,6 @@ class RunRecord(BaseModel):
     cost_usd: float = 0.0
     tool_calls: int = 0
     duration_s: float = 0.0
-    mode: str = "bench"
-    base_ref: str | None = None
-    base_sha: str | None = None
-    base_tree_sha: str | None = None
     mode: str = "bench"
     base_ref: str | None = None
     base_sha: str | None = None

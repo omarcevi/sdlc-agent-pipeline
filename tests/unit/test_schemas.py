@@ -71,3 +71,22 @@ def test_new_outcomes_and_record_fields():
 def test_run_record_roundtrips_json():
     record = RunRecord(task_id="t", run_id="r", outcome="failed", failure_kind="budget")
     assert RunRecord.model_validate_json(record.model_dump_json()) == record
+
+
+def test_test_report_fields_are_unchanged():
+    """TestReport is the reviewer's and the coder's user message: its fields are part
+    of the frozen prompts."""
+    assert list(TestReport.model_fields) == [
+        "passed",
+        "exit_code",
+        "failed_tests",
+        "output_tail",
+        "duration_s",
+    ]
+    assert list(TestReport(passed=True, exit_code=0).model_dump()) == [
+        "passed",
+        "exit_code",
+        "failed_tests",
+        "output_tail",
+        "duration_s",
+    ]

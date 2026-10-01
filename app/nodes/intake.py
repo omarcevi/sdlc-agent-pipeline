@@ -1,7 +1,9 @@
 """Issue intake and sandbox provisioning (bench and live mode)."""
 
+import json
 import re
 import tempfile
+import unicodedata
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -38,18 +40,60 @@ class RunRefused(Exception):
     carries no issue content; the driver records outcome `refused`."""
 
 
-_ISSUE_TAG = re.compile(r"<\s*(/?)\s*issue\s*>", re.IGNORECASE)
+MAX_TITLE_CHARS = 500
+MAX_BODY_CHARS = 20_000
+TRUNCATED = "\n[issue text truncated]"
+_OPEN, _CLOSE = r"(?:<|&lt;|&#0*60;|&#x0*3c;)", r"(?:>|&gt;|&#0*62;|&#x0*3e;)"
+# <issue>, </issue>, with spaces, attributes or a self-closing slash, as a raw tag
+# or as an HTML entity.
+_ISSUE_TAG = re.compile(
+    rf"{_OPEN}\s*(/?)\s*issue\b[^<>&]{{0,200}}?{_CLOSE}", re.IGNORECASE
+)
 PLANNER_PROMPT = "Plan the change for the issue in your instructions."
+
+
+def _normalised(text: str) -> tuple[str, list[int]]:
+    """NFKC-folded text without invisible format characters, and for each of its
+    characters the index it came from in `text`."""
+    chars: list[str] = []
+    origin: list[int] = []
+    for index, char in enumerate(text):
+        if unicodedata.category(char) == "Cf":
+            continue
+        for folded in unicodedata.normalize("NFKC", char):
+            chars.append(folded)
+            origin.append(index)
+    return "".join(chars), origin
+
+
+def _defuse(text: str) -> str:
+    """Replace every issue tag in `text`, however it is spelled, by [issue] or [/issue]."""
+    folded, origin = _normalised(text)
+    out: list[str] = []
+    position = 0
+    for match in _ISSUE_TAG.finditer(folded):
+        start = origin[match.start()]
+        end = origin[match.end() - 1] + 1
+        if start < position:
+            continue
+        out.append(text[position:start])
+        out.append(f"[{match.group(1)}issue]")
+        position = end
+    out.append(text[position:])
+    return "".join(out)
+
+
+def _clip(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit] + TRUNCATED
 
 
 def format_issue_text(title: str, body: str) -> str:
     """The issue as the agents see it: between <issue> tags, with any such tag
-    inside the title or body defused so the text cannot close the block early."""
-
-    def defuse(text: str) -> str:
-        return _ISSUE_TAG.sub(lambda m: f"[{m.group(1)}issue]", text)
-
-    return f"<issue>\nTitle: {defuse(title)}\n\n{defuse(body)}\n</issue>"
+    inside the title or body defused so the text cannot close the block early, and
+    with the length capped."""
+    title = _defuse(_clip(title, MAX_TITLE_CHARS))
+    body = _defuse(_clip(body, MAX_BODY_CHARS))
+    return f"<issue>\nTitle: {title}\n\n{body}\n</issue>"
 
 
 def _initial_state(issue: IssueTask) -> dict:
@@ -79,11 +123,18 @@ def fetch_issue(node_input: RunRequest):
 
 
 def _is_pull_request(html_url: str) -> bool:
-    # GET /issues/{n} also answers for pull requests; their html_url says /pull/.
-    return "/pull/" in urlparse(html_url).path
+    # GET /issues/{n} also answers for pull requests; their html_url is
+    # https://<host>/<owner>/<repo>/pull/<n>. Only the third path segment counts: a
+    # repository or owner may be named "pull".
+    segments = urlparse(html_url).path.split("/")
+    return len(segments) > 3 and segments[3] == "pull"
 
 
 def _refused(exc: GitHubError) -> RunRefused:
+    if "archive exceeds" in exc.message:
+        return RunRefused("source archive is too large")
+    if exc.status is None:
+        return RunRefused("GitHub response could not be read safely")
     return RunRefused(f"GitHub refused the request: {exc.status}")
 
 
@@ -133,6 +184,8 @@ async def fetch_live_issue(node_input: RunRequest):
             base_ref = node_input.base_ref or default_branch
             try:
                 base_sha, base_tree_sha = await client.branch_head(repo, base_ref)
+            except json.JSONDecodeError:
+                raise  # a bad response, not a bad branch name
             except ValueError:
                 raise RunRefused("base branch name is not valid") from None
             await client.download_tarball(repo, base_sha, archive)

@@ -20,14 +20,13 @@ from bench import review_probe
 from bench.probes import list_probes
 from bench.review_probe import plan_probe_runs, run_probe_spec
 from tests.fakes import FakeEnvironment, FakeLlm, json_out
-from tests.unit.test_pipeline import (  # noqa: F401  (bench is a fixture)
+from tests.unit.test_pipeline import (
     APPROVE,
     CHANGES,
     DIFF,
     FAIL,
     PASS,
     PLAN,
-    bench,
     diff_responses,
     use_env,
 )
@@ -51,7 +50,7 @@ class RecordingLlm(FakeLlm):
 
 
 @pytest.fixture
-def probe_store(bench, monkeypatch):  # noqa: F811
+def probe_store(bench, monkeypatch):
     monkeypatch.setenv("REVIEW_PROBES_DIR", str(bench / "probes"))
     directory = bench / "probes" / "rp-01"
     directory.mkdir(parents=True)

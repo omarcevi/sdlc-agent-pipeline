@@ -17,12 +17,11 @@ from bench import matrix
 from bench.matrix import RunSpec, plan_runs, run_matrix, run_spec
 from bench.presets import workflow_for
 from tests.fakes import FakeEnvironment, FakeLlm, json_out
-from tests.unit.test_pipeline import (  # noqa: F401  (bench is a fixture)
+from tests.unit.test_pipeline import (
     APPROVE,
     PASS,
     PATCH,
     PLAN,
-    bench,
     diff_responses,
     use_env,
 )
@@ -126,7 +125,7 @@ async def test_concurrency_limit_is_respected(tmp_path):
     assert peak == 2 and len(rows) == 6
 
 
-async def test_concurrent_repeats_do_not_share_run_dirs(bench, monkeypatch):  # noqa: F811
+async def test_concurrent_repeats_do_not_share_run_dirs(bench, monkeypatch):
     async def is_resolved(task, record):
         return True
 
@@ -271,7 +270,7 @@ async def test_every_row_carries_every_field(tmp_path):
     }  # fmt: skip
 
 
-async def test_a_scoring_crash_keeps_the_record_numbers(bench, monkeypatch):  # noqa: F811
+async def test_a_scoring_crash_keeps_the_record_numbers(bench, monkeypatch):
     async def broken(task, record):
         raise OSError("docker is gone")
 
@@ -338,7 +337,7 @@ async def test_progress_lines_and_status_are_prefixed_with_the_label(tmp_path, c
 # --- A3: a crash keeps the money it spent ---
 
 
-async def test_a_pipeline_crash_after_spending_shows_the_spend(bench, monkeypatch):  # noqa: F811
+async def test_a_pipeline_crash_after_spending_shows_the_spend(bench, monkeypatch):
     use_env(
         monkeypatch, FakeEnvironment(responses={**diff_responses(), TEST_CMD: PASS})
     )
@@ -367,7 +366,7 @@ async def test_a_pipeline_crash_after_spending_shows_the_spend(bench, monkeypatc
 # --- A4: scoring retries infra errors ---
 
 
-def _score_with(bench, monkeypatch, behaviour):  # noqa: F811
+def _score_with(bench, monkeypatch, behaviour):
     """Run one spec whose scoring calls `behaviour`; returns (row, call count)."""
     monkeypatch.setattr(matrix, "SCORE_RETRY_PAUSE_S", 0)
     calls: list[int] = []
@@ -386,7 +385,7 @@ def _score_with(bench, monkeypatch, behaviour):  # noqa: F811
     )
 
 
-async def test_scoring_infra_error_is_retried_then_succeeds(bench, monkeypatch):  # noqa: F811
+async def test_scoring_infra_error_is_retried_then_succeeds(bench, monkeypatch):
     def behaviour(n):
         if n == 1:
             raise InfraError("docker run failed")
@@ -398,7 +397,7 @@ async def test_scoring_infra_error_is_retried_then_succeeds(bench, monkeypatch):
     assert result["resolved"] is True and result["crashed"] is False
 
 
-async def test_scoring_infra_error_three_times_is_a_crashed_row(bench, monkeypatch):  # noqa: F811
+async def test_scoring_infra_error_three_times_is_a_crashed_row(bench, monkeypatch):
     def behaviour(n):
         raise InfraError("docker run failed")
 
@@ -409,7 +408,7 @@ async def test_scoring_infra_error_three_times_is_a_crashed_row(bench, monkeypat
     assert result["reason"] == "unhandled InfraError: docker run failed"
 
 
-async def test_other_scoring_errors_are_not_retried(bench, monkeypatch):  # noqa: F811
+async def test_other_scoring_errors_are_not_retried(bench, monkeypatch):
     def behaviour(n):
         raise OSError("disk")
 
