@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+SP_DIR = "deployment/terraform/single-project"
+BUDGET_DIR = "deployment/terraform/budget"
 
 # Targets that create, change or destroy cloud resources or spend money, or that
 # read the cloud. Each must check the project first.
@@ -33,9 +35,11 @@ CLOUD_TARGETS = {
     "teardown",
     "teardown-budget",
 }
-# Recipe lines that reach the cloud, matched after variable expansion.
+# Recipe lines that reach the cloud, matched after variable expansion. `terraform` is
+# the command, not a path segment such as deployment/terraform/budget.
 CLOUD_COMMAND = re.compile(
-    r"terraform|gcloud|agents-cli (infra|deploy)|sandbox_infra\.py|budget_guard_check\.py"
+    r"(?<![\w/.-])terraform(?![\w/.-])|gcloud|agents-cli (infra|deploy)"
+    r"|sandbox_infra\.py|budget_guard_check\.py"
     r"|stage_deploy\.py (deploy|smoke)|ITP_CLOUD_TESTS"
 )
 # Local, free forms of those commands.
@@ -145,19 +149,106 @@ def test_every_cloud_target_prints_what_it_will_do():
         assert TARGETS[name][1][0].startswith('@echo "will: '), name
 
 
-def test_terraform_apply_and_destroy_auto_approve_and_init_plan_take_no_input():
+def test_apply_takes_only_a_saved_plan_destroy_auto_approves_nothing_asks():
+    """An apply is always of the plan file the owner read (Terraform applies a saved
+    plan without asking and refuses a stale one); destroys stay behind CONFIRM=yes."""
     seen = set()
     for name in TARGETS:
         for line in _tf_lines(name):
-            words = line.split()
+            words = line.split(";")[0].split()
             sub = next(w for w in words[1:] if not w.startswith("-"))
             seen.add(sub)
-            if sub in ("apply", "destroy"):
+            if sub == "apply":
+                assert words[-2:] == ["-input=false", "budget.tfplan"], line
+                assert "-auto-approve" not in words and "-var" not in words, line
+            if sub == "destroy":
                 assert "-auto-approve" in words, line
                 assert "-input=false" not in words, line
             if sub in ("init", "plan"):
                 assert "-input=false" in words, line
     assert {"init", "plan", "apply", "destroy"} <= seen
+
+
+def test_budget_plan_requires_the_lira_amount_and_passes_it():
+    prereqs, _ = TARGETS["budget-plan"]
+    assert "require-budget-try" in prereqs
+    assert any(
+        "-var budget_amount_try=$(BUDGET_TRY)" in line
+        for line in _tf_lines("budget-plan")
+    )
+    guard = " ".join(TARGETS["require-budget-try"][1])
+    assert "BUDGET_TRY" in guard and "exit 2" in guard
+
+
+def test_budget_plan_saves_the_plan_and_budget_apply_applies_only_that_file():
+    (plan,) = [line for line in _tf_lines("budget-plan") if " plan " in line]
+    assert " -out=budget.tfplan " in plan
+    (apply,) = _tf_lines("budget-apply")  # no init, no re-plan
+    assert apply.split(";")[0] == (
+        "terraform -chdir=deployment/terraform/budget apply -input=false budget.tfplan"
+    )
+    assert "require-budget-plan" in TARGETS["budget-apply"][0]
+    guard = " ".join(_recipe("require-budget-plan"))
+    assert "deployment/terraform/budget/budget.tfplan" in guard
+    assert "run make budget-plan first" in guard and "exit 2" in guard
+
+
+def test_saved_plans_are_git_ignored():
+    """A plan file holds the project id."""
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", "--no-index", f"{BUDGET_DIR}/budget.tfplan"],
+        cwd=ROOT,
+        check=False,
+    )
+    assert ignored.returncode == 0
+
+
+PINS = {
+    "infra-plan": "require-same-project-infra",
+    "infra-apply": "require-same-project-infra",
+    "teardown-dry-run": "require-same-project-infra",
+    "teardown": "require-same-project-infra",
+    "budget-plan": "require-same-project-budget",
+    "budget-apply": "require-same-project-budget",
+    "teardown-budget": "require-same-project-budget",
+}
+
+
+def test_every_plan_apply_and_destroy_target_pins_its_root_to_the_project():
+    for name, pin in PINS.items():
+        assert pin in TARGETS[name][0], name
+    assert _recipe("require-same-project-infra") == [f"$(call SAME_PROJECT,{SP_DIR})"]
+    assert _recipe("require-same-project-budget") == [
+        f"$(call SAME_PROJECT,{BUDGET_DIR})"
+    ]
+    pin = VARIABLES["SAME_PROJECT"]
+    assert "output -raw project_id" in pin and "$(PROJECT)" in pin
+    for root in (SP_DIR, BUDGET_DIR):
+        assert 'output "project_id"' in squash((ROOT / root / "outputs.tf").read_text())
+
+
+def squash(text: str) -> str:
+    return re.sub(r"\s+", " ", text)
+
+
+BACKED_UP = {
+    "infra-apply": "agents-cli infra single-project",
+    "budget-apply": "$(TF_BUDGET) apply",
+    "teardown": "$(TF_SP) destroy",
+    "teardown-budget": "$(TF_BUDGET) destroy",
+}
+
+
+def test_every_apply_and_destroy_is_backed_up_before_and_after():
+    for name, command in BACKED_UP.items():
+        raw = TARGETS[name][1]
+        (index,) = [i for i, line in enumerate(raw) if command in line]
+        assert raw[index - 1] == "@$(TF_BACKUP)", name
+        assert raw[index].endswith("; $(TF_BACKUP_AFTER)"), name
+    assert _recipe("tf-backup") == [_expand("$(TF_BACKUP)")]
+    after = VARIABLES["TF_BACKUP_AFTER"]
+    assert after.startswith("s=$$?;") and after.endswith("exit $$s")
+    assert VARIABLES["TF_BACKUP_DIR"] == "$(HOME)/.local/state/issue-to-pr/tfstate"
 
 
 def test_teardown_names_the_engine_from_terraform_on_every_step():
@@ -172,17 +263,6 @@ def test_teardown_names_the_engine_from_terraform_on_every_step():
         for line in steps:
             flag = "--name" if "delete-engine" in line else "--engine"
             assert f"{flag} {engine}" in line, line
-
-
-def test_budget_targets_require_the_lira_amount_and_pass_it():
-    for name in ("budget-plan", "budget-apply"):
-        prereqs, _ = TARGETS[name]
-        assert "require-budget-try" in prereqs
-        assert any(
-            "-var budget_amount_try=$(BUDGET_TRY)" in line for line in _tf_lines(name)
-        )
-    guard = " ".join(TARGETS["require-budget-try"][1])
-    assert "BUDGET_TRY" in guard and "exit 2" in guard
 
 
 def test_destructive_targets_need_an_explicit_confirmation():
@@ -211,6 +291,7 @@ def test_teardown_runs_its_steps_in_order_and_waits_for_deletes():
         "sweep --all",
         "prune-templates --all",
         "delete-engine --name",
+        "tf-backup: copied",
         "destroy -auto-approve",
         "gcloud storage rm -r",
         "budget root kept",
@@ -254,9 +335,10 @@ def _make(env, *args):
             "BUDGET_TRY must be a whole number",
         ),
         (
-            ["budget-apply", "GOOGLE_CLOUD_PROJECT=p", "BUDGET_TRY=1.5"],
+            ["budget-plan", "GOOGLE_CLOUD_PROJECT=p", "BUDGET_TRY=1.5"],
             "BUDGET_TRY must be",
         ),
+        (["budget-apply", "GOOGLE_CLOUD_PROJECT=p"], "run make budget-plan first"),
         (["teardown", "GOOGLE_CLOUD_PROJECT=p"], "rerun with CONFIRM=yes"),
         (["teardown-budget", "GOOGLE_CLOUD_PROJECT=p"], "rerun with CONFIRM=yes"),
     ],
@@ -275,3 +357,211 @@ def test_the_bare_make_command_only_prints_help(stub_env):
     result = _make(stub_env)
     assert result.returncode == 0
     assert "owner approval" in result.stdout
+
+
+# ---- behaviour: the project pin, the saved plan and the state backup ----
+
+STUB_TERRAFORM = """#!/bin/sh
+# terraform -chdir=<root> <command...>: answers `state list` and `output -raw
+# project_id` from the environment and logs every other command.
+shift
+case "$*" in
+  "state list")
+    [ -z "$STUB_STATE_UNREADABLE" ] || exit 1
+    printf '%s' "$STUB_RESOURCES"; exit 0;;
+  "output -raw project_id")
+    [ -n "$STUB_PROJECT_ID" ] || { echo "Error: Output not found" >&2; exit 1; }
+    printf '%s' "$STUB_PROJECT_ID"; exit 0;;
+esac
+echo "terraform $*" >> "$STUB_LOG"
+exit "${STUB_EXIT:-0}"
+"""
+
+
+@pytest.fixture
+def budget_root(tmp_path, stub_env):
+    """A budget root with state and a saved plan, a stub terraform that answers
+    from STUB_* variables, and a private backup directory."""
+    stub = tmp_path / "terraform"
+    stub.write_text(STUB_TERRAFORM)
+    stub.chmod(0o755)
+    root = tmp_path / "budget"
+    root.mkdir()
+    (root / "terraform.tfstate").write_text('{"secret": "proj-alpha"}')
+    (root / "budget.tfplan").write_text("plan")
+    env = {
+        **stub_env,
+        "HOME": str(tmp_path / "home"),
+        "STUB_LOG": str(tmp_path / "terraform.log"),
+        "STUB_RESOURCES": "google_pubsub_topic.budget",
+        "STUB_PROJECT_ID": "proj-alpha",
+    }
+    args = [
+        f"TF_BUDGET_DIR={root}",
+        f"TF_SP_DIR={tmp_path / 'single-project'}",
+        f"TF_BACKUP_DIR={tmp_path / 'backups'}",
+    ]
+    return env, args, tmp_path
+
+
+def _terraform_log(tmp_path) -> str:
+    log = tmp_path / "terraform.log"
+    return log.read_text() if log.exists() else ""
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="make is not installed")
+def test_the_pin_refuses_a_root_applied_with_another_project(budget_root):
+    env, args, tmp_path = budget_root
+    for target in ("budget-apply", "budget-plan"):
+        result = _make(
+            env, target, "GOOGLE_CLOUD_PROJECT=proj-beta", "BUDGET_TRY=1", *args
+        )
+        assert result.returncode == 2, result.stderr
+        assert "belongs to another project than GOOGLE_CLOUD_PROJECT" in result.stderr
+        output = result.stdout + result.stderr
+        assert "proj-alpha" not in output and "proj-beta" not in output
+        assert "will: " not in result.stdout
+    assert _terraform_log(tmp_path) == ""
+    assert not (tmp_path / "backups").exists()
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="make is not installed")
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"STUB_PROJECT_ID": ""}, "has no project_id output"),
+        ({"STUB_STATE_UNREADABLE": "1"}, "cannot read the Terraform state"),
+    ],
+)
+def test_the_pin_fails_closed_when_it_cannot_tell(budget_root, changes, message):
+    env, args, tmp_path = budget_root
+    result = _make(
+        {**env, **changes}, "budget-apply", "GOOGLE_CLOUD_PROJECT=proj-alpha", *args
+    )
+    assert result.returncode == 2
+    assert message in result.stderr
+    assert _terraform_log(tmp_path) == ""
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="make is not installed")
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {},  # the same project
+        {"STUB_RESOURCES": "", "STUB_PROJECT_ID": ""},  # state with no resources
+    ],
+)
+def test_the_pin_passes_the_same_project_or_a_root_without_resources(
+    budget_root, changes
+):
+    env, args, tmp_path = budget_root
+    result = _make(
+        {**env, **changes}, "budget-apply", "GOOGLE_CLOUD_PROJECT=proj-alpha", *args
+    )
+    assert result.returncode == 0, result.stderr
+    assert _terraform_log(tmp_path) == "terraform apply -input=false budget.tfplan\n"
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="make is not installed")
+def test_budget_apply_needs_the_saved_plan(budget_root):
+    env, args, tmp_path = budget_root
+    (tmp_path / "budget" / "budget.tfplan").unlink()
+    result = _make(env, "budget-apply", "GOOGLE_CLOUD_PROJECT=proj-alpha", *args)
+    assert result.returncode == 2
+    assert "no saved budget plan; run make budget-plan first" in result.stderr
+    assert _terraform_log(tmp_path) == ""
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="make is not installed")
+def test_state_is_backed_up_before_and_after_even_a_failed_apply(budget_root):
+    env, args, tmp_path = budget_root
+    (tmp_path / "budget" / "terraform.tfstate.backup").write_text("older")
+    result = _make(
+        {**env, "STUB_EXIT": "1"},
+        "budget-apply",
+        "GOOGLE_CLOUD_PROJECT=proj-alpha",
+        *args,
+    )
+    assert result.returncode != 0
+    assert result.stdout.count("tf-backup: copied 2 state files") == 2
+    stamps = sorted((tmp_path / "backups").iterdir())
+    assert len(stamps) == 2
+    for stamp in stamps:
+        assert (stamp / "budget" / "terraform.tfstate").read_text() == (
+            '{"secret": "proj-alpha"}'
+        )
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="make is not installed")
+def test_tf_backup_copies_privately_and_prints_only_the_count(budget_root):
+    env, args, tmp_path = budget_root
+    single = tmp_path / "single-project"
+    single.mkdir()
+    (single / "terraform.tfstate").write_text("sp")
+    (single / "terraform.tfstate.backup").write_text("sp-old")
+    result = _make(env, "tf-backup", *args)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "tf-backup: copied 3 state files\n"
+    (stamp,) = (tmp_path / "backups").iterdir()
+    assert re.fullmatch(r"\d{8}T\d{6}Z", stamp.name)
+    copied = sorted(p.relative_to(stamp).as_posix() for p in stamp.rglob("*"))
+    assert copied == [
+        "budget",
+        "budget/terraform.tfstate",
+        "single-project",
+        "single-project/terraform.tfstate",
+        "single-project/terraform.tfstate.backup",
+    ]
+    for path in [stamp, *stamp.rglob("*")]:
+        mode = path.stat().st_mode & 0o777
+        assert mode == (0o700 if path.is_dir() else 0o600), path
+    assert (stamp / "single-project" / "terraform.tfstate.backup").read_text() == (
+        "sp-old"
+    )
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="make is not installed")
+def test_tf_backup_with_no_state_copies_nothing(budget_root):
+    env, args, tmp_path = budget_root
+    (tmp_path / "budget" / "terraform.tfstate").unlink()
+    result = _make(env, "tf-backup", *args)
+    assert result.returncode == 0
+    assert result.stdout == "tf-backup: copied 0 state files\n"
+    assert not (tmp_path / "backups").exists()
+
+
+def _dry_run(*args: str) -> list[str]:
+    result = subprocess.run(
+        [shutil.which("make") or "make", "-n", *args, "GOOGLE_CLOUD_PROJECT=fake-proj"],
+        cwd=ROOT,
+        env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.splitlines()
+
+
+def _first(lines: list[str], text: str) -> int:
+    return next(i for i, line in enumerate(lines) if text in line)
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="make is not installed")
+@pytest.mark.parametrize(
+    ("target", "command"),
+    [
+        ("budget-apply", "apply -input=false budget.tfplan"),
+        ("infra-apply", "agents-cli infra single-project"),
+        ("teardown", "single-project destroy -auto-approve"),
+        ("teardown-budget", "budget destroy -auto-approve"),
+    ],
+)
+def test_dry_runs_show_the_pin_then_a_backup_around_the_change(target, command):
+    lines = _dry_run(target, "CONFIRM=yes")
+    pin = _first(lines, "output -raw project_id")
+    will = _first(lines, 'echo "will: ')
+    change = _first(lines, command)
+    assert pin < will < change
+    assert "tf-backup: copied" in lines[change - 1]
+    assert "tf-backup: copied" in lines[change].split(command, 1)[1]

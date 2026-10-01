@@ -31,3 +31,8 @@ output "sandbox_image_repository" {
   description = "Artifact Registry repository for the sandbox image"
   value       = "${var.region}-docker.pkg.dev/${var.project_id}/issue-to-pr"
 }
+
+output "project_id" {
+  description = "The project this root was applied to; make's project pin compares it with GOOGLE_CLOUD_PROJECT."
+  value       = var.project_id
+}

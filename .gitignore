@@ -146,9 +146,10 @@ dmypy.json
 .terraform*
 .Terraform*
 
-# Terraform state.
+# Terraform state and saved plans (both hold the project id).
 *.tfstate
 *.tfstate.*
+*.tfplan
 
 # agents-cli's deploy record: names the engine and the project number once a
 # deploy has run (scripts/stage_deploy.py copies it back here).

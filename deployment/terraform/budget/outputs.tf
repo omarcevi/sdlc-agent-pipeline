@@ -17,3 +17,8 @@ output "guard_function" {
   description = "The guard function's name."
   value       = google_cloudfunctions2_function.guard.name
 }
+
+output "project_id" {
+  description = "The project this root was applied to; make's project pin compares it with GOOGLE_CLOUD_PROJECT."
+  value       = var.project_id
+}
