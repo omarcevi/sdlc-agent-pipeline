@@ -45,6 +45,16 @@ def run_timeout_s() -> float:
         value = float("nan")
     if not value > 0 or value == float("inf"):
         raise ValueError(f"RUN_TIMEOUT_S must be a positive number, got {raw!r}")
+    ttl_raw = os.environ.get("SANDBOX_TTL_S", "1800")  # the Docker backend's default
+    try:
+        ttl = float(ttl_raw)
+    except ValueError:
+        return value  # the backend rejects a bad SANDBOX_TTL_S itself
+    if value >= ttl:
+        raise ValueError(
+            f"RUN_TIMEOUT_S ({raw}) must stay below SANDBOX_TTL_S ({ttl_raw}) so the "
+            "driver releases the sandbox before it expires"
+        )
     return value
 
 

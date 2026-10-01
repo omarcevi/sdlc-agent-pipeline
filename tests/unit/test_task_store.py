@@ -55,3 +55,33 @@ def test_materialize_with_solution_and_shortcut_is_an_error(bench_root, tmp_path
         materialize(
             load_task("t-1"), tmp_path / "x", with_solution=True, with_shortcut=True
         )
+
+
+def test_repr_hides_task_text():
+    from app.task_store import TaskSpec
+
+    spec = TaskSpec(
+        task_id="x-1",
+        repo="r",
+        title="SECRET-TITLE",
+        body="SECRET-BODY",
+        category="bug",
+        difficulty="easy",
+        split="dev",
+    )
+    assert "SECRET-TITLE" not in repr(spec) and "SECRET-BODY" not in repr(spec)
+    assert spec.title == "SECRET-TITLE" and spec.body == "SECRET-BODY"
+    assert spec == spec.model_copy()
+
+
+def test_materialize_never_copies_caches(bench_root, tmp_path):
+    for base in (bench_root / "repos" / "mini", bench_root / "tasks" / "t-1" / "plant"):
+        (base / "__pycache__").mkdir(parents=True, exist_ok=True)
+        (base / "__pycache__" / "x.pyc").write_bytes(b"x")
+        (base / ".pytest_cache").mkdir(exist_ok=True)
+        (base / ".pytest_cache" / "v").write_text("x")
+        (base / "stale.pyc").write_bytes(b"x")
+    out = materialize(load_task("t-1"), tmp_path / "out")
+    assert not list(out.rglob("__pycache__"))
+    assert not list(out.rglob(".pytest_cache"))
+    assert not list(out.rglob("*.pyc"))

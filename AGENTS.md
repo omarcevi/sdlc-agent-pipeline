@@ -22,6 +22,7 @@ Read the spec before making architectural changes. If the code and the spec disa
    - Never edit `hidden_tests/` to make a run pass.
    - Run `bench validate` after changing anything under `bench/repos/`.
    - Held-out task directories (`bench/tasks/*-h[0-9][0-9]/`) are sealed: never open, print or diff them, not even as file names in a diff stat. Exclude them from review diffs with the pathspec `':(exclude,glob)bench/tasks/*-h[0-9][0-9]/**'`; a pattern without `/**` does not exclude the files inside.
+   - Keep git output quiet around them: `git commit -q`, `git cherry-pick ... >/dev/null`, `git merge --no-stat`. Run pytest with `--tb=no` when held-out tasks are collected. Never review a held-out change in a GitHub PR's file view.
 6. **Keep the cost guards.** The budget plugin, sandbox TTLs and loop bounds stay on. Changing their defaults needs the owner's approval.
 7. **Don't change model names unless asked.** Models are configured through env vars (`PLANNER_MODEL`, `CODER_MODEL`, `REVIEWER_MODEL`). Bench runs take their models from `--preset`; the three role variables configure `app/agent.py`.
 8. **Never deploy, create cloud resources, or push to GitHub without explicit approval** from the owner, given in the current session.

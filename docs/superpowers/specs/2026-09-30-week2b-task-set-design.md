@@ -74,7 +74,7 @@ The new tasks are split about evenly between the two repos. Difficulty for the n
 
 - A separate subagent (the sealed author) writes the five held-out tasks from a brief that fixes only repo, category, difficulty and levers. It works from the committed repos and may read the dev tasks as examples.
 - A second subagent (the sealed checker) reads each held-out task and answers only: is the issue fair, do the hidden tests test what the issue and the repo's rules say, does the trap really need declining. It reports pass or fail per task ID with no quotes from the task.
-- The main session never opens, prints or diffs anything under a held-out task directory. Commits that add them are made with `git add` on the directory, checked only with `git status` and `bench validate`. Review diffs given to non-sealed reviewers exclude those directories.
+- The main session never opens, prints or diffs anything under a held-out task directory. Commits that add them are made with `git add` on the directory, checked with counts and `bench validate` only (never `git status`, which lists staged paths). Review diffs given to non-sealed reviewers exclude those directories.
 - Held-out tasks are not run in Week 2B. They run once, at the end of the project, after any prompt tuning, at a commit recorded before the run. `bench run` already refuses them without `--confirm-heldout`.
 
 ## 8. Pilot on Flash

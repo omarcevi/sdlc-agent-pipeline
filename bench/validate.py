@@ -100,7 +100,12 @@ def validate_task(task: TaskSpec) -> list[str]:
 def main() -> int:
     failures = 0
     for task in list_tasks():
-        problems = validate_task(task)
+        try:
+            problems = validate_task(task)
+        except Exception as exc:  # a message or traceback could quote sealed text
+            print(f"{task.task_id}: error ({type(exc).__name__})")
+            failures += 1
+            continue
         print(f"{task.task_id}: {'ok' if not problems else '; '.join(problems)}")
         failures += bool(problems)
     return 1 if failures else 0

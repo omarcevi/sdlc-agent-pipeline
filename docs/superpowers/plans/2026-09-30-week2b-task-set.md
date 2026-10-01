@@ -268,7 +268,7 @@ The main session never reads this task's output. It dispatches two subagents and
 
 - [ ] **Step 1:** Dispatch the sealed author.
 - [ ] **Step 2:** Dispatch the sealed checker; fix rounds until all five pass.
-- [ ] **Step 3:** Controller: cherry-pick the author's commits; run `uv run python -m bench.validate` (one line per task) and the full suite. Check the diff by file names only: `git diff --stat <base> HEAD -- bench/tasks`.
+- [ ] **Step 3:** Controller: cherry-pick the author's commits quietly (`git cherry-pick <sha> >/dev/null`); run `uv run python -m bench.validate` (one line per task) and the full suite (`--tb=no`). Check only with counts (for example `git diff --name-only <base> HEAD -- bench/tasks | grep -c -- '-h[0-9][0-9]/'`) and with `bench.validate`, never with a listing of names.
 
 ---
 

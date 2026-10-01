@@ -106,3 +106,13 @@ def test_validate_output_for_a_heldout_task_is_one_generic_line(
     lines = capsys.readouterr().out.splitlines()
     assert lines == ["zz-h01: hidden tests already pass at base+plant"]
     assert "secret" not in "".join(lines).lower()
+
+
+def test_main_prints_error_type_only_and_carries_on(root, monkeypatch, capsys):
+    def boom(task):
+        raise RuntimeError("SECRET-MESSAGE")
+
+    monkeypatch.setattr(validate, "validate_task", boom)
+    assert validate.main() == 1
+    out = capsys.readouterr().out
+    assert out.strip() == "t-1: error (RuntimeError)"

@@ -735,3 +735,20 @@ async def test_transport_timeout_is_infra_not_the_wall_clock_budget(bench, monke
     assert (record.outcome, record.failure_kind) == ("failed", "infra")
     assert "wall clock" not in record.reason
     assert env.closed
+
+
+@pytest.mark.parametrize(
+    ("timeout", "ttl", "ok"),
+    [("3000", "3300", True), ("3000", None, False), ("1500", None, True)],
+)
+def test_run_timeout_must_stay_below_sandbox_ttl(monkeypatch, timeout, ttl, ok):
+    monkeypatch.setenv("RUN_TIMEOUT_S", timeout)
+    if ttl is None:
+        monkeypatch.delenv("SANDBOX_TTL_S", raising=False)
+    else:
+        monkeypatch.setenv("SANDBOX_TTL_S", ttl)
+    if ok:
+        assert run_timeout_s() == float(timeout)
+    else:
+        with pytest.raises(ValueError, match="SANDBOX_TTL_S"):
+            run_timeout_s()

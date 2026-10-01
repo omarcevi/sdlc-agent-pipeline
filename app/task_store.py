@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+_NO_CACHES = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache")
 
 LEVERS = frozenset(
     {"multi_file", "distant_symptom", "doc_rule", "regression_risk", "shortcut"}
@@ -20,8 +22,9 @@ LEVERS = frozenset(
 class TaskSpec(BaseModel):
     task_id: str
     repo: str
-    title: str
-    body: str
+    # Out of reprs: pytest prints parametrised TaskSpec objects in tracebacks.
+    title: str = Field(repr=False)
+    body: str = Field(repr=False)
     category: Literal["bug", "feature", "refactor", "trap"]
     difficulty: Literal["easy", "medium", "hard"]
     split: Literal["dev", "heldout"]
@@ -54,7 +57,7 @@ def list_tasks() -> list[TaskSpec]:
 
 def _overlay(src: Path, dest: Path) -> None:
     if src.is_dir():
-        shutil.copytree(src, dest, dirs_exist_ok=True)
+        shutil.copytree(src, dest, dirs_exist_ok=True, ignore=_NO_CACHES)
 
 
 def materialize(
@@ -67,7 +70,7 @@ def materialize(
 ) -> Path:
     if with_solution and with_shortcut:
         raise ValueError("with_solution and with_shortcut are mutually exclusive")
-    shutil.copytree(repos_dir() / task.repo, dest)
+    shutil.copytree(repos_dir() / task.repo, dest, ignore=_NO_CACHES)
     _overlay(task_dir(task.task_id) / "plant", dest)
     if with_shortcut:
         _overlay(task_dir(task.task_id) / "shortcut", dest)
