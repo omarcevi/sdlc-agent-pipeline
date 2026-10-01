@@ -24,7 +24,7 @@ from app.budget import BudgetExceeded, BudgetPlugin
 from app.environment import registry
 from app.environment.base import InfraError
 from app.guardrails import GuardrailPlugin
-from app.models import RoleModels
+from app.models import ModelCallStalled, RoleModels, model_call_timeout_s
 from app.nodes.finish import runs_dir
 from app.pipeline import build_workflow
 from app.schemas import FailureKind, Plan, Review, RunRecord, RunRequest, SoloResult
@@ -56,6 +56,17 @@ def run_timeout_s() -> float:
             "driver releases the sandbox before it expires"
         )
     return value
+
+
+def check_model_call_timeout(run_timeout: float) -> None:
+    """MODEL_CALL_TIMEOUT_S must be valid and stay below the run's wall-clock cap:
+    a call timeout at or above the cap could never fire before the cap does."""
+    value = model_call_timeout_s()
+    if value >= run_timeout:
+        raise ValueError(
+            f"MODEL_CALL_TIMEOUT_S ({value:g}) must stay below RUN_TIMEOUT_S "
+            f"({run_timeout:g}), or a stalled model call is never retried"
+        )
 
 
 class RunCrashed(Exception):
@@ -186,6 +197,10 @@ def classify_failure(
             return "budget", str(error)
         if isinstance(error, InfraError):
             return "infra", str(error)
+        if isinstance(error, ModelCallStalled):
+            # A provider stall that outlasted one retry. It is not a TimeoutError,
+            # so the driver never takes it for the wall-clock cap.
+            return "infra", str(error)
         if isinstance(error, genai_errors.ClientError) and error.code in (400, 413):
             # The agent built a request the model cannot take, e.g. a context overflow.
             return "agent", f"model rejected the request: {error.code} {error.message}"
@@ -267,6 +282,7 @@ async def _run(
     on_event: Callable[[Event], None] | None = None,
 ) -> RunRecord:
     timeout_s = run_timeout_s()
+    check_model_call_timeout(timeout_s)
     budget = BudgetPlugin()
     tracker = _ActiveAgentTracker()
     app = App(
