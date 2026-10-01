@@ -76,6 +76,7 @@ __all__ = [
     "SandboxHandle",
     "SandboxSettings",
     "SdkSandboxControl",
+    "redact",
     "sdk_control",
     "template_is_usable",
 ]
@@ -209,32 +210,45 @@ def _is_not_found(exc: BaseException) -> bool:
     )
 
 
-# Control-plane messages name resources, and so the project number; this text
-# becomes a run's reason, which reaches record.json and the tracked results.
-_REDACTIONS = (
-    (re.compile(r" for url: .*", re.DOTALL), ""),  # requests' HTTPError tail
-    (re.compile(r"projects/[^\s'\"]+"), "projects/…"),
-    (re.compile(r"project_number:\d+"), "project_number:…"),
-    (re.compile(r"[\w.+-]+@[\w.-]+\.iam\.gserviceaccount\.com"), "<service account>"),
-    (re.compile(r"\b\d{10,}\b"), "…"),  # a project number in any other form
-)
+# Provider text (the SDK's messages, the proxy's bodies, transport errors) names
+# the project, its number and service accounts; an error's text becomes a run's
+# reason, which reaches record.json and the tracked results. Every such text goes
+# through redact() before it is put in an error.
+_URL_TAIL = re.compile(r" for url: .*", re.DOTALL)  # requests' HTTPError tail
+_SERVICE_ACCOUNT = re.compile(r"[\w.+-]+@(?:[\w-]+\.)*gserviceaccount\.com")
+_PROJECT_PATH = re.compile(r"projects/[^/\s'\"]+")
+_LONG_NUMBER = re.compile(r"\d{9,}")  # project numbers have 12 digits; ports stay
 
 
-def _redacted(text: str) -> str:
-    for pattern, replacement in _REDACTIONS:
-        text = pattern.sub(replacement, text)
-    return text
+def redact(text: str) -> str:
+    """`text` without project paths (`projects/<project>`), service-account emails
+    (`<service-account>`), the `GOOGLE_CLOUD_PROJECT` value when it is set (whole
+    word, any case: `<project>`) or runs of 9 or more digits (`<number>`)."""
+    text = _URL_TAIL.sub("", text)
+    text = _SERVICE_ACCOUNT.sub("<service-account>", text)
+    text = _PROJECT_PATH.sub("projects/<project>", text)
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip()
+    if project:
+        whole_word = rf"(?<![A-Za-z0-9]){re.escape(project)}(?![A-Za-z0-9])"
+        text = re.sub(whole_word, "<project>", text, flags=re.IGNORECASE)
+    return _LONG_NUMBER.sub("<number>", text)
+
+
+def _provider_text(text: str) -> str:
+    """At most 200 characters of redacted provider text (redacted first, so a cut
+    never leaves part of a number or an email behind)."""
+    return redact(text)[:_BODY_CHARS]
 
 
 def _control_error(action: str, exc: BaseException) -> InfraError:
     """The SDK's error as an InfraError: the action, the error type, its code and
-    status, and at most 200 characters of its message with every resource name,
-    project number and service account removed."""
+    status, and at most 200 characters of its redacted message. Raise it
+    `from None`, so no traceback carries the SDK's own text."""
     code = getattr(exc, "code", None)
     if code is None:
         code = getattr(getattr(exc, "response", None), "status_code", None)
     status = getattr(exc, "status", None)
-    message = _redacted(str(getattr(exc, "message", None) or exc))[:_BODY_CHARS]
+    message = _provider_text(str(getattr(exc, "message", None) or exc))
     detail = " ".join(str(part) for part in (code, status) if part)
     kind = f"{type(exc).__name__} {detail}".strip()
     return InfraError(f"sandbox {action} failed: {kind}: {message}")
@@ -270,7 +284,7 @@ class SdkSandboxControl:
         try:
             return await asyncio.to_thread(call)
         except Exception as exc:
-            raise _control_error(action, exc) from exc
+            raise _control_error(action, exc) from None
 
     async def check_template(self, template: str) -> None:
         try:
@@ -280,7 +294,7 @@ class SdkSandboxControl:
         except Exception as exc:
             if _is_not_found(exc):
                 raise InfraError(TEMPLATE_NOT_USABLE) from None
-            raise _control_error("template check", exc) from exc
+            raise _control_error("template check", exc) from None
         if not template_is_usable(found):
             raise InfraError(TEMPLATE_NOT_USABLE)
 
@@ -339,7 +353,7 @@ class SdkSandboxControl:
         except Exception as exc:
             if _is_not_found(exc):
                 return
-            raise _control_error("delete", exc) from exc
+            raise _control_error("delete", exc) from None
 
 
 _SDK_CONTROLS: dict[SandboxSettings, SdkSandboxControl] = {}
@@ -590,7 +604,7 @@ class AgentRuntimeEnvironment:
         except httpx.HTTPError as exc:
             raise InfraError(
                 f"sandbox {self.env_id}: {method} {label} failed: "
-                f"{type(exc).__name__}: {str(exc)[:_BODY_CHARS]}"
+                f"{type(exc).__name__}: {_provider_text(str(exc))}"
             ) from None
 
     def _status_error(
@@ -598,7 +612,7 @@ class AgentRuntimeEnvironment:
     ) -> InfraError:
         return InfraError(
             f"sandbox {self.env_id}: {method} {label} returned HTTP "
-            f"{response.status_code}: {response.text[:_BODY_CHARS]}"
+            f"{response.status_code}: {_provider_text(response.text)}"
         )
 
     def _body_error(
@@ -606,7 +620,7 @@ class AgentRuntimeEnvironment:
     ) -> InfraError:
         return InfraError(
             f"sandbox {self.env_id}: {method} {label} returned an unreadable body: "
-            f"{response.text[:_BODY_CHARS]}"
+            f"{_provider_text(response.text)}"
         )
 
     @staticmethod
@@ -640,7 +654,7 @@ class AgentRuntimeEnvironment:
             timeout=httpx.Timeout(_HTTP_TIMEOUT_S, read=seconds + 30),
         )
         if response.status_code != 200:
-            raise self._status_error("POST", "/exec", response)
+            raise self._status_error("POST", "/exec", response) from None
         try:
             result = ExecResult.model_validate(response.json())
         except ValueError:
@@ -682,9 +696,9 @@ class AgentRuntimeEnvironment:
                 raise OSError(detail)
             error = self._status_error("GET", label, response)
             if status < 500:
-                raise error
+                raise error from None
         assert error is not None
-        raise error
+        raise error from None
 
     async def write_file(self, path: str, content: str) -> None:
         self._ensure_open()
@@ -703,7 +717,7 @@ class AgentRuntimeEnvironment:
             detail = self._shim_detail(response)
             if detail is not None:
                 raise OSError(detail)
-        raise self._status_error("POST", label, response)
+        raise self._status_error("POST", label, response) from None
 
     async def upload_dir(self, local_dir: Path, dest: str = WORKDIR) -> None:
         self._ensure_open()
@@ -719,7 +733,7 @@ class AgentRuntimeEnvironment:
             timeout=_UPLOAD_TIMEOUT_S,
         )
         if response.status_code != 200:
-            raise self._status_error("POST", label, response)
+            raise self._status_error("POST", label, response) from None
 
     async def close(self) -> None:
         """Delete the sandbox (without waiting for the operation) and close the

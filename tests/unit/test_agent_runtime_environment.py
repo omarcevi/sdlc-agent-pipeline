@@ -1186,7 +1186,9 @@ def _http_error(status: int) -> requests.HTTPError:
 
 
 @pytest.mark.parametrize("error", [*REALISTIC_ERRORS, _http_error(403)])
-async def test_control_errors_carry_no_resource_names(sdk, control, error):
+async def test_control_errors_carry_no_project_number_or_service_account(
+    sdk, control, error
+):
     sdk.sandboxes.errors["create"] = error
     sdk.sandboxes.errors["generate_access_token"] = error
     with pytest.raises(InfraError) as created:
@@ -1199,9 +1201,12 @@ async def test_control_errors_carry_no_resource_names(sdk, control, error):
         text = str(caught.value)
         assert text.startswith(f"sandbox {action} failed: {type(error).__name__} ")
         assert str(getattr(error, "code", 403)) in text
-        for secret in ("123456789012", "4242", "9001", "demo-project", "for url"):
+        # redact() keeps the path after the project segment (the engine and
+        # template ids of these fakes are short; real ones are long numbers)
+        for secret in ("123456789012", "demo-project", "sandbox-caller", "for url"):
             assert secret not in text
-        assert "projects/" not in text.replace("projects/…", "")
+        assert "projects/" not in text.replace("projects/<project>", "")
+        assert caught.value.__cause__ is None
         if getattr(error, "status", None):
             assert error.status in text
 
@@ -1281,3 +1286,126 @@ async def test_upload_dir_turns_a_name_it_cannot_encode_into_an_infra_error(
     monkeypatch.setattr(zipfile.ZipFile, "write", write)
     with pytest.raises(InfraError, match="upload failed"):
         await env.upload_dir(_tree(tmp_path / "repo"))
+
+
+# --- final fix wave: one redact() on every cloud error path -----------------------
+
+LEAKY_PROJECT = "my-demo-proj"
+# Each body is short, so its redacted form fits in the 200 characters an error keeps.
+LEAKY_BODIES = [
+    "denied on projects/123456789012/locations/us-central1/reasoningEngines/4242 "
+    "port 8080",
+    "caller sandbox-caller@my-demo-proj.iam.gserviceaccount.com port 8080",
+    "agent service-123456789012@gcp-sa-aiplatform.iam.gserviceaccount.com port 8080",
+    "compute 123456789012-compute@developer.gserviceaccount.com port 8080",
+    "build 987654321@cloudservices.gserviceaccount.com port 8080",
+    "bucket gs://My-Demo-Proj_cloudbuild in my-demo-proj port 8080",
+    "consumer project_number:123456789012 port 8080",
+]
+
+
+def _assert_redacted(error: BaseException) -> None:
+    text = str(error)
+    for secret in ("123456789012", "987654321", "@", "gserviceaccount"):
+        assert secret not in text, secret
+    assert LEAKY_PROJECT not in text.lower()
+    assert "8080" in text  # a port is not a project number
+    assert re.search(r"<(project|number|service-account)>", text)
+    assert error.__cause__ is None
+    assert error.__suppress_context__ is True
+
+
+def test_redact_removes_project_paths_numbers_service_accounts_and_the_id(
+    monkeypatch,
+):
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", LEAKY_PROJECT)
+    redact = agent_runtime.redact
+    assert redact("x projects/123456789012/locations/l y") == (
+        "x projects/<project>/locations/l y"
+    )
+    assert redact("number 123456789 and 12345678, HTTP 403") == (
+        "number <number> and 12345678, HTTP 403"
+    )
+    for email in (
+        "a@p.iam.gserviceaccount.com",
+        "1-compute@developer.gserviceaccount.com",
+        "2@cloudservices.gserviceaccount.com",
+        "service-3@gcp-sa-aiplatform.iam.gserviceaccount.com",
+    ):
+        assert redact(f"by {email}.") == "by <service-account>."
+    assert redact("MY-DEMO-PROJ, my-demo-proj_cloudbuild, my-demo-project") == (
+        "<project>, <project>_cloudbuild, my-demo-project"
+    )
+    assert redact("403 Forbidden for url: https://x/projects/1") == "403 Forbidden"
+
+
+def test_redact_leaves_names_alone_without_a_project_setting(monkeypatch):
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    assert agent_runtime.redact("my-demo-proj on port 8080") == (
+        "my-demo-proj on port 8080"
+    )
+
+
+@pytest.mark.parametrize("body", LEAKY_BODIES)
+async def test_data_plane_errors_carry_provider_text_only_redacted(
+    rig, monkeypatch, body
+):
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", LEAKY_PROJECT)
+    env = await rig.start()
+    caught: list[InfraError] = []
+    answers = {
+        "status": httpx.Response(403, text=body),
+        "unreadable body": httpx.Response(200, text=body),
+        "transport": httpx.ConnectError(body),
+    }
+    for kind, answer in answers.items():
+        rig.shim.queue("/exec", answer)
+        with pytest.raises(InfraError) as raised:
+            await env.exec("true")
+        caught.append(raised.value)
+        if kind == "status":
+            assert "HTTP 403" in str(raised.value)
+        if kind == "transport":
+            assert "ConnectError" in str(raised.value)
+    rig.shim.queue("/files", httpx.Response(403, text=body))
+    with pytest.raises(InfraError) as raised:
+        await env.read_file(PATH)
+    assert "HTTP 403" in str(raised.value)
+    caught.append(raised.value)
+    rig.shim.queue("/files", httpx.Response(200, text=body))
+    with pytest.raises(InfraError) as raised:
+        await env.read_file(PATH)
+    caught.append(raised.value)
+    rig.shim.queue("/files", *[httpx.ConnectError(body)] * 3)
+    with pytest.raises(InfraError) as raised:
+        await env.read_file(PATH)
+    caught.append(raised.value)
+    for error in caught:
+        _assert_redacted(error)
+
+
+@pytest.mark.parametrize("body", LEAKY_BODIES)
+async def test_control_plane_errors_carry_provider_text_only_redacted(
+    sdk, control, monkeypatch, body
+):
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", LEAKY_PROJECT)
+    error = api_error(403, "PERMISSION_DENIED", body)
+    for method in ("create", "generate_access_token", "delete"):
+        sdk.sandboxes.errors[method] = error
+    sdk.sandboxes.templates.error = error
+    calls = {
+        "create": lambda: control.create(
+            engine=ENGINE, template=TEMPLATE, ttl_s=60, display_name="itp-x"
+        ),
+        "token signing": lambda: control.sign_token(CALLER_SA, 60),
+        "template check": lambda: control.check_template(TEMPLATE),
+        "delete": lambda: control.delete(f"{ENGINE}/sandboxEnvironments/1"),
+    }
+    for action, call in calls.items():
+        with pytest.raises(InfraError) as raised:
+            await call()
+        text = str(raised.value)
+        assert text.startswith(
+            f"sandbox {action} failed: ClientError 403 PERMISSION_DENIED: "
+        )
+        _assert_redacted(raised.value)
