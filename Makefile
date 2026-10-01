@@ -9,7 +9,9 @@ TF_SP_DIR = deployment/terraform/single-project
 TF_BUDGET_DIR = deployment/terraform/budget
 TF_SP = terraform -chdir=$(TF_SP_DIR)
 TF_BUDGET = terraform -chdir=$(TF_BUDGET_DIR)
-BUDGET_VARS = -var project_id=$(PROJECT) -var budget_amount_try=$(BUDGET_TRY)
+# Only set after the hard stop has unlinked billing (the root can no longer read it).
+BILLING_VAR = $(if $(BILLING_ACCOUNT),-var billing_account=$(BILLING_ACCOUNT))
+BUDGET_VARS = -var project_id=$(PROJECT) -var budget_amount_try=$(BUDGET_TRY) $(BILLING_VAR)
 # budget-plan saves the plan the owner reads; budget-apply applies exactly that file.
 BUDGET_PLAN = budget.tfplan
 # Teardown names the engine from Terraform on every step, never from SANDBOX_ENGINE;
@@ -208,11 +210,12 @@ teardown: require-project require-confirm require-same-project-infra
 
 # Removes the hard stop; always last, and only when the owner asks. The variable
 # budget_amount_try must pass its validation (whole lira >= 1) even on destroy, so 1.
+# After the hard stop has fired, pass BILLING_ACCOUNT=<id> (billing is unlinked).
 teardown-budget: require-project require-confirm require-same-project-budget
 	@echo "will: DESTROY the budget, its topic and the guard function, then offer to delete gcf-artifacts and gcf-v2-* (owner approval)"
 	$(TF_BUDGET) init -input=false
 	@$(TF_BACKUP)
-	$(TF_BUDGET) destroy -auto-approve -var project_id=$(PROJECT) -var budget_amount_try=1; $(TF_BACKUP_AFTER)
+	$(TF_BUDGET) destroy -auto-approve -var project_id=$(PROJECT) -var budget_amount_try=1 $(BILLING_VAR); $(TF_BACKUP_AFTER)
 	@echo "left behind by the function build:"
 	@gcloud artifacts repositories list --project=$(PROJECT) --location=us-central1 --filter="name~/gcf-artifacts$$" --format="value(name)"
 	@gcloud storage buckets list --project=$(PROJECT) --filter="name~^gcf-v2-" --format="value(name)"

@@ -565,3 +565,19 @@ def test_dry_runs_show_the_pin_then_a_backup_around_the_change(target, command):
     assert pin < will < change
     assert "tf-backup: copied" in lines[change - 1]
     assert "tf-backup: copied" in lines[change].split(command, 1)[1]
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="make is not installed")
+def test_billing_account_reaches_the_budget_plan_and_destroy_only_when_set():
+    for target in ("budget-plan", "teardown-budget"):
+        args = (target, "CONFIRM=yes", "BUDGET_TRY=1")
+        lines = _dry_run(*args)
+        assert not any("billing_account" in line for line in lines)
+        lines = _dry_run(*args, "BILLING_ACCOUNT=AAAAAA-BBBBBB-CCCCCC")
+        (line,) = [
+            line
+            for line in lines
+            if line.startswith("terraform")
+            and (" plan " in line or " destroy " in line)
+        ]
+        assert "-var billing_account=AAAAAA-BBBBBB-CCCCCC" in line
