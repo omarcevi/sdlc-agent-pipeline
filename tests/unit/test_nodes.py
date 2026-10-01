@@ -391,12 +391,13 @@ def test_deliver_patch_writes_file(bench_root):
     assert (bench_root / "runs" / "r-9" / "patch.diff").read_text() == DIFF
 
 
-def test_report_failure_maps_declines_and_agent_failures():
+async def test_report_failure_maps_declines_and_agent_failures():
+    # report_failure is an async generator since week 2C (live mode posts a comment).
     declined = _last(
-        list(report_failure({}, {"kind": "declined", "reason": "r"}))
+        [e async for e in report_failure({}, {"kind": "declined", "reason": "r"})]
     ).actions.state_delta["outcome"]
     assert (declined["outcome"], declined["failure_kind"]) == ("declined", "none")
     failed = _last(
-        list(report_failure({}, {"kind": "agent", "reason": "r"}))
+        [e async for e in report_failure({}, {"kind": "agent", "reason": "r"})]
     ).actions.state_delta["outcome"]
     assert (failed["outcome"], failed["failure_kind"]) == ("failed", "agent")

@@ -7,7 +7,7 @@ because state deltas from a failing callback are not persisted.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from google.adk.plugins.base_plugin import BasePlugin
@@ -26,6 +26,7 @@ class Usage:
     cost_usd: float = 0.0
     tool_calls: int = 0
     last_model: str = ""
+    models: set[str] = field(default_factory=set)
 
 
 class BudgetPlugin(BasePlugin):
@@ -56,6 +57,8 @@ class BudgetPlugin(BasePlugin):
     ) -> None:
         usage = self.usage(callback_context.session.id)
         usage.last_model = llm_request.model or ""
+        if usage.last_model:
+            usage.models.add(usage.last_model)
         if usage.cost_usd >= self.max_usd:
             raise BudgetExceeded(
                 f"run cost ${usage.cost_usd:.3f} reached the ${self.max_usd:.2f} cap"
@@ -80,6 +83,7 @@ class BudgetPlugin(BasePlugin):
             "tokens_in": usage.tokens_in,
             "tokens_out": usage.tokens_out,
             "tool_calls": usage.tool_calls,
+            "models": sorted(usage.models),
         }
         return None
 

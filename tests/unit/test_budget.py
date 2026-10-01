@@ -106,3 +106,19 @@ def test_per_turn_env_var_is_not_read(monkeypatch):
     plugin = BudgetPlugin()
     assert not hasattr(plugin, "max_turn_tool_calls")
     assert plugin.max_tool_calls == 75
+
+
+async def test_budget_state_lists_the_models_seen():
+    plugin = BudgetPlugin(max_usd=10)
+    ctx = _ctx()
+    for model in ("gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-3.8-flash"):
+        await plugin.before_model_callback(
+            callback_context=ctx, llm_request=SimpleNamespace(model=model)
+        )
+        await plugin.after_model_callback(
+            callback_context=ctx, llm_response=_response(10, 10)
+        )
+    assert ctx.state["budget"]["models"] == [
+        "gemini-3.1-pro-preview",
+        "gemini-3.8-flash",
+    ]
