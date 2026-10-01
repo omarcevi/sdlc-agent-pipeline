@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -74,16 +75,20 @@ def run_command(
         list(cmd),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
         cwd=cwd,
     )
     collected: dict[str, list[str]] = {"out": [], "err": []}
 
     def pump(stream, key: str, sink) -> None:
         for line in stream:
-            collected[key].append(line)
-            sink.write(line)
-            sink.flush()
+            collected[key].append(line)  # keep draining even if the sink fails
+            try:
+                sink.write(line)
+                sink.flush()
+            except (OSError, ValueError):
+                pass
 
     threads = [
         threading.Thread(target=pump, args=(proc.stdout, "out", sys.stdout)),
@@ -164,7 +169,8 @@ def _check_out(repo_root: Path, out: Path) -> None:
         if any(target.iterdir()) and not _marker(target).is_file():
             raise StageRefused(
                 "staging refused: the output directory is not empty and was not "
-                "made by a stage"
+                "made by a stage; remove it by hand, or stage once into a fresh "
+                "path, then retry"
             )
 
 
@@ -177,10 +183,9 @@ def stage(repo_root: Path, out: Path) -> list[str]:
     for name in ROOT_FILES:
         if name not in OPTIONAL_ROOT_FILES and not (repo_root / name).is_file():
             raise StageRefused(f"staging refused: {name} is missing")
-    work = out.parent / f"{out.name}.tmp"
-    if work.exists():
-        shutil.rmtree(work)
-    work.mkdir(parents=True)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    # a fresh, uniquely named directory: only this path is ever removed on failure
+    work = Path(tempfile.mkdtemp(dir=out.parent, prefix=f".{out.name}.staging-"))
     try:
         staged = _build(repo_root, work)
     except BaseException:

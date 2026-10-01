@@ -595,3 +595,54 @@ def test_dockerfile_copies_bench():
     ]
     assert "COPY ./bench ./bench" in lines
     assert lines.index("COPY ./bench ./bench") == lines.index("COPY ./app ./app") + 1
+
+
+def test_stage_never_removes_a_preexisting_sibling(tree, tmp_path):
+    out = tmp_path / "mine"
+    for name in ("mine.tmp", "mine.staging", ".mine.staging-x"):
+        write(tmp_path / name / "precious.txt", "keep")
+    sd.stage(tree, out)
+    for name in ("mine.tmp", "mine.staging", ".mine.staging-x"):
+        assert (tmp_path / name / "precious.txt").read_text() == "keep"
+    assert all_files(out) == EXPECTED
+    leftovers = [
+        p.name for p in tmp_path.iterdir() if p.name.startswith(".mine.staging-")
+    ]
+    assert leftovers == [".mine.staging-x"]  # its own work dir is gone
+
+
+def test_a_refused_unmarked_directory_says_how_to_fix_it(tree):
+    out = tree / "build" / "deploy"
+    write(out / "old.txt")
+    with pytest.raises(sd.StageRefused) as caught:
+        sd.stage(tree, out)
+    assert "remove it by hand" in str(caught.value)
+
+
+def test_tee_survives_a_flood_on_stderr_and_bad_bytes():
+    code = (
+        "import sys\n"
+        "sys.stderr.write('e' * 400000)\n"
+        "sys.stdout.buffer.write(b'\\xff\\xfe ok\\n')\n"
+        "sys.stdout.flush()\n"
+        "sys.stderr.write('done\\n')\n"
+    )
+    done = sd.run_command([sys.executable, "-c", code], tee=True)
+    assert done.returncode == 0
+    assert len(done.stderr) > 400000 and done.stderr.endswith("done\n")
+    assert "ok" in done.stdout
+
+
+def test_tee_keeps_collecting_when_the_terminal_pipe_breaks(monkeypatch):
+    class Broken:
+        def write(self, _text):
+            raise BrokenPipeError
+
+        def flush(self):
+            raise BrokenPipeError
+
+    monkeypatch.setattr(sys, "stdout", Broken())
+    code = "import sys\nfor _ in range(200):\n    print('x' * 3000)\nprint('END')\n"
+    done = sd.run_command([sys.executable, "-c", code], tee=True)
+    assert done.returncode == 0
+    assert done.stdout.endswith("END\n")
