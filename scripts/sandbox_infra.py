@@ -24,7 +24,9 @@ from typing import Any, Protocol
 
 SWEEP_GRACE_S = 60
 DEFAULT_TTL_S = 1800
-TERMINAL_STATES = frozenset({"STATE_DELETED", "STATE_DEPROVISIONING"})
+TERMINAL_STATES = frozenset({"STATE_DELETED", "STATE_DEPROVISIONING"})  # sandboxes
+# Template states have no STATE_ prefix in the SDK (types/common.py:18170-18181).
+TEMPLATE_TERMINAL_STATES = frozenset({"DELETED", "DEPROVISIONING"})
 TEMPLATE_PORT = 8080
 TEMPLATE_RESOURCES = {
     "limits": {"cpu": "2", "memory": "2Gi"},
@@ -59,7 +61,7 @@ class Template:
 class Sandbox:
     name: str
     state: str
-    create_time: datetime
+    create_time: datetime | None
     load_balancer_hostname: str | None = None
     routing_token: str | None = field(default=None, repr=False)
 
@@ -122,10 +124,8 @@ def template_config(
     return {
         "display_name": display_name,
         "custom_container_environment": {
-            "custom_container_spec": {
-                "image_uri": image,
-                "resources": json.loads(json.dumps(TEMPLATE_RESOURCES)),
-            },
+            "custom_container_spec": {"image_uri": image},
+            "resources": json.loads(json.dumps(TEMPLATE_RESOURCES)),
             "ports": [{"port": int(p), "protocol": "TCP"} for p in ports],
         },
         "egress_control_config": {"internet_access": False},
@@ -159,7 +159,9 @@ def expired(
     return [
         s.name
         for s in sandboxes
-        if s.state not in TERMINAL_STATES and now - s.create_time > limit
+        if s.state not in TERMINAL_STATES
+        and s.create_time is not None
+        and now - s.create_time > limit
     ]
 
 
@@ -192,17 +194,25 @@ def find_template(platform: Platform, engine: str, image: str) -> str | None:
 # ---- the real platform ------------------------------------------------------
 
 
+def _state(raw: Any) -> str:
+    """SDK sandbox states are str-enums whose str() carries the class name; template
+    states are bare literals. Both come out as plain strings."""
+    return str(getattr(raw, "value", raw) or "")
+
+
 class SdkPlatform:
     """The Agent Platform SDK. Imported lazily; unit tests never build it."""
 
-    def __init__(self, project: str, location: str) -> None:
-        import agentplatform
+    def __init__(self, project: str, location: str, client: Any = None) -> None:
+        if client is None:
+            import agentplatform
 
-        self._client = agentplatform.Client(
-            project=project,
-            location=location,
-            http_options={"api_version": "v1beta1"},
-        )
+            client = agentplatform.Client(
+                project=project,
+                location=location,
+                http_options={"api_version": "v1beta1"},
+            )
+        self._client = client
 
     @property
     def _sandboxes(self) -> Any:
@@ -212,13 +222,17 @@ class SdkPlatform:
     def _template(raw: Any) -> Template:
         env = getattr(raw, "custom_container_environment", None)
         spec = getattr(env, "custom_container_spec", None)
-        ports = [int(p.port) for p in (getattr(env, "ports", None) or [])]
+        ports = [
+            int(p.port)
+            for p in (getattr(env, "ports", None) or [])
+            if getattr(p, "port", None) is not None
+        ]
         egress = getattr(raw, "egress_control_config", None)
         internet = getattr(egress, "internet_access", None)
         return Template(
             name=str(raw.name),
             image_uri=getattr(spec, "image_uri", None),
-            state=str(getattr(raw, "state", "")),
+            state=_state(getattr(raw, "state", None)),
             internet_access=internet,
             ports=ports or None,
         )
@@ -230,8 +244,8 @@ class SdkPlatform:
         host = getattr(info, "load_balancer_hostname", None)
         return Sandbox(
             name=str(raw.name),
-            state=str(getattr(raw, "state", "")),
-            create_time=raw.create_time,
+            state=_state(getattr(raw, "state", None)),
+            create_time=getattr(raw, "create_time", None),
             load_balancer_hostname=str(host) if host else None,
             routing_token=str(token) if token else None,
         )
@@ -267,7 +281,10 @@ class SdkPlatform:
 
     def get_engine(self, name: str) -> Engine:
         res = self._client.agent_engines.get(name=name).api_resource
-        return Engine(name=str(res.name), display_name=str(res.display_name))
+        return Engine(
+            name=str(res.name),
+            display_name=str(getattr(res, "display_name", None) or ""),
+        )
 
     def delete_engine(self, name: str, *, force: bool) -> None:
         self._client.agent_engines.delete(name=name, force=force)
@@ -420,10 +437,19 @@ def cmd_template(ctx: Context, args: argparse.Namespace) -> int:
 def cmd_prune(ctx: Context, args: argparse.Namespace) -> int:
     engine = ctx.engine(args.engine)
     platform = ctx.platform(engine)
-    image = None if args.all else _current_image(ctx)[1]
+    image = None
+    in_use = ctx.environ.get("SANDBOX_TEMPLATE", "")
+    if not args.all:
+        image = _current_image(ctx)[1]
+        if find_template(platform, engine, image) is None:
+            raise Refused(
+                "no active template for the current image: run the template step first"
+            )
     count = 0
     for t in platform.list_templates(engine):
-        if t.state in TERMINAL_STATES or (image is not None and t.image_uri == image):
+        if t.state in TEMPLATE_TERMINAL_STATES:
+            continue
+        if not args.all and (t.image_uri == image or t.name == in_use):
             continue
         if args.dry_run:
             ctx.out(f"would delete template {t.name}")
@@ -543,6 +569,16 @@ def main(
     except UsageError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    except FileNotFoundError as exc:
+        print(f"error: command not found: {exc.filename}", file=sys.stderr)
+        return 2
+    except Exception as exc:  # SDK, credential and validation errors: type name only
+        code = 2 if type(exc).__name__ == "DefaultCredentialsError" else 1
+        print(
+            f"error: {type(exc).__name__} (see the operator's own credentials/API)",
+            file=sys.stderr,
+        )
+        return code
 
 
 if __name__ == "__main__":

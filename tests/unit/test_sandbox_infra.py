@@ -6,7 +6,9 @@ import json
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
+from enum import Enum
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -104,7 +106,7 @@ class FakePlatform:
         self.deleted_engines.append((name, force))
 
 
-def tmpl(name="t1", image=IMAGE, state="STATE_ACTIVE", **kw):
+def tmpl(name="t1", image=IMAGE, state="ACTIVE", **kw):
     return infra.Template(
         name=f"{ENGINE}/sandboxEnvironmentTemplates/{name}",
         image_uri=image,
@@ -189,8 +191,8 @@ def test_template_reuses_an_active_match():
 
 def test_template_ignores_inactive_or_other_images():
     templates = [
-        tmpl("a", state="STATE_DELETED"),
-        tmpl("b", state="STATE_CREATING"),
+        tmpl("a", state="DELETED"),
+        tmpl("b", state="PROVISIONING"),
         tmpl("c", image=f"{REPOSITORY}/sandbox:other"),
     ]
     assert infra.matching_template(templates, IMAGE) is None
@@ -225,9 +227,9 @@ def test_template_creates_with_2_cpu_2gi_port_8080_no_internet():
     ((engine, config),) = platform.created
     assert engine == ENGINE
     assert config == infra.template_config(IMAGE, f"issue-to-pr-sandbox-{TAG}")
-    spec = config["custom_container_environment"]["custom_container_spec"]
-    assert spec["image_uri"] == IMAGE
-    assert spec["resources"] == {
+    env = config["custom_container_environment"]
+    assert env["custom_container_spec"] == {"image_uri": IMAGE}
+    assert env["resources"] == {
         "limits": {"cpu": "2", "memory": "2Gi"},
         "requests": {"cpu": "2", "memory": "2Gi"},
     }
@@ -240,9 +242,7 @@ def test_template_creates_with_2_cpu_2gi_port_8080_no_internet():
 
 def test_template_config_does_not_share_the_module_constant():
     config = infra.template_config(IMAGE, "n")
-    config["custom_container_environment"]["custom_container_spec"]["resources"][
-        "limits"
-    ]["cpu"] = "9"
+    config["custom_container_environment"]["resources"]["limits"]["cpu"] = "9"
     assert infra.TEMPLATE_RESOURCES["limits"]["cpu"] == "2"
 
 
@@ -256,6 +256,20 @@ def test_find_only_never_creates_and_fails_without_a_match(capsys):
     )
     assert code == 0
     assert lines == [f"SANDBOX_TEMPLATE={ENGINE}/sandboxEnvironmentTemplates/g"]
+
+
+def test_template_config_validates_against_the_sdk_model():
+    """Key paths must match the SDK's own config model (extra fields are forbidden)."""
+    common = pytest.importorskip("agentplatform._genai.types.common")
+    config = infra.template_config(IMAGE, "n")
+    body = {k: v for k, v in config.items() if k != "display_name"}
+    parsed = common.CreateSandboxEnvironmentTemplateConfig.model_validate(body)
+    env = parsed.custom_container_environment
+    assert env.custom_container_spec.image_uri == IMAGE
+    assert env.resources.limits == {"cpu": "2", "memory": "2Gi"}
+    assert env.resources.requests == {"cpu": "2", "memory": "2Gi"}
+    assert [p.port for p in env.ports] == [8080]
+    assert parsed.egress_control_config.internet_access is False
 
 
 # ---- engine configuration ---------------------------------------------------
@@ -308,7 +322,7 @@ def test_prune_keeps_the_current_image():
         [
             tmpl("cur"),
             tmpl("old", image="other"),
-            tmpl("gone", image="o", state="STATE_DELETED"),
+            tmpl("gone", image="o", state="DELETED"),
         ]
     )
     code, _, _ = invoke(["prune-templates"], platform=platform)
@@ -321,6 +335,29 @@ def test_prune_all_deletes_every_template():
     code, _, _ = invoke(["prune-templates", "--all"], platform=platform)
     assert code == 0
     assert len(platform.deleted_templates) == 2
+
+
+def test_prune_refuses_without_a_template_for_the_current_image(capsys):
+    platform = FakePlatform([tmpl("old", image="other")])
+    code, _, _ = invoke(["prune-templates"], platform=platform)
+    assert code == 1
+    assert platform.deleted_templates == []
+    assert "no active template for the current image" in capsys.readouterr().err
+    # --all is the teardown path and needs no current template
+    code, _, _ = invoke(["prune-templates", "--all"], platform=platform)
+    assert code == 0 and len(platform.deleted_templates) == 1
+
+
+def test_prune_never_deletes_the_template_named_in_sandbox_template():
+    in_use = f"{ENGINE}/sandboxEnvironmentTemplates/inuse"
+    platform = FakePlatform(
+        [tmpl("cur"), tmpl("inuse", image="other"), tmpl("x", image="o")]
+    )
+    code, _, _ = invoke(
+        ["prune-templates"], platform=platform, environ={"SANDBOX_TEMPLATE": in_use}
+    )
+    assert code == 0
+    assert platform.deleted_templates == [f"{ENGINE}/sandboxEnvironmentTemplates/x"]
 
 
 # ---- sweep ------------------------------------------------------------------
@@ -358,6 +395,18 @@ def test_sweep_skips_deleted_and_deprovisioning():
     assert any("STATE_DELETED" in line for line in lines)
 
 
+def test_default_sweep_skips_deleted_and_deprovisioning_and_counts_nothing():
+    platform = FakePlatform(
+        sandboxes=[
+            sbx("a", state="STATE_DELETED", age_s=99999),
+            sbx("b", state="STATE_DEPROVISIONING", age_s=99999),
+        ]
+    )
+    _, lines, _ = invoke(["sweep"], platform=platform)
+    assert platform.deleted_sandboxes == []
+    assert lines[-1] == "swept 0"
+
+
 def test_sweep_all_ignores_age():
     platform = FakePlatform(sandboxes=[sbx("fresh", age_s=1), sbx("old", age_s=99999)])
     invoke(["sweep", "--all"], platform=platform)
@@ -381,7 +430,7 @@ def test_expired_is_pure():
 )
 def test_dry_run_deletes_nothing(argv):
     platform = FakePlatform(
-        templates=[tmpl("old", image="other")],
+        templates=[tmpl("cur"), tmpl("old", image="other")],
         sandboxes=[sbx("old", age_s=99999)],
         engines={ENGINE: infra.Engine(ENGINE, "issue-to-pr")},
     )
@@ -438,3 +487,171 @@ def test_env_prints_the_four_lines_without_secrets():
 def test_env_fails_without_a_template():
     code, lines, _ = invoke(["env"], platform=FakePlatform())
     assert code == 1 and lines == []
+
+
+# ---- the SDK adapter, fed objects shaped like the SDK's ----------------------
+
+
+class SdkState(str, Enum):  # noqa: UP042 - str() must carry the class prefix, as the SDK's
+    STATE_RUNNING = "STATE_RUNNING"
+    STATE_DELETED = "STATE_DELETED"
+
+
+def sdk_template(name="t", image=IMAGE, state="ACTIVE", ports=(8080,), internet=False):
+    return SimpleNamespace(
+        name=f"{ENGINE}/sandboxEnvironmentTemplates/{name}",
+        state=state,
+        custom_container_environment=SimpleNamespace(
+            custom_container_spec=SimpleNamespace(image_uri=image),
+            ports=[SimpleNamespace(port=p, protocol="TCP") for p in ports],
+        ),
+        egress_control_config=SimpleNamespace(internet_access=internet),
+    )
+
+
+def sdk_sandbox(name, state=SdkState.STATE_RUNNING, age_s=0):
+    return SimpleNamespace(
+        name=f"{ENGINE}/sandboxEnvironments/{name}",
+        state=state,
+        create_time=NOW - timedelta(seconds=age_s),
+        connection_info=SimpleNamespace(
+            load_balancer_hostname="lb.example", routing_token="rt"
+        ),
+    )
+
+
+class FakeClient:
+    def __init__(self, templates=(), sandboxes=()):
+        self.calls = []
+        client = self
+
+        class Templates:
+            def list(self, *, name):
+                client.calls.append(("templates.list", name))
+                return [SimpleNamespace(name=t.name) for t in templates]
+
+            def get(self, *, name):
+                return next(t for t in templates if t.name == name)
+
+            def create(self, **kw):
+                client.calls.append(("templates.create", kw))
+                return SimpleNamespace(response=SimpleNamespace(name="new"))
+
+            def delete(self, *, name):
+                client.calls.append(("templates.delete", name))
+
+        class Sandboxes:
+            templates = Templates()
+
+            def list(self, *, name):
+                return list(sandboxes)
+
+            def get(self, *, name):
+                return next(s for s in sandboxes if s.name == name)
+
+            def delete(self, *, name):
+                client.calls.append(("sandboxes.delete", name))
+
+        class Engines:
+            sandboxes = Sandboxes()
+
+            def get(self, *, name):
+                res = SimpleNamespace(name=name, display_name="issue-to-pr")
+                return SimpleNamespace(api_resource=res)
+
+            def delete(self, *, name, force):
+                client.calls.append(("engines.delete", name, force))
+
+        self.agent_engines = Engines()
+
+
+def test_sdk_platform_maps_sdk_shaped_templates():
+    client = FakeClient(
+        [sdk_template("a"), sdk_template("b", state="DELETED", ports=())]
+    )
+    platform = infra.SdkPlatform("p", "l", client=client)
+    a, b = platform.list_templates(ENGINE)
+    assert (a.state, a.image_uri, a.ports, a.internet_access) == (
+        "ACTIVE",
+        IMAGE,
+        [8080],
+        False,
+    )
+    assert b.state == "DELETED" and b.ports is None
+    assert infra.matching_template([a, b], IMAGE) == a.name
+
+
+def test_sdk_platform_normalises_enum_sandbox_states_and_skips_dead_ones():
+    client = FakeClient(
+        sandboxes=[
+            sdk_sandbox("live", age_s=99999),
+            sdk_sandbox("dead", state=SdkState.STATE_DELETED, age_s=99999),
+        ]
+    )
+    platform = infra.SdkPlatform("p", "l", client=client)
+    live, dead = platform.list_sandboxes(ENGINE)
+    assert (live.state, dead.state) == ("STATE_RUNNING", "STATE_DELETED")
+    assert live.load_balancer_hostname == "lb.example" and live.routing_token == "rt"
+    assert "rt" not in repr(live)
+    code, lines, _ = invoke(["sweep"], platform=platform)
+    assert code == 0
+    assert client.calls == [("sandboxes.delete", live.name)]
+    assert lines[-1] == "swept 1"
+
+
+def test_sdk_platform_prune_skips_deleted_templates():
+    client = FakeClient(
+        [
+            sdk_template("cur"),
+            sdk_template("old", image="other"),
+            sdk_template("gone", image="other", state="DELETED"),
+        ]
+    )
+    platform = infra.SdkPlatform("p", "l", client=client)
+    code, _, _ = invoke(["prune-templates"], platform=platform)
+    assert code == 0
+    assert [c for c in client.calls if c[0] == "templates.delete"] == [
+        ("templates.delete", f"{ENGINE}/sandboxEnvironmentTemplates/old")
+    ]
+
+
+def test_sdk_platform_create_template_passes_name_display_name_and_config():
+    client = FakeClient()
+    platform = infra.SdkPlatform("p", "l", client=client)
+    config = infra.template_config(IMAGE, "disp")
+    assert platform.create_template(ENGINE, config) == "new"
+    ((_, kw),) = [c for c in client.calls if c[0] == "templates.create"]
+    assert kw["name"] == ENGINE and kw["display_name"] == "disp"
+    assert "display_name" not in kw["config"]
+    assert kw["config"]["egress_control_config"] == {"internet_access": False}
+
+
+def test_sdk_platform_engine_and_forced_delete():
+    client = FakeClient()
+    platform = infra.SdkPlatform("p", "l", client=client)
+    assert platform.get_engine(ENGINE) == infra.Engine(ENGINE, "issue-to-pr")
+    platform.delete_engine(ENGINE, force=True)
+    assert ("engines.delete", ENGINE, True) in client.calls
+
+
+def test_a_sandbox_without_create_time_is_never_expired():
+    box = infra.Sandbox("n", "STATE_RUNNING", None)
+    assert infra.expired([box], now=NOW, ttl_s=1) == []
+
+
+def test_unexpected_errors_exit_with_a_one_line_message(capsys):
+    class Boom(FakePlatform):
+        def list_sandboxes(self, engine):
+            raise RuntimeError("secret detail")
+
+    code, _, _ = invoke(["sweep"], platform=Boom())
+    err = capsys.readouterr().err
+    assert code == 1 and "RuntimeError" in err and "secret" not in err
+
+
+def test_a_missing_binary_exits_2(capsys):
+    def run(cmd, **kw):
+        raise FileNotFoundError(2, "no such file", cmd[0])
+
+    code, _, _ = invoke(["sweep"], platform=FakePlatform(), run=run)
+    assert code == 2 and "terraform" in capsys.readouterr().err
