@@ -329,6 +329,23 @@ async def test_a_wrongly_typed_default_branch_is_a_refusal_not_a_crash(live):
     await assert_refused("GitHub response could not be read safely")
 
 
+async def test_a_wrongly_typed_label_actor_is_a_refusal_not_a_crash(live):
+    event = {
+        "event": "labeled",
+        "label": {"name": "agent-ok"},
+        "created_at": "t",
+        "actor": {"login": 5},
+    }
+
+    class NumberActor(FakeGitHub):
+        async def last_label_actor(self, repo, number, label):
+            async with real_client(httpx.Response(200, json=[event])) as client:
+                return await client.last_label_actor(repo, number, label)
+
+    live.__class__ = NumberActor
+    await assert_refused("GitHub response could not be read safely")
+
+
 async def test_a_revoked_token_is_a_github_refusal(live):
     live.errors["get_issue"] = GitHubConfigError(401, "GET", "/x", "Bad credentials")
     await assert_refused("GitHub refused the request: 401")

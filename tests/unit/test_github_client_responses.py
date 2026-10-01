@@ -126,10 +126,14 @@ async def test_a_non_json_3xx_is_unavailable_too(status):
     assert err.__context__ is None and err.__cause__ is None
 
 
+LABEL_EVENT = {"event": "labeled", "label": {"name": "agent-ok"}, "created_at": "t"}
+
+
 @pytest.mark.parametrize(
     "call, answer",
     [
         ("default_branch", {"default_branch": 5}),
+        ("last_label_actor", [LABEL_EVENT | {"actor": {"login": 5}}]),
         ("branch_head", {"sha": 5, "commit": {"tree": {"sha": "b" * 40}}}),
         ("branch_head", {"sha": "a" * 40, "commit": {"tree": {"sha": ["x"]}}}),
     ],

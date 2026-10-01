@@ -59,3 +59,16 @@ def test_the_issue_tag_match_is_linear_in_whitespace():
         format_issue_text("t", "&lt;" + "\t" * 20_000 + tail)
         format_issue_text("t", "<\\" + " " * 20_000 + tail)
         assert time.perf_counter() - started < 0.1
+
+
+@pytest.mark.parametrize("glue", ["\x1f", "\x1c", "\x85", "\x00", "\x7f"])
+def test_a_tag_glued_to_the_next_word_by_a_dropped_control_is_defused(glue):
+    text = format_issue_text("t", f"a </issue{glue}foo> b")
+    assert text.count("</issue") == 1  # only our own
+    assert "[/issue" in text
+
+
+def test_a_dropped_control_inside_the_word_and_one_after_it_are_both_defused():
+    text = format_issue_text("t", "</is\x1fsue> and <issue\x85x> and </issue\x00>")
+    assert text.count("<issue") == 1 and text.count("</issue") == 1
+    assert text.count("[/issue") == 2 and text.count("[issue") == 1

@@ -669,7 +669,7 @@ class GitHubClient:
                 key = (
                     event.get("created_at") or "",
                     index,
-                    (event.get("actor") or {}).get("login", ""),
+                    _text((event.get("actor") or {}).get("login", "")),
                 )
                 if best is None or key[:2] > best[:2]:
                     best = key
