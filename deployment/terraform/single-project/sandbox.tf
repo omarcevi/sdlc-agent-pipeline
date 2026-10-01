@@ -30,8 +30,8 @@ resource "google_artifact_registry_repository" "sandbox" {
 }
 
 resource "google_service_account" "sandbox_caller" {
-  project     = var.project_id
-  account_id  = "sandbox-caller"
+  project    = var.project_id
+  account_id = "sandbox-caller"
 
   depends_on = [google_project_service.services]
 }
