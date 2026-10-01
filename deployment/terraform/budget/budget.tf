@@ -1,5 +1,9 @@
 data "google_project" "project" {
   project_id = var.project_id
+
+  # The billing account is read through Cloud Billing; an empty read would fail
+  # the coalesce below.
+  depends_on = [google_project_service.budget_services]
 }
 
 locals {

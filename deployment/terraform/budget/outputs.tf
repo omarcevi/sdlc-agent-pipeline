@@ -9,8 +9,8 @@ output "budget_id" {
 }
 
 output "budget_amount_try" {
-  description = "The budget amount in TRY."
-  value       = var.budget_amount_try
+  description = "The budget amount in TRY, the whole-lira units set on the budget."
+  value       = floor(var.budget_amount_try)
 }
 
 output "guard_function" {

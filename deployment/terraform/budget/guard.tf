@@ -1,11 +1,15 @@
 resource "google_service_account" "guard" {
   account_id   = "budget-guard"
   display_name = "Budget guard: disables billing at the hard stop"
+
+  depends_on = [google_project_service.budget_services]
 }
 
 resource "google_service_account" "guard_build" {
   account_id   = "budget-guard-build"
   display_name = "Budget guard: builds the function"
+
+  depends_on = [google_project_service.budget_services]
 }
 
 # Unlinking the project from its billing account needs only this project
@@ -14,12 +18,16 @@ resource "google_project_iam_member" "guard_billing_project_manager" {
   project = var.project_id
   role    = "roles/billing.projectManager"
   member  = google_service_account.guard.member
+
+  depends_on = [google_project_service.budget_services]
 }
 
 resource "google_project_iam_member" "guard_build_builder" {
   project = var.project_id
   role    = "roles/cloudbuild.builds.builder"
   member  = google_service_account.guard_build.member
+
+  depends_on = [google_project_service.budget_services]
 }
 
 resource "google_storage_bucket" "guard_source" {

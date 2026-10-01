@@ -4,6 +4,7 @@ Comments are stripped before matching, so a commented-out resource cannot pass.
 """
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -195,6 +196,24 @@ def test_guard_roles_are_project_billing_manager_and_invoker_only():
     assert "google_project_iam_binding" not in everything
     assert "google_project_iam_policy" not in everything
 
+    for public in ("allUsers", "allAuthenticatedUsers"):
+        assert public not in everything
+    # Every IAM grant of any type, in any file, whose member is the guard.
+    granted = set()
+    for kind, name in re.findall(
+        r'resource "(google_\w*iam_(?:member|binding|policy))" "(\w+)"', everything
+    ):
+        body = squash(resource(everything, kind, name))
+        if re.search(r"google_service_account\.guard\.(member|email|id|name)\b", body):
+            granted.add((kind, re.search(r'role = "([^"]+)"', body).group(1)))
+    assert granted <= {
+        ("google_project_iam_member", "roles/billing.projectManager"),
+        ("google_project_iam_member", "roles/browser"),
+        ("google_cloud_run_service_iam_member", "roles/run.invoker"),
+    }
+    assert ("google_project_iam_member", "roles/billing.projectManager") in granted
+    assert ("google_cloud_run_service_iam_member", "roles/run.invoker") in granted
+
     members = re.findall(r'resource "google_project_iam_member" "(\w+)" \{', text)
     guard_roles: set[str] = set()
     build_roles: set[str] = set()
@@ -255,7 +274,21 @@ def test_guard_source_is_the_function_directory():
     assert "object = google_storage_bucket_object.guard_source.name" in source
     # The zip path is git-ignored (a top-level `build/` rule), the function stays tracked.
     assert (ROOT / "function" / "main.py").is_file()
-    assert not (ROOT / "build").exists()
+    # The zip lands under build/ at plan time: it must be ignored, never tracked.
+    zip_path = "deployment/terraform/budget/build/budget-guard-source.zip"
+    repo = ROOT.parents[2]
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", zip_path], cwd=repo, check=False
+    )
+    assert ignored.returncode == 0
+    tracked = subprocess.run(
+        ["git", "ls-files", "deployment/terraform/budget/build"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert tracked.stdout == ""
 
 
 def test_apis_providers_and_outputs():
@@ -311,3 +344,40 @@ def test_no_tf_file_names_the_project():
 def test_files_have_balanced_braces(name):
     text = tf(name)
     assert text.count("{") == text.count("}")
+
+
+def test_root_enables_what_it_needs_and_orders_resources_after_it():
+    apis = tf("apis")
+    for api in ("iam", "cloudresourcemanager", "serviceusage"):
+        assert f'"{api}.googleapis.com"' in apis
+    gate = "google_project_service.budget_services"
+    budget, guard = tf("budget"), tf("guard")
+    pairs = [
+        (budget, 'data "google_project" "project"'),
+        (budget, 'resource "google_pubsub_topic" "budget"'),
+        (guard, 'resource "google_service_account" "guard"'),
+        (guard, 'resource "google_service_account" "guard_build"'),
+        (guard, 'resource "google_project_iam_member" "guard_billing_project_manager"'),
+        (guard, 'resource "google_project_iam_member" "guard_build_builder"'),
+        (guard, 'resource "google_storage_bucket" "guard_source"'),
+    ]
+    for text, header in pairs:
+        assert gate in squash(block(text, header)), header
+
+
+def test_billing_account_variable_matches_the_coalesce_order():
+    variables = tf("variables")
+    var = squash(block(variables, 'variable "billing_account"'))
+    assert "wins" in var
+    assert "only when" not in var
+    assert "validation" in var
+    assert "[0-9A-F]{6}-[0-9A-F]{6}-[0-9A-F]{6}" in var
+
+
+def test_budget_amount_is_validated_and_the_output_is_the_floored_units():
+    var = squash(block(tf("variables"), 'variable "budget_amount_try"'))
+    assert "validation" in var
+    assert "var.budget_amount_try >= 1" in var
+    assert "var.budget_amount_try == floor(var.budget_amount_try)" in var
+    out = squash(block(tf("outputs"), 'output "budget_amount_try"'))
+    assert "value = floor(var.budget_amount_try)" in out

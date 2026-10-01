@@ -9,6 +9,11 @@ locals {
     "eventarc.googleapis.com",
     "artifactregistry.googleapis.com",
     "logging.googleapis.com",
+    # Needed by the service accounts, the project reads and the IAM members, so
+    # the root applies on a project that nothing else has set up.
+    "iam.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "serviceusage.googleapis.com",
   ]
 }
 
