@@ -230,22 +230,28 @@ def summarize(rows: list[dict]) -> list[Summary]:
     return [_summarize_group(sy, pr, groups[(sy, pr)]) for sy, pr in sorted(groups)]
 
 
-def check_prompt_versions(rows: list[dict]) -> None:
-    """Raise ValueError when one table (a system and preset) would pool rows of
-    different prompt versions: their numbers are not comparable."""
-    versions: dict[tuple[str, str], set[str]] = defaultdict(set)
+def prompt_versions(rows: list[dict]) -> dict[str, list[str]]:
+    """Each configuration's prompt versions, keyed by its column name."""
+    found: dict[str, set[str]] = defaultdict(set)
     for r in rows:
-        versions[(r["system"], r["preset"])].add(r["prompt_version"])
-    mixed = [
-        f"{system}/{preset} has {', '.join(sorted(found))}"
-        for (system, preset), found in sorted(versions.items())
-        if len(found) > 1
-    ]
-    if mixed:
+        found[f"{r['system']} ({r['preset']})"].add(r["prompt_version"])
+    return {config: sorted(found[config]) for config in sorted(found)}
+
+
+def _versions_text(versions: dict[str, list[str]]) -> str:
+    return "; ".join(f"{c}: {', '.join(v)}" for c, v in versions.items())
+
+
+def check_prompt_versions(rows: list[dict]) -> None:
+    """Raise ValueError when the report would set rows of different prompt versions
+    side by side, within one configuration or across them: their numbers are not
+    comparable."""
+    versions = prompt_versions(rows)
+    if len({v for found in versions.values() for v in found}) > 1:
         raise ValueError(
-            "rows of different prompt versions would be pooled ("
-            + "; ".join(mixed)
-            + "); pass --allow-mixed-prompts to pool them anyway"
+            "rows of different prompt versions would be compared ("
+            + _versions_text(versions)
+            + "); pass --allow-mixed-prompts to compare them anyway"
         )
 
 
@@ -318,8 +324,21 @@ def _caveat(summaries: list[Summary]) -> str:
     )
 
 
-def render_markdown(summaries: list[Summary], *, title: str, sources: list[str]) -> str:
+def render_markdown(
+    summaries: list[Summary],
+    *,
+    title: str,
+    sources: list[str],
+    versions: dict[str, list[str]] | None = None,
+) -> str:
     lines = [f"# {title}", ""]
+    if versions and len({v for found in versions.values() for v in found}) > 1:
+        lines += [
+            f"Prompt versions differ: {_versions_text(versions)}. These "
+            "configurations ran different prompts, so their numbers are not "
+            "directly comparable.",
+            "",
+        ]
     if not summaries:
         lines += ["There are no rows in the input, so there is nothing to report.", ""]
     else:
@@ -464,7 +483,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--allow-mixed-prompts",
         action="store_true",
-        help="pool rows of different prompt versions in one table",
+        help="compare rows of different prompt versions in one report",
     )
     args = parser.parse_args(argv)
 
@@ -481,7 +500,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     md = render_markdown(
-        summaries, title=args.title, sources=[p.name for p in args.results]
+        summaries,
+        title=args.title,
+        sources=[p.name for p in args.results],
+        versions=prompt_versions(rows),
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(md)

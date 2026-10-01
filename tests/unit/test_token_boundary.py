@@ -3,6 +3,7 @@ GitHub token, and that nothing reads it from the environment. The canary test
 (test_token_canary.py) checks the same boundary at run time."""
 
 import ast
+import os
 from pathlib import Path
 
 import app
@@ -43,11 +44,14 @@ SKIPPED_DATA = (ROOT / "bench" / "tasks", ROOT / "bench" / "repos")
 
 
 def _pipeline_files(package: str) -> list[Path]:
-    return [
-        path
-        for path in sorted((ROOT / package).rglob("*.py"))
-        if not any(data in path.parents for data in SKIPPED_DATA)
-    ]
+    """Every .py file under the package, pruning the task and repo data before
+    descending, so not even their file names are listed."""
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(ROOT / package):
+        here = Path(dirpath)
+        dirnames[:] = sorted(d for d in dirnames if here / d not in SKIPPED_DATA)
+        found += [here / name for name in filenames if name.endswith(".py")]
+    return sorted(found)
 
 
 def _sources(*packages: str) -> list[tuple[str, str]]:
@@ -62,7 +66,28 @@ def test_the_scan_skips_task_and_repo_data():
     paths = [path for path, _ in _sources("app", "bench")]
     assert paths  # it still scans the pipeline's own code
     assert "bench/run.py" in paths
-    assert not [p for p in paths if p.startswith(("bench/tasks/", "bench/repos/"))]
+    # any(), not a list: a failing assertion must not print task file names.
+    assert not any(p.startswith(("bench/tasks/", "bench/repos/")) for p in paths)
+
+
+def test_the_scan_never_enters_task_or_repo_data(monkeypatch):
+    # Pruned before descending: not even file names under them are listed.
+    entered = []
+    real_walk = os.walk
+
+    def spy(top, *args, **kwargs):
+        for dirpath, dirnames, filenames in real_walk(top, *args, **kwargs):
+            entered.append(Path(dirpath))
+            yield dirpath, dirnames, filenames
+
+    monkeypatch.setattr(os, "walk", spy)
+    _pipeline_files("bench")
+    assert entered
+    assert not any(
+        data == path or data in path.parents
+        for path in entered
+        for data in SKIPPED_DATA
+    )
 
 
 class _ClientUses(ast.NodeVisitor):

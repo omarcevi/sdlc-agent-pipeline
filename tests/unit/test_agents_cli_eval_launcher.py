@@ -71,3 +71,34 @@ def test_the_tool_interpreter_comes_from_the_shebang(tmp_path, monkeypatch):
     monkeypatch.setattr(launcher.shutil, "which", lambda name: None)
     with pytest.raises(SystemExit):
         launcher._tool_python()
+
+
+def test_a_second_import_failure_is_raised_not_re_executed(monkeypatch):
+    # Under the tool's own interpreter the import still fails (a broken tool
+    # environment): re-executing again would loop forever, so the error surfaces.
+    monkeypatch.setitem(sys.modules, "google.agents.cli._adk_client", None)
+    monkeypatch.setenv("ISSUE_TO_PR_AGENTS_CLI_REEXEC", "1")
+    launcher = load_launcher()
+    launched = []
+    monkeypatch.setattr(launcher, "_tool_python", lambda: "/tool/python3")
+    monkeypatch.setattr(launcher.os, "execv", lambda *a: launched.append(a))
+    with pytest.raises(ImportError):
+        launcher.main(["eval", "run"])
+    assert launched == []
+
+
+def test_the_first_re_exec_marks_itself(monkeypatch):
+    monkeypatch.setitem(sys.modules, "google.agents.cli._adk_client", None)
+    monkeypatch.delenv("ISSUE_TO_PR_AGENTS_CLI_REEXEC", raising=False)
+    launcher = load_launcher()
+    seen = []
+    monkeypatch.setattr(launcher, "_tool_python", lambda: "/tool/python3")
+    monkeypatch.setattr(
+        launcher.os,
+        "execv",
+        lambda *a: seen.append(
+            launcher.os.environ.get("ISSUE_TO_PR_AGENTS_CLI_REEXEC")
+        ),
+    )
+    launcher.main(["eval", "run"])
+    assert seen == ["1"]

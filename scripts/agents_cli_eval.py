@@ -37,13 +37,20 @@ def _tool_python() -> str:
     return first[2:].split()[0]
 
 
+# Set on the one re-exec under agents-cli's own interpreter.
+REEXEC_MARKER = "ISSUE_TO_PR_AGENTS_CLI_REEXEC"
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else list(argv)
     try:
         client = importlib.import_module("google.agents.cli._adk_client")
         cli = importlib.import_module("google.agents.cli.main")
     except ImportError:
+        if os.environ.get(REEXEC_MARKER):
+            raise  # already under the tool's interpreter: re-executing would loop
         python = _tool_python()
+        os.environ[REEXEC_MARKER] = "1"
         os.execv(python, [python, os.path.abspath(__file__), *args])
         return 1  # only reached when execv is replaced (it does not return)
     client._RUN_SSE_TIMEOUT = RUN_SSE_TIMEOUT

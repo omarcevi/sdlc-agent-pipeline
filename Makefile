@@ -18,7 +18,7 @@ validate:
 # agents-cli's 120 s read timeout; see AGENTS.md. A reused local server keeps its old
 # configuration, hence --stop-server first. Compare attempted and graded cases after.
 eval:
-	agents-cli run --stop-server
+	-agents-cli run --stop-server  # exits 1 when no server runs; that is fine
 	uv run python scripts/agents_cli_eval.py eval run --dataset tests/eval/datasets/pipeline-dev.json --config tests/eval/eval_config.yaml --concurrency 2
 	@echo "leftover itp- containers (none expected):"
 	@docker ps -a --filter name=itp- --format '{{.Names}} {{.Status}}'

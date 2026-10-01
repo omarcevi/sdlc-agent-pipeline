@@ -182,11 +182,38 @@ def test_the_flag_allows_mixed_prompt_versions(tmp_path: Path):
     assert out.exists()
 
 
-def test_other_configurations_may_differ_in_prompt_version(tmp_path: Path):
-    # Different tables (system, preset): nothing is pooled across versions.
+def test_configurations_in_one_report_must_share_a_prompt_version(
+    tmp_path: Path, capsys
+):
+    # The report sets configurations side by side, so mixing versions across
+    # columns is the same pooling as mixing them within one.
     out = tmp_path / "out.md"
     args = [*_two_versions(tmp_path, {"system": "single"}), "--out", str(out)]
+    assert main(args) == 2
+    err = capsys.readouterr().err
+    assert "multi (flash): 2a" in err and "single (flash): 2c" in err
+    assert not out.exists()
+
+
+def test_an_allowed_mix_says_so_in_the_report(tmp_path: Path):
+    out = tmp_path / "out.md"
+    args = [
+        *_two_versions(tmp_path, {"system": "single"}),
+        "--out",
+        str(out),
+        "--allow-mixed-prompts",
+    ]
     assert main(args) == 0
+    text = out.read_text()
+    assert "Prompt versions differ: multi (flash): 2a; single (flash): 2c." in text
+
+
+def test_one_version_adds_no_prompt_note(tmp_path: Path):
+    out = tmp_path / "out.md"
+    src = tmp_path / "r.json"
+    src.write_text(json.dumps([row("a", resolved=True, prompt_version="2c")]))
+    assert main([str(src), "--out", str(out)]) == 0
+    assert "Prompt versions differ" not in out.read_text()
 
 
 # ---- fix wave B: the report states its sample and buckets every run ----
