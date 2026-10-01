@@ -939,6 +939,34 @@ async def test_create_commit_builds_blobs_tree_and_commit():
     }
 
 
+async def test_create_commit_with_a_fixed_date_sets_author_and_committer():
+    posts: list[tuple[str, dict]] = []
+
+    def handler(request):
+        posts.append((request.url.path, json.loads(request.content)))
+        if request.url.path.endswith("/blobs"):
+            return reply(201, {"sha": "b1"})
+        if request.url.path.endswith("/trees"):
+            return reply(201, {"sha": "t1"})
+        return reply(201, {"sha": "c1"})
+
+    client, _ = make_client(handler)
+    async with client:
+        await client.create_commit(
+            REPO,
+            parent_sha="p",
+            base_tree_sha="t",
+            changes=[FileChange("a.py", b"x")],
+            message="m",
+            author_name="n",
+            author_email="e@example.invalid",
+            date="2026-10-01T12:00:00Z",
+        )
+    (commit,) = [d for path, d in posts if path.endswith("/commits")]
+    stamp = {"name": "n", "email": "e@example.invalid", "date": "2026-10-01T12:00:00Z"}
+    assert commit["author"] == stamp and commit["committer"] == stamp
+
+
 @pytest.mark.parametrize(
     "path",
     [

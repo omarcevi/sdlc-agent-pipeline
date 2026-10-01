@@ -6,9 +6,11 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tarfile
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +18,7 @@ import httpx
 import pytest
 
 from app import pr_text
+from app.environment.base import InfraError
 from app.github_client import GitHubClient
 from app.nodes.finish import (
     deliver_patch,
@@ -42,6 +45,7 @@ class FakeGitHub:
         self.requests: list[tuple[str, str]] = []
         self.drop_first_pull_response = False
         self.fail_comments = False
+        self.fail_pulls = False
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -83,6 +87,8 @@ class FakeGitHub:
                 200, json=[p for p in self.pulls if p["head"]["ref"] == head]
             )
         if path == f"{base}/pulls" and request.method == "POST":
+            if self.fail_pulls:
+                return httpx.Response(500, json={"message": "boom"})
             pull = {
                 "number": 5,
                 "html_url": f"https://github.com/{REPO}/pull/5",
@@ -220,9 +226,8 @@ def _sha(unified: str) -> str:
 
 
 def _decision(unified: str, approver: str = "octocat", **over):
-    return SimpleNamespace(
-        approved=True, approver=approver, patch_sha256=_sha(unified), **over
-    )
+    fields = {"approved": True, "approver": approver, "patch_sha256": _sha(unified)}
+    return SimpleNamespace(**{**fields, **over})
 
 
 async def _collect(generator) -> list:
@@ -404,9 +409,12 @@ async def test_open_pr_builds_the_commit_from_the_applied_patch(tmp_path, runs, 
 
 
 async def test_open_pr_refuses_a_patch_that_writes_outside_the_tree(
-    tmp_path, runs, github
+    tmp_path, runs, github, monkeypatch
 ):
     archive, _unified, _files = make_source(tmp_path, _standard_change)
+    apply_root = tmp_path / "apply-root"
+    apply_root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(apply_root))
     evil = (
         "diff --git a/../escaped.txt b/../escaped.txt\n"
         "new file mode 100644\n"
@@ -415,7 +423,7 @@ async def test_open_pr_refuses_a_patch_that_writes_outside_the_tree(
         "@@ -0,0 +1 @@\n"
         "+owned\n"
     )
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="unsafe path"):
         await _collect(
             open_pr(
                 _decision(evil),
@@ -426,7 +434,7 @@ async def test_open_pr_refuses_a_patch_that_writes_outside_the_tree(
             )
         )
     assert github.requests == []
-    assert not list(tmp_path.rglob("escaped.txt"))
+    assert not list(tmp_path.rglob("escaped.txt"))  # apply dirs live under tmp_path
 
 
 async def test_open_pr_refuses_a_patch_that_does_not_apply(tmp_path, runs, github):
@@ -453,12 +461,63 @@ async def test_open_pr_retry_after_a_lost_response_opens_one_pr(tmp_path, runs, 
         "patch_sha256": _sha(unified),
         "source_archive": str(archive),
     }
+    kwargs["patch_created_at"] = "2026-10-01T12:00:00Z"
     github.drop_first_pull_response = True  # the PR is created, the answer is lost
     first = await _collect(open_pr(_decision(unified), **kwargs))
     second = await _collect(open_pr(_decision(unified), **kwargs))
     assert first[-1].output["pr_url"] == second[-1].output["pr_url"]
     assert len(github.pulls) == 1
     assert github.count("POST", "/pulls") == 1
+
+
+async def test_open_pr_rerun_after_the_branch_exists_but_no_pr_opens_exactly_one(
+    tmp_path, runs, github
+):
+    archive, unified, files = make_source(tmp_path, _standard_change)
+    kwargs = {
+        "issue": issue_record(),
+        "diff": _diff(unified, files),
+        "patch_sha256": _sha(unified),
+        "source_archive": str(archive),
+        "patch_created_at": "2026-10-01T12:00:00Z",
+    }
+    github.fail_pulls = True  # branch and commit land, the pull request does not
+    with pytest.raises(InfraError):
+        await _collect(open_pr(_decision(unified), **kwargs))
+    assert len(github.refs) == 1 and github.pulls == []
+    github.fail_pulls = False
+    events = await _collect(open_pr(_decision(unified), **kwargs))  # same commit
+    assert len(github.pulls) == 1 and len(github.refs) == 1
+    assert events[-1].output["outcome"] == "pr_opened"
+    commit = github.commits[0]
+    assert (
+        commit["author"]["date"]
+        == commit["committer"]["date"]
+        == kwargs["patch_created_at"]
+    )
+    assert github.commits[0] == github.commits[-1]
+
+
+def test_deliver_patch_records_when_the_patch_was_written(runs):
+    events = _plain(deliver_patch(None, issue_record(), _diff("d\n", ["a"]), **STATE))
+    stamp = events[-1].actions.state_delta["patch_created_at"]
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", stamp)
+
+
+async def test_open_pr_refuses_an_approval_that_is_not_one(tmp_path, runs, github):
+    archive, unified, files = make_source(tmp_path, _standard_change)
+    for approved in (False, None):
+        with pytest.raises(RuntimeError, match="not approved"):
+            await _collect(
+                open_pr(
+                    _decision(unified, approved=approved),
+                    issue=issue_record(),
+                    diff=_diff(unified, files),
+                    patch_sha256=_sha(unified),
+                    source_archive=str(archive),
+                )
+            )
+    assert github.requests == []
 
 
 # --- failure comments --------------------------------------------------------------------

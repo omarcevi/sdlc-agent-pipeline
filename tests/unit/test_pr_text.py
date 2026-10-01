@@ -25,6 +25,10 @@ HOSTILE = [
     "````````` ~~~~~~~~~~ resolves #4",
     "~~~\nFixes #5\n~~~",
     "```\n</details> @someone\n```\nFixes #6",
+    "line\r\n```\r\nFixes #7\r\n@someone\r\n",
+    "evil \u202e txt.exe \u200b@someone\u200b \ufeff Fixes \u2066#8",
+    "`~" * 1000,
+    "`" * 40 + "\n" + "~" * 40 + " Fixes #9",
 ]
 CLOSING = re.compile(
     r"\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b[:\s]+(?:[\w.-]+/[\w.-]+)?#\d+",
@@ -191,6 +195,79 @@ def test_title_branch_and_commit_message_are_clean():
     assert "#99" not in hostile and "r#4" not in hostile
 
 
+def test_alternating_fence_characters_cannot_blow_the_caps():
+    text = "`~" * 1000
+    block = fence(text)
+    assert len(block) < 2_300
+    assert len(block.split("\n")[0]) <= 17
+    assert len(fence("`" * 5000)) < 2_300
+    huge = "`~" * 1000
+    body = _body(
+        plan={"summary": huge},
+        patch={"summary": huge},
+        review={
+            "verdict": "request_changes",
+            "comments": [
+                {"file": "a.py", "line": 1, "severity": "major", "issue": huge}
+            ],
+            "must_fix": [huge],
+        },
+    )
+    assert len(body) <= 20_000
+    _outside_fences(body)
+    assert body.rstrip().endswith("approved by @octocat")
+
+
+def test_body_blocks_shrink_to_fit_the_cap():
+    many_models = [f"model-{i}-" + "m" * 50 for i in range(40)]
+    body = _body(
+        plan={"summary": "x" * 5000},
+        patch={"summary": "y" * 5000},
+        review={
+            "verdict": "request_changes",
+            "comments": [
+                {"file": "f" * 300, "line": 1, "severity": "major", "issue": "z" * 3000}
+            ]
+            * 30,
+            "must_fix": ["w" * 3000] * 30,
+        },
+        budget={"cost_usd": 1, "tool_calls": 1, "models": many_models},
+    )
+    assert len(body) <= 20_000
+    _outside_fences(body)
+
+
+def test_titles_and_commit_messages_defuse_references_and_mentions():
+    for text in (
+        "Fix #3",
+        "closes GH-99",
+        "resolves https://github.com/o/r/issues/5",
+        "hello @someone",
+        "see owner/repo#4",
+    ):
+        for out in (pr_title(text), commit_message(1, text)):
+            tail = out.removeprefix("[issue-to-pr] ").removeprefix("Fix #1: ")
+            assert "#" not in tail and "@" not in tail, out
+            assert "GH-" not in tail and "/issues/" not in tail, out
+    assert pr_title("a\u202etxt.exe\u200b b").count("\u202e") == 0
+    assert "\u200b" not in pr_title("a\u200bb")
+
+
+def test_invisible_characters_are_stripped_from_spans_and_fences():
+    assert code_span("src/\u202etxt.exe") == "`src/ txt.exe`"
+    assert "\u200b" not in code_span("a\u200bb") and "\ufeff" not in code_span(
+        "\ufeffa"
+    )
+    assert "\u202e" not in fence("x\u202ey")
+
+
+def test_unknown_exit_code_is_not_rendered_as_zero():
+    body = _body(test_report={"passed": False, "failed_tests": []})
+    assert "exit code unknown" in body and "exit code 0" not in body
+    body = _body(test_report={"passed": False, "exit_code": None})
+    assert "exit code unknown" in body
+
+
 def test_paths_are_code_spans_with_backticks_escaped():
     assert code_span("a.py") == "`a.py`"
     assert code_span("a`b") == "``a`b``"
@@ -213,8 +290,8 @@ def test_failure_comment_is_marked_fenced_and_signed():
     assert text.startswith(marker("run-9", "failure"))
     outside = _outside_fences(text)
     assert "@victim" not in outside and not CLOSING.search(outside)
-    assert "model `m1, m2`" in text
+    assert "models `m1, m2`" in text
     assert "approved by" not in text
     assert "{run_id}" in pr_text.FOOTER_TEMPLATE.format(
-        run_id="{run_id}", model="m", approval=""
+        run_id="{run_id}", label="model", model="m", approval=""
     )

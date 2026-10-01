@@ -13,6 +13,7 @@ import os
 import subprocess
 import tarfile
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -76,7 +77,12 @@ def deliver_patch(
         "patch_path": str(path),
     }
     yield Event(message=f"patch written to {path}\n\n{body}")
-    yield Event(output=outcome, state={"outcome": outcome, "patch_sha256": digest})
+    # The commit date: open_pr passes it on, so a re-run makes the same commit.
+    created = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    yield Event(
+        output=outcome,
+        state={"outcome": outcome, "patch_sha256": digest, "patch_created_at": created},
+    )
 
 
 # --- open_pr ---------------------------------------------------------------------------
@@ -105,11 +111,19 @@ def extract_tarball(
         tops = {m.name.split("/", 1)[0] for m in members}
         if len(tops) != 1:
             raise RuntimeError("the source archive must have one top-level directory")
+        seen: set[str] = set()
         for member in members:
             if not (member.isfile() or member.isdir()):
                 raise RuntimeError("the source archive contains a link or special file")
             if "/" not in member.name:
                 continue  # the top-level directory itself
+            parts = member.name.split("/")[1:]
+            if any(part.lower() == ".git" for part in parts):
+                raise RuntimeError("the source archive contains a .git path")
+            folded = "/".join(p.lower() for p in parts if p not in ("", "."))
+            if folded in seen:
+                raise RuntimeError("the source archive has duplicate member names")
+            seen.add(folded)
             stripped = member.replace(name=member.name.split("/", 1)[1], deep=False)
             tar.extract(stripped, dest, filter="data")
     return dest
@@ -120,6 +134,7 @@ def _git(args: list[str], cwd: Path, home: Path, stdin: bytes | None = None):
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": str(home),
         "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_CEILING_DIRECTORIES": str(home),
         "LC_ALL": "C",
     }
@@ -154,6 +169,9 @@ def _is_github_path(path: str) -> bool:
 
 def _check_paths(paths: list[str], protected: set[str]) -> None:
     for path in paths:
+        parts = path.split("/")
+        if path.startswith("/") or ".." in parts or "\\" in path:
+            raise RuntimeError("refusing a patch with an unsafe path")
         if _is_github_path(path):
             raise RuntimeError("refusing a patch that touches .github")
         if path in protected:
@@ -168,6 +186,10 @@ def _build_changes(unified_diff: str, archive: Path, protected: set[str]):
         home = Path(tmp).resolve()
         repo = home / "repo"
         extract_tarball(archive, repo)
+        # A .git directory or file would make git treat the tree as a repository:
+        # its config could name filter commands, a gitdir file another repository.
+        if os.path.lexists(repo / ".git"):
+            raise RuntimeError("the source archive contains a .git path")
         patch_bytes = unified_diff.encode("utf-8")
         listing = _git(["apply", "--numstat", "-z", "-"], repo, home, patch_bytes)
         if listing.returncode != 0:
@@ -209,12 +231,15 @@ async def open_pr(
     test_report: dict | None = None,
     review: dict | None = None,
     budget: dict | None = None,
+    patch_created_at: str | None = None,
 ):
     def decided(name: str) -> Any:
         if isinstance(node_input, dict):
             return node_input.get(name)
         return getattr(node_input, name, None)
 
+    if decided("approved") is not True:
+        raise RuntimeError("refusing to open a pull request: not approved")
     digest = _patch_hash(diff)
     if not (digest == patch_sha256 == decided("patch_sha256")):
         raise RuntimeError("refusing to open a pull request: the patch hash differs")
@@ -249,6 +274,7 @@ async def open_pr(
             message=pr_text.commit_message(number, issue["title"]),
             author_name=pr_text.AUTHOR_NAME,
             author_email=pr_text.AUTHOR_EMAIL,
+            date=patch_created_at,
         )
         branch = pr_text.branch_name(number, run_id)
         await client.ensure_branch(repo, branch, commit_sha)
@@ -309,8 +335,6 @@ async def post_failure_comment(
         InfraError,
         httpx.HTTPError,
         OSError,
-        ValueError,
-        KeyError,
     ) as exc:
         logger.warning("could not post the failure comment: %s", type(exc).__name__)
         return False

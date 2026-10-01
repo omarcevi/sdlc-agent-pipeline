@@ -14,7 +14,7 @@ import re
 AUTHOR_NAME = "issue-to-pr pipeline"
 AUTHOR_EMAIL = "issue-to-pr@example.invalid"
 FOOTER_TEMPLATE = (
-    "Opened by the issue-to-pr pipeline (run `{run_id}`, model `{model}`){approval}"
+    "Opened by the issue-to-pr pipeline (run `{run_id}`, {label} `{model}`){approval}"
 )
 
 BLOCK_LIMIT = 2_000
@@ -25,9 +25,16 @@ BRANCH_SLUG_LIMIT = 40
 CODE_SPAN_LIMIT = 200
 MAX_LISTED_FILES = 25
 MAX_LISTED_TESTS = 10
+MAX_LISTED_MODELS = 5
+_BLOCK_LIMITS = (BLOCK_LIMIT, 1_000, 500, 250)
 
+# Bidi overrides and zero-width characters can make a title or a path read as
+# something else (Trojan source); they are never published.
+_INVISIBLE = re.compile(
+    r"[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
+)
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
-_FENCE_RUN = re.compile(r"[`~]+")
+_FENCE_RUN = re.compile(r"`+|~+")  # a closing fence is one character type
 _LONG_RUN = re.compile(r"([`~])\1{15,}")
 _BACKTICKS = re.compile(r"`+")
 _LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
@@ -35,7 +42,20 @@ _SAFE_ID = re.compile(r"[^A-Za-z0-9_.:/+-]")
 
 
 def _one_line(text: str) -> str:
-    return " ".join(_CONTROL.sub(" ", text).split())
+    return " ".join(_CONTROL.sub(" ", _INVISIBLE.sub(" ", text)).split())
+
+
+_ISSUE_URL = re.compile(r"https?://\S*/(?:issues|pull)/\d+\S*", re.IGNORECASE)
+
+
+def _defuse(text: str) -> str:
+    """One line with no issue reference, mention or issue link, for a title: a
+    squash merge makes the pull request title a commit subject, where a closing
+    keyword followed by a reference would close that issue."""
+    text = _ISSUE_URL.sub("link", _one_line(text))
+    text = re.sub(r"\bGH-(?=\d)", "GH ", text, flags=re.IGNORECASE)
+    text = re.sub(r"[#@](?=\w)", "", text)
+    return text.replace("#", "")
 
 
 def _identifier(text: str, limit: int = 80) -> str:
@@ -55,7 +75,8 @@ def fence(text: str, *, limit: int = BLOCK_LIMIT) -> str:
     The fence is longer than any run of backticks or tilde in the (capped) text.
     Text beyond `limit` characters is dropped with a note inside the block.
     """
-    text = str(text).replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n")
+    text = _INVISIBLE.sub("", str(text))
+    text = text.replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n")
     text = _LONG_RUN.sub(lambda m: m.group(1) * 16, text)
     if len(text) > limit:
         text = f"{text[:limit]}\n[truncated: {len(text) - limit} more characters]"
@@ -75,7 +96,7 @@ def code_span(text: str) -> str:
 
 
 def pr_title(issue_title: str) -> str:
-    return f"[issue-to-pr] {_one_line(issue_title)}"[:TITLE_LIMIT].rstrip()
+    return f"[issue-to-pr] {_defuse(issue_title)}"[:TITLE_LIMIT].rstrip()
 
 
 def branch_name(issue_number: int, run_id: str) -> str:
@@ -85,15 +106,16 @@ def branch_name(issue_number: int, run_id: str) -> str:
 
 
 def commit_message(issue_number: int, issue_title: str) -> str:
-    # A reference in the title ("#99", "owner/repo#4") could close another issue
-    # when the commit reaches the default branch, so the "#" is dropped.
-    title = _one_line(issue_title).replace("#", "")
+    # A reference in the title ("#99", "owner/repo#4", "GH-9") could close another
+    # issue when the commit reaches the default branch.
+    title = _defuse(issue_title)
     return f"Fix #{int(issue_number)}: {title}"[:COMMIT_LIMIT].rstrip()
 
 
 def _models_text(budget: dict | None) -> str:
     models = [_identifier(m, 60) for m in (budget or {}).get("models") or []]
-    return ", ".join(m for m in models if m) or "unknown"
+    models = [m for m in models if m][:MAX_LISTED_MODELS]
+    return ", ".join(models) or "unknown"
 
 
 def _footer(run_id: str, budget: dict | None, approver: str | None) -> str:
@@ -103,7 +125,10 @@ def _footer(run_id: str, budget: dict | None, approver: str | None) -> str:
         who = f"@{approver}" if _LOGIN.fullmatch(approver) else code_span(approver)
         approval = f", approved by {who}"
     return FOOTER_TEMPLATE.format(
-        run_id=_identifier(run_id), model=models, approval=approval
+        run_id=_identifier(run_id),
+        label="models" if "," in models else "model",
+        model=models,
+        approval=approval,
     )
 
 
@@ -123,7 +148,11 @@ def _tests_line(report: dict | None) -> str | None:
     if not report:
         return None
     state = "passed" if report.get("passed") else "failed"
-    line = f"**Tests:** {state}, exit code {int(report.get('exit_code') or 0)}"
+    code = report.get("exit_code")
+    shown_code = (
+        f"exit code {int(code)}" if isinstance(code, int) else "exit code unknown"
+    )
+    line = f"**Tests:** {state}, {shown_code}"
     failed = list(report.get("failed_tests") or [])
     if failed:
         shown = ", ".join(code_span(t) for t in failed[:MAX_LISTED_TESTS])
@@ -132,7 +161,7 @@ def _tests_line(report: dict | None) -> str | None:
     return line
 
 
-def _review_blocks(review: dict | None) -> list[str]:
+def _review_blocks(review: dict | None, limit: int = BLOCK_LIMIT) -> list[str]:
     if not review:
         return []
     blocks = [f"**Review verdict:** {code_span(review.get('verdict', ''))}"]
@@ -143,12 +172,15 @@ def _review_blocks(review: dict | None) -> list[str]:
         for c in review.get("comments") or []
     ]
     if comments:
-        blocks += ["Reviewer comments (model-written):", fence("\n".join(comments))]
+        blocks += [
+            "Reviewer comments (model-written):",
+            fence("\n".join(comments), limit=limit),
+        ]
     must_fix = [f"- {item}" for item in review.get("must_fix") or []]
     if must_fix:
         blocks += [
             "Reviewer must-fix items (model-written):",
-            fence("\n".join(must_fix)),
+            fence("\n".join(must_fix), limit=limit),
         ]
     return blocks
 
@@ -185,7 +217,7 @@ def pr_body(
         else code_span(subject or "task")
     )
 
-    def build(files_in_body: bool) -> str:
+    def build(files_in_body: bool, limit: int) -> str:
         parts = [marker(run_id, "pr"), f"Proposed fix for {reference}"]
         parts.append(
             _files_line(diff) if files_in_body else _files_line({**diff, "files": []})
@@ -193,10 +225,16 @@ def pr_body(
         if line := _tests_line(test_report):
             parts.append(line)
         if plan and plan.get("summary"):
-            parts += ["Plan summary (model-written):", fence(plan["summary"])]
+            parts += [
+                "Plan summary (model-written):",
+                fence(plan["summary"], limit=limit),
+            ]
         if patch and patch.get("summary"):
-            parts += ["Coder summary (model-written):", fence(patch["summary"])]
-        if review_parts := _review_blocks(review):
+            parts += [
+                "Coder summary (model-written):",
+                fence(patch["summary"], limit=limit),
+            ]
+        if review_parts := _review_blocks(review, limit):
             parts.append("\n\n".join(review_parts))
         if line := _run_line(budget):
             parts.append(line)
@@ -205,10 +243,19 @@ def pr_body(
         parts.append(f"---\n{_footer(run_id, budget, approver)}")
         return "\n\n".join(parts) + "\n"
 
-    body = build(True)
-    if len(body) > BODY_LIMIT:
-        body = build(False)
-    return body
+    # Shrink the blocks, then drop the file list, until the body fits.
+    for files_in_body in (True, False):
+        for limit in _BLOCK_LIMITS:
+            body = build(files_in_body, limit)
+            if len(body) <= BODY_LIMIT:
+                return body
+    return "\n\n".join(
+        [
+            marker(run_id, "pr"),
+            f"Proposed fix for {reference}",
+            f"---\n{_footer(run_id, budget, approver)}",
+        ]
+    )
 
 
 def failure_comment(

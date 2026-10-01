@@ -694,7 +694,10 @@ class GitHubClient:
         message: str,
         author_name: str,
         author_email: str,
+        date: str | None = None,
     ) -> str:
+        """`date` (ISO 8601, e.g. 2026-10-01T12:00:00Z) fixes the author and committer
+        dates, so repeating the call with the same inputs yields the same commit."""
         _check_repo(repo)
         for change in changes:
             _check_change_path(change.path)
@@ -721,15 +724,18 @@ class GitHubClient:
             f"/repos/{repo}/git/trees",
             json={"base_tree": base_tree_sha, "tree": entries},
         )
+        author: dict[str, str] = {"name": author_name, "email": author_email}
+        commit_body: dict[str, Any] = {
+            "message": message,
+            "tree": tree.json()["sha"],
+            "parents": [parent_sha],
+            "author": author,
+        }
+        if date is not None:
+            author["date"] = date
+            commit_body["committer"] = {**author}
         commit = await self._request(
-            "POST",
-            f"/repos/{repo}/git/commits",
-            json={
-                "message": message,
-                "tree": tree.json()["sha"],
-                "parents": [parent_sha],
-                "author": {"name": author_name, "email": author_email},
-            },
+            "POST", f"/repos/{repo}/git/commits", json=commit_body
         )
         return commit.json()["sha"]
 
