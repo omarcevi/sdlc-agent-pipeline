@@ -31,7 +31,7 @@ describe("replay text is plain text", () => {
         step: 1,
         t: 1,
         agent: "coder",
-        call: { id: "c", tool: "run", label: "run", args: { cmd: HOSTILE } },
+        call: { id: "c", tool: "run", label: `run ${HOSTILE}`, args: { cmd: HOSTILE } },
       },
       {
         kind: "result",
@@ -62,11 +62,11 @@ describe("replay text is plain text", () => {
       ...base,
       kind: "diff",
       value: {
-        files: ["a.txt"],
+        files: [HOSTILE],
         insertions: 1,
         deletions: 0,
         cut: false,
-        unified_diff: `diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,1 +1,2 @@\n keep\n+${HOSTILE}\n`,
+        unified_diff: `diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,1 +1,2 @@ ${HOSTILE}\n keep\n+${HOSTILE}\n`,
       },
     };
     const tests: TestsStep = {
@@ -79,12 +79,16 @@ describe("replay text is plain text", () => {
       kind: "review",
       value: {
         verdict: "request_changes",
-        comments: [{ file: "a.txt", line: 1, severity: "nit", issue: HOSTILE }],
+        comments: [{ file: HOSTILE, line: 1, severity: "nit", issue: HOSTILE }],
         must_fix: [HOSTILE],
       },
     };
     const replay = makeReplay();
-    replay.outcome = { ...replay.outcome, audit: [HOSTILE] };
+    replay.outcome = { ...replay.outcome, audit: [HOSTILE],
+      reason: HOSTILE,
+      outcome: "failed",
+      failure_kind: "agent",
+    };
 
     const { container } = render(
       <div>
@@ -101,6 +105,8 @@ describe("replay text is plain text", () => {
     for (const b of screen.getAllByRole("button", { name: /^Show / })) fireEvent.click(b);
 
     assertPlain(container, [HOSTILE]);
+    // hostile labels also reach aria-labels; they stay attribute text
+    expect(container.querySelector(`[aria-label="Seek to 00:01 (run ${HOSTILE})"]`)).not.toBeNull();
     // every place the string was supplied shows it verbatim
     const occurrences = container.textContent!.split(HOSTILE).length - 1;
     expect(occurrences).toBeGreaterThanOrEqual(14);

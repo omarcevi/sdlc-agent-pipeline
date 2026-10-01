@@ -12,6 +12,12 @@ export interface FeedProps {
 
 const NEAR_BOTTOM_PX = 24;
 
+/** Identity of a line: step and kind, plus the call id where one step holds several. */
+function itemKey(item: FeedItem): string {
+  const id = item.kind === "call" ? item.call.id : item.kind === "result" ? item.result.call : "";
+  return `${item.kind}-${item.step}-${id}`;
+}
+
 function prefersReducedMotion(): boolean {
   return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
@@ -50,7 +56,7 @@ function Line({
     details = <Fields data={item.call.args} />;
   } else if (item.kind === "result") {
     const r = item.result;
-    summary = r.tool;
+    summary = toolName(r.tool, r.tool);
     detailsName = `Show result of ${summary}`;
     details = <Fields data={r.result} />;
     if (r.error !== null) tone = "text-red-700";
@@ -96,7 +102,7 @@ function Line({
 
 export function Feed({ items, follow, onFollowChange, onSeek }: FeedProps) {
   const box = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
     const el = box.current;
@@ -109,13 +115,20 @@ export function Feed({ items, follow, onFollowChange, onSeek }: FeedProps) {
     }
   }, [items.length, follow]);
 
+  // Only the reader stops following. The app's own smooth scroll only ever moves down, so follow
+  // turns off only when scrollTop moves up and the box is away from the bottom.
+  const lastTop = useRef(0);
   const onScroll = () => {
     const el = box.current;
-    if (!el || !follow) return;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight > NEAR_BOTTOM_PX) onFollowChange(false);
+    if (!el) return;
+    const top = el.scrollTop;
+    const movedUp = top < lastTop.current;
+    lastTop.current = top;
+    if (!follow || !movedUp) return;
+    if (el.scrollHeight - top - el.clientHeight > NEAR_BOTTOM_PX) onFollowChange(false);
   };
 
-  const toggle = (k: number) =>
+  const toggle = (k: string) =>
     setOpen((prev) => {
       const next = new Set(prev);
       if (!next.delete(k)) next.add(k);
@@ -127,9 +140,10 @@ export function Feed({ items, follow, onFollowChange, onSeek }: FeedProps) {
       <h2 className="text-sm font-semibold m-0">Feed</h2>
       <div ref={box} data-testid="feed-scroll" className="min-h-0 flex-1 overflow-y-auto" onScroll={onScroll}>
         <ol className="m-0 list-none space-y-1 p-0">
-          {items.map((item, k) => (
-            <Line key={k} item={item} open={open.has(k)} onToggle={() => toggle(k)} onSeek={onSeek} />
-          ))}
+          {items.map((item) => {
+            const k = itemKey(item);
+            return <Line key={k} item={item} open={open.has(k)} onToggle={() => toggle(k)} onSeek={onSeek} />;
+          })}
         </ol>
       </div>
       {!follow && (

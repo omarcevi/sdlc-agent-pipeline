@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Diff, Hunk, parseDiff } from "react-diff-view";
 import type { FileData } from "react-diff-view";
 import "react-diff-view/style/index.css";
@@ -43,6 +43,10 @@ function fileName(f: FileData): string {
 
 export function DiffPanel({ diffs }: { diffs: DiffStep[] }) {
   const [picked, setPicked] = useState<{ n: number; k: number } | null>(null);
+  // Follow the newest diff until the reader picks one; a new diff resets the pick.
+  const k = picked && picked.n === diffs.length ? Math.min(picked.k, diffs.length - 1) : diffs.length - 1;
+  const text = diffs[k]?.value.unified_diff ?? "";
+  const parsed = useMemo(() => parse(text), [text]);
   if (diffs.length === 0) {
     return (
       <Panel title="Diff">
@@ -50,11 +54,8 @@ export function DiffPanel({ diffs }: { diffs: DiffStep[] }) {
       </Panel>
     );
   }
-  // Follow the newest diff until the reader picks one; a new diff resets the pick.
-  const k = picked && picked.n === diffs.length ? Math.min(picked.k, diffs.length - 1) : diffs.length - 1;
   const step = diffs[k];
   const v = step.value;
-  const parsed = parse(v.unified_diff);
 
   return (
     <Panel title="Diff">
@@ -95,7 +96,7 @@ export function DiffPanel({ diffs }: { diffs: DiffStep[] }) {
                   {`${fileName(f)} +${c.add} −${c.del}`}
                 </p>
                 <Diff viewType="unified" diffType={f.type} hunks={f.hunks}>
-                  {(hunks) => hunks.map((h) => <Hunk key={h.content} hunk={h} />)}
+                  {(hunks) => hunks.map((h, hi) => <Hunk key={hi} hunk={h} />)}
                 </Diff>
               </div>
             );

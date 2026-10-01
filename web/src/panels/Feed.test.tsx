@@ -92,13 +92,38 @@ describe("Feed", () => {
     const box = container.querySelector("[data-testid='feed-scroll']") as HTMLElement;
     Object.defineProperty(box, "scrollHeight", { configurable: true, value: 1000 });
     Object.defineProperty(box, "clientHeight", { configurable: true, value: 200 });
-    box.scrollTop = 100;
+    box.scrollTop = 800;
+    fireEvent.scroll(box);
+    box.scrollTop = 100; // the reader scrolls up
     fireEvent.scroll(box);
     expect(onFollowChange).toHaveBeenCalledWith(false);
     expect(screen.queryByRole("button", { name: "follow" })).toBeNull();
     rerender(<Feed items={items()} follow={false} onFollowChange={onFollowChange} onSeek={noop} />);
     fireEvent.click(screen.getByRole("button", { name: "follow" }));
     expect(onFollowChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("the app's own scroll in progress does not stop following", () => {
+    const onFollowChange = vi.fn();
+    const { container } = render(<Feed items={items()} follow onFollowChange={onFollowChange} onSeek={noop} />);
+    const box = container.querySelector("[data-testid='feed-scroll']") as HTMLElement;
+    Object.defineProperty(box, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(box, "clientHeight", { configurable: true, value: 200 });
+    for (const top of [10, 120, 300, 560, 800]) {
+      box.scrollTop = top; // mid-animation: far from the bottom, moving down
+      fireEvent.scroll(box);
+    }
+    expect(onFollowChange).not.toHaveBeenCalled();
+  });
+
+  it("a set_model_response result reads answer", () => {
+    const it: FeedItem[] = [
+      { kind: "result", step: 5, t: 12, result: result({ tool: "set_model_response", result: { ok: "yes" } }) },
+    ];
+    render(<Feed items={it} follow onFollowChange={noop} onSeek={noop} />);
+    expect(screen.queryByText("set_model_response")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show result of answer" }));
+    expect(screen.getByText("yes")).toBeTruthy();
   });
 
   it("clicking a line seeks to its time", () => {
