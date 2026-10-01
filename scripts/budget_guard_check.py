@@ -38,6 +38,8 @@ def build_test_message(
     budget_id: str, amount: float, currency: str = "TRY"
 ) -> tuple[str, dict[str, str]]:
     """A payload with cost == budget, and attributes that make it a dry run."""
+    if not re.fullmatch(r"[A-Za-z0-9-]+", budget_id):
+        raise ValueError("budget id must match [A-Za-z0-9-]+")
     payload = {
         "budgetDisplayName": "issue-to-pr guard check",
         "costAmount": amount,
@@ -128,9 +130,12 @@ def run_check(
         print("error: publish returned no message id", file=sys.stderr)
         return 1, None
     deadline = monotonic() + timeout_s
+    last_error = ""
     while True:
         read = runner(_read_args(message_id, project))
-        if read.returncode == 0:
+        if read.returncode != 0:
+            last_error = (read.stderr or "").strip()
+        else:
             try:
                 entries = json.loads(read.stdout or "[]")
             except ValueError:
@@ -140,6 +145,11 @@ def run_check(
                 if isinstance(payload, dict):
                     return (0 if passed(payload) else 1), payload
         if monotonic() >= deadline:
+            if last_error:
+                print(
+                    f"error: last gcloud logging read failed: {last_error}",
+                    file=sys.stderr,
+                )
             return 1, None
         sleep(POLL_INTERVAL_S)
 
@@ -179,6 +189,11 @@ def main(argv: list[str] | None = None) -> int:
         print("error: GOOGLE_CLOUD_PROJECT is not set", file=sys.stderr)
         return 2
     outputs = _terraform_outputs()
+    try:
+        build_test_message(str(outputs["budget_id"]), 1.0)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     code, line = run_check(
         _run,
         str(outputs["budget_topic"]),

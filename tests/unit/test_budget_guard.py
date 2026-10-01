@@ -83,27 +83,35 @@ def event(data: bytes, attributes: dict, message_id: str = "m-1") -> dict:
 
 class FakeClients:
     def __init__(
-        self, enabled=True, permissions=(DELETE_PERMISSION, GET_PERMISSION), error=None
+        self,
+        enabled=True,
+        permissions=(DELETE_PERMISSION, GET_PERMISSION),
+        error=None,
+        fail=(),
     ):
+        self.fail = set(fail)  # with `error`: only these methods raise (default: all)
         self.enabled = enabled
         self.permissions = set(permissions)
         self.error = error
         self.calls: list[tuple] = []
 
+    def _maybe_raise(self, name):
+        if self.error and (not self.fail or name in self.fail):
+            raise self.error
+
     def billing_enabled(self, project_id):
         self.calls.append(("billing_enabled", project_id))
-        if self.error:
-            raise self.error
+        self._maybe_raise("billing_enabled")
         return self.enabled
 
     def disable_billing(self, project_id):
         self.calls.append(("disable_billing", project_id))
-        if self.error:
-            raise self.error
+        self._maybe_raise("disable_billing")
         self.enabled = False
 
     def granted_permissions(self, project_id, permissions):
         self.calls.append(("granted_permissions", project_id))
+        self._maybe_raise("granted_permissions")
         return {p for p in permissions if p in self.permissions}
 
     def names(self):
@@ -255,7 +263,7 @@ def test_function_directory_has_no_bytecode():
 
 def test_dry_run_never_calls_update_billing_info(main, config):
     _, lines, clients = run(main, config, payload(), real_attributes(itp_dry_run="1"))
-    assert clients.names() == ["billing_enabled", "granted_permissions"]
+    assert clients.names() == ["granted_permissions", "billing_enabled"]
     line = lines[0]
     assert (line["decision"], line["result"]) == ("dry_run", "dry run")
     assert line["billing_enabled"] is True
@@ -395,3 +403,120 @@ def test_stop_billing_reads_config_from_env(main, monkeypatch, capsys):
     assert len(lines) == 1
     assert lines[0]["decision"] == "dry_run"
     assert "disable_billing" not in clients.names()
+
+
+# --- fix round 1 ---------------------------------------------------------------
+
+
+def test_dry_run_shows_get_false_when_get_billing_info_is_denied(main, config):
+    clients = FakeClients(
+        permissions=(DELETE_PERMISSION,),
+        error=RuntimeError("denied"),
+        fail=("billing_enabled",),
+    )
+    _, lines, _ = run(
+        main, config, payload(), real_attributes(itp_dry_run="1"), clients
+    )
+    line = lines[0]
+    assert line["result"] == "dry run"
+    assert line["billing_enabled"] is None
+    assert line["permissions"] == {DELETE_PERMISSION: True, GET_PERMISSION: False}
+    assert "disable_billing" not in clients.names()
+
+
+def test_real_message_disables_when_billing_status_is_unreadable(main, config):
+    clients = FakeClients(error=RuntimeError("denied"), fail=("billing_enabled",))
+    _, lines, _ = run(main, config, payload(), real_attributes(), clients)
+    assert clients.names() == ["billing_enabled", "disable_billing"]
+    assert lines[0]["result"] == "billing disabled"
+    assert lines[0]["billing_enabled"] is None
+    assert "could not be read" in lines[0]["message"]
+
+
+def test_disable_billing_error_is_logged_and_raised_after_enabled_read(main, config):
+    clients = FakeClients(error=RuntimeError("nope"), fail=("disable_billing",))
+    lines: list[dict] = []
+    with pytest.raises(RuntimeError, match="nope"):
+        main.handle(event(payload(), real_attributes()), config, clients, lines.append)
+    assert clients.names() == ["billing_enabled", "disable_billing"]
+    assert len(lines) == 1
+    assert lines[0]["result"] == "error"
+
+
+def test_dry_run_permission_error_is_logged_and_raised(main, config):
+    clients = FakeClients(error=RuntimeError("iam"), fail=("granted_permissions",))
+    lines: list[dict] = []
+    attributes = real_attributes(itp_dry_run="1")
+    with pytest.raises(RuntimeError, match="iam"):
+        main.handle(event(payload(), attributes), config, clients, lines.append)
+    assert len(lines) == 1
+    assert lines[0]["result"] == "error"
+
+
+@pytest.mark.parametrize("value", [10**400, -(10**400)])
+def test_huge_integer_amounts_are_malformed(guard, config, value):
+    for cost, budget in [(value, 5), (5, value)]:
+        data = json.dumps(
+            {"costAmount": cost, "budgetAmount": budget, "currencyCode": "TRY"}
+        ).encode()
+        assert guard.decide(data, real_attributes(), config).reason == "malformed"
+
+
+def test_huge_integer_message_writes_one_log_line(main, config):
+    data = (
+        '{"costAmount": ' + "9" * 400 + ', "budgetAmount": 5, "currencyCode": "TRY"}'
+    ).encode()
+    _, lines, _ = run(main, config, data, real_attributes())
+    assert len(lines) == 1
+    assert lines[0]["result"] == "ignored"
+
+
+@pytest.mark.parametrize("budget", [0, -5])
+def test_non_positive_budget_is_malformed(guard, config, budget):
+    decision = guard.decide(payload(10, budget), real_attributes(), config)
+    assert (decision.action, decision.reason) == ("ignore", "malformed")
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("GUARD_BUDGET_ID", "billingAccounts/A/budgets/"),
+        ("GUARD_BILLING_ACCOUNT", "billingAccounts/"),
+        ("GUARD_BUDGET_ID", "/"),
+    ],
+)
+def test_ids_blank_after_reduction_are_refused(guard, name, value):
+    env = {
+        "GUARD_PROJECT_ID": PROJECT,
+        "GUARD_BUDGET_ID": BUDGET_ID,
+        "GUARD_BILLING_ACCOUNT": ACCOUNT,
+        name: value,
+    }
+    with pytest.raises(ValueError, match=name):
+        guard.GuardConfig.from_env(env)
+
+
+def test_every_log_line_says_whether_the_account_matched(main, config):
+    _, lines, _ = run(main, config, payload(1, 500), real_attributes())
+    assert lines[0]["account_matches"] is True
+    _, lines, _ = run(main, config, payload(1, 500), {"budgetId": BUDGET_ID})
+    assert lines[0]["account_matches"] is False
+    assert ACCOUNT not in json.dumps(lines)
+
+
+def test_clients_are_built_lazily_and_once(main, monkeypatch):
+    monkeypatch.setenv("GUARD_PROJECT_ID", PROJECT)
+    monkeypatch.setenv("GUARD_BUDGET_ID", BUDGET_ID)
+    monkeypatch.setenv("GUARD_BILLING_ACCOUNT", ACCOUNT)
+    built = []
+    clients = FakeClients()
+    monkeypatch.setattr(main, "make_clients", lambda: built.append(1) or clients)
+    main.stop_billing(types.SimpleNamespace(data=event(b"junk", real_attributes())))
+    assert built == []
+    dry = real_attributes(itp_dry_run="1")
+    main.stop_billing(types.SimpleNamespace(data=event(payload(), dry)))
+    assert built == [1]
+    lazy = main.LazyClients()
+    lazy.billing_enabled(PROJECT)
+    lazy.billing_enabled(PROJECT)
+    assert len(built) == 2

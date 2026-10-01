@@ -77,7 +77,9 @@ def _message_parts(event_data: dict) -> tuple[bytes, dict[str, str], str]:
     return data, attributes, str(message.get("messageId") or "")
 
 
-def _line(decision: Decision, config: GuardConfig, message_id: str) -> dict:
+def _line(
+    decision: Decision, config: GuardConfig, message_id: str, attributes: dict
+) -> dict:
     return {
         "severity": "INFO",
         "decision": decision.action,
@@ -88,6 +90,9 @@ def _line(decision: Decision, config: GuardConfig, message_id: str) -> dict:
         "budget_id": config.budget_id,
         "message_id": message_id,
         "result": "no action",
+        # Whether the message's billingAccountId equals the configured account (a
+        # boolean, never the id): the first real "below budget" line proves rule 5.
+        "account_matches": attributes.get("billingAccountId") == config.billing_account,
     }
 
 
@@ -100,28 +105,43 @@ def handle(
 ) -> dict:
     data, attributes, message_id = _message_parts(event_data)
     decision = decide(data, attributes, config)
-    line = _line(decision, config, message_id)
+    line = _line(decision, config, message_id, attributes)
     project = config.project_id
     try:
         if decision.action == "ignore":
             line.update(severity="WARNING", result="ignored")
         elif decision.action == "dry_run":
-            enabled = clients.billing_enabled(project)
+            # testIamPermissions needs no permission and runs first: if getBillingInfo
+            # is denied, the map still shows get=false.
             granted = clients.granted_permissions(project, PERMISSIONS)
             permissions = {name: name in granted for name in PERMISSIONS}
+            try:
+                enabled: bool | None = clients.billing_enabled(project)
+            except Exception:
+                enabled = None
             line.update(
                 result="dry run",
                 billing_enabled=enabled,
                 permissions=permissions,
                 message=(
                     f"DRY RUN: would disable billing on {project}: {_amounts(decision)}; "
-                    f"billing enabled: {enabled}; permissions: "
+                    f"billing enabled: {'unknown' if enabled is None else enabled}; "
+                    f"permissions: "
                     f"deleteBillingAssignment={permissions[PERMISSIONS[0]]}, "
                     f"get={permissions[PERMISSIONS[1]]}"
                 ),
             )
         elif decision.action == "disable":
-            if not clients.billing_enabled(project):
+            note = ""
+            try:
+                enabled = clients.billing_enabled(project)
+            except Exception:
+                # As in Google's documented sample: assume billing is on and disable
+                # (idempotent). Only an error from disable_billing is raised.
+                enabled = True
+                line["billing_enabled"] = None
+                note = "; billing status could not be read, assumed enabled"
+            if not enabled:
                 line.update(
                     result="already disabled", message=f"already disabled on {project}"
                 )
@@ -130,7 +150,7 @@ def handle(
                 line.update(
                     severity="CRITICAL",
                     result="billing disabled",
-                    message=f"billing disabled on {project}: {_amounts(decision)}",
+                    message=f"billing disabled on {project}: {_amounts(decision)}{note}",
                 )
     except Exception as error:
         line.update(
@@ -150,7 +170,31 @@ def _stdout_log(line: dict) -> None:
     sys.stdout.flush()
 
 
+class LazyClients:
+    """Builds the cloud clients on first use, once per instance, so a message that
+    needs no client (ignore, none) never constructs them."""
+
+    def __init__(self) -> None:
+        self._clients: Clients | None = None
+
+    def _get(self) -> Clients:
+        if self._clients is None:
+            self._clients = make_clients()
+        return self._clients
+
+    def billing_enabled(self, project_id: str) -> bool:
+        return self._get().billing_enabled(project_id)
+
+    def disable_billing(self, project_id: str) -> None:
+        self._get().disable_billing(project_id)
+
+    def granted_permissions(
+        self, project_id: str, permissions: Sequence[str]
+    ) -> set[str]:
+        return self._get().granted_permissions(project_id, permissions)
+
+
 @functions_framework.cloud_event
 def stop_billing(cloud_event) -> None:
     config = GuardConfig.from_env(os.environ)
-    handle(cloud_event.data, config, make_clients(), _stdout_log)
+    handle(cloud_event.data, config, LazyClients(), _stdout_log)

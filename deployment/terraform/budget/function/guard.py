@@ -36,14 +36,14 @@ class GuardConfig:
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> "GuardConfig":
         def read(name: str) -> str:
-            value = (environ.get(name) or "").strip()
+            value = (environ.get(name) or "").strip().rsplit("/", 1)[-1].strip()
             if not value:
                 raise ValueError(f"{name} is not set")
             return value
 
         project_id = read("GUARD_PROJECT_ID")
-        budget_id = read("GUARD_BUDGET_ID").rsplit("/", 1)[-1]
-        billing_account = read("GUARD_BILLING_ACCOUNT").rsplit("/", 1)[-1]
+        budget_id = read("GUARD_BUDGET_ID")
+        billing_account = read("GUARD_BILLING_ACCOUNT")
         return cls(project_id, budget_id, billing_account)
 
 
@@ -59,7 +59,11 @@ class Decision:
 def _number(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
-    return float(value) if math.isfinite(value) else None
+    try:
+        number = float(value)
+    except OverflowError:  # an integer too large for a float
+        return None
+    return number if math.isfinite(number) else None
 
 
 def _parse(data: bytes) -> tuple[float, float, str] | None:
@@ -72,7 +76,9 @@ def _parse(data: bytes) -> tuple[float, float, str] | None:
     cost = _number(body.get("costAmount"))
     budget = _number(body.get("budgetAmount"))
     currency = body.get("currencyCode")
-    if cost is None or budget is None or not isinstance(currency, str) or not currency:
+    if cost is None or budget is None or budget <= 0:
+        return None
+    if not isinstance(currency, str) or not currency:
         return None
     return cost, budget, currency
 

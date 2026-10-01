@@ -165,3 +165,30 @@ def test_check_script_message_cannot_disable_billing(check):
     assert guard.decide(message.encode(), attributes, config).action == "dry_run"
     stripped = {k: v for k, v in attributes.items() if k != "itp_dry_run"}
     assert guard.decide(message.encode(), stripped, config).action == "ignore"
+
+
+def test_check_surfaces_a_failed_log_read(check, capsys):
+    class Failing(Gcloud):
+        def __call__(self, command):
+            if "read" in command:
+                self.commands.append(command)
+                return subprocess.CompletedProcess(
+                    command, 1, "", "PERMISSION_DENIED logging"
+                )
+            return super().__call__(command)
+
+    code, line = run_check(check, Failing([]))
+    assert (code, line) == (1, None)
+    assert "PERMISSION_DENIED logging" in capsys.readouterr().err
+
+
+def test_constants_match_the_guard(check):
+    guard = load_guard()
+    assert check.PERMISSIONS == guard.PERMISSIONS
+    assert check.DRY_RUN_ATTRIBUTE == guard.DRY_RUN_ATTRIBUTE
+
+
+@pytest.mark.parametrize("bad", ["x,billingAccountId=ACC", "a b", "", "a=b"])
+def test_budget_id_with_odd_characters_is_refused(check, bad):
+    with pytest.raises(ValueError):
+        check.build_test_message(bad, 1.0)
