@@ -23,6 +23,7 @@ from tests.integration.sandbox_helpers import (
     credential_like_variables,
     delete_template_with_retry,
     is_not_found,
+    second_port_failure,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -134,7 +135,7 @@ async def test_authorization_header_does_not_reach_the_container(
             json={"command": f"python {WORKDIR}/header_echo_server.py", "cwd": WORKDIR},
         )
         assert spawn.status_code == 200, f"spawn answered HTTP {spawn.status_code}"
-        seen = await _echo_answer(env)
+        seen = await _echo_answer(env, spawn.json()["session_id"])
         print(f"headers that reached the container: {seen}")
         assert seen["authorization"] is False
     finally:
@@ -155,8 +156,10 @@ async def _wait_until_active(platform, template: str) -> None:
         await asyncio.sleep(5)
 
 
-async def _echo_answer(env: AgentRuntimeEnvironment) -> dict[str, bool]:
-    """The echo server's JSON, once it answers; polls while it starts."""
+async def _echo_answer(env: AgentRuntimeEnvironment, session: str) -> dict[str, bool]:
+    """The echo server's JSON, once it answers; polls while it starts. When it never
+    answers, one status check of its process tells a failed spawn from a port the
+    platform did not route."""
     deadline = time.monotonic() + 60
     while True:
         try:
@@ -171,10 +174,20 @@ async def _echo_answer(env: AgentRuntimeEnvironment) -> dict[str, bool]:
             if isinstance(answer, dict) and "authorization" in answer:
                 return answer
         if time.monotonic() > deadline:
-            pytest.fail(
-                "platform did not route to a second port; the header question stays open"
-            )
+            pytest.fail(await _second_port_failure(env, session))
         await asyncio.sleep(2)
+
+
+async def _second_port_failure(env: AgentRuntimeEnvironment, session: str) -> str:
+    try:
+        status = await env.proxy_request("GET", f"/processes/{session}/status")
+    except InfraError:
+        return second_port_failure(None, None)
+    try:
+        body = status.json()
+    except ValueError:
+        body = None
+    return second_port_failure(status.status_code, body)
 
 
 @pytest.mark.cloud

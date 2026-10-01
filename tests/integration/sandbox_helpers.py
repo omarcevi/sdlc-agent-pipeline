@@ -28,6 +28,27 @@ TEMPLATE_LEFT_BEHIND = (
 )
 
 
+SECOND_PORT_NOT_ROUTED = (
+    "platform did not route to a second port; the header question stays open"
+)
+
+
+def second_port_failure(status_code: int | None, body: object) -> str:
+    """Why the echo server never answered on the second port, from one answer of
+    the shim's `GET /processes/{id}/status` (None: no answer): a process that is
+    still running means the platform did not route the port; anything else means
+    the spawn failed. Fixed text and numbers only."""
+    if status_code is None:
+        return "spawn failed: its status check got no answer"
+    if status_code != 200 or not isinstance(body, dict):
+        return f"spawn failed: its status answered HTTP {status_code}"
+    if body.get("is_running") is True:
+        return SECOND_PORT_NOT_ROUTED
+    exit_code = body.get("exit_code")
+    shown = exit_code if isinstance(exit_code, int) else "unknown"
+    return f"spawn failed: the echo server is not running (exit code {shown})"
+
+
 def is_not_found(error: Exception) -> bool:
     return getattr(error, "code", None) == 404 or "NOT_FOUND" in str(
         getattr(error, "status", "")

@@ -11,9 +11,11 @@ from pathlib import Path
 import pytest
 
 from tests.integration.sandbox_helpers import (
+    SECOND_PORT_NOT_ROUTED,
     TEMPLATE_LEFT_BEHIND,
     credential_like_variables,
     delete_template_with_retry,
+    second_port_failure,
 )
 
 _SPEC = importlib.util.spec_from_file_location(
@@ -114,3 +116,35 @@ async def test_template_delete_treats_not_found_as_done():
     platform = _Platform(refusals=None, error=error)
     await delete_template_with_retry(platform, "t", sleep=_no_sleep)
     assert platform.calls == 1
+
+
+def test_a_running_echo_server_means_the_second_port_was_not_routed():
+    body = {"session_id": "s", "pid": 7, "is_running": True, "exit_code": None}
+    assert second_port_failure(200, body) == SECOND_PORT_NOT_ROUTED
+    assert "platform did not route to a second port" in SECOND_PORT_NOT_ROUTED
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "message"),
+    [
+        (
+            200,
+            {"is_running": False, "exit_code": 1},
+            "spawn failed: the echo server is not running (exit code 1)",
+        ),
+        (
+            200,
+            {"is_running": False, "exit_code": None},
+            "spawn failed: the echo server is not running (exit code unknown)",
+        ),
+        (
+            404,
+            {"detail": "no such session"},
+            "spawn failed: its status answered HTTP 404",
+        ),
+        (None, None, "spawn failed: its status check got no answer"),
+        (200, "not a dict", "spawn failed: its status answered HTTP 200"),
+    ],
+)
+def test_an_echo_server_that_is_not_running_is_a_failed_spawn(status, body, message):
+    assert second_port_failure(status, body) == message
