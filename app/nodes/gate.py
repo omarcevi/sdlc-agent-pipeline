@@ -13,7 +13,7 @@ from google.adk.events.request_input import RequestInput
 
 from app import pr_text
 from app.approval import ApprovalDecision, ApprovalRequest
-from app.nodes.finish import _patch_hash, runs_dir
+from app.nodes.finish import patch_hash, published_body, runs_dir
 
 
 def human_gate(
@@ -28,8 +28,9 @@ def human_gate(
     budget: dict | None = None,
 ):
     """Ask for approval of the pull request exactly as `open_pr` would publish it:
-    same branch, title and body (the published footer adds the approver)."""
-    digest = _patch_hash(diff)
+    same branch, title and body (`published_body`, whose published footer adds the
+    approver)."""
+    digest = patch_hash(diff)
     if digest != patch_sha256:
         raise RuntimeError("the patch hash in state is not the hash of the diff")
     run_id = issue["run_id"]
@@ -45,16 +46,14 @@ def human_gate(
         base_ref=issue["base_ref"],
         branch=pr_text.branch_name(number, run_id),
         pr_title=pr_text.pr_title(issue["title"]),
-        pr_body=pr_text.pr_body(
-            run_id=run_id,
-            issue_number=number,
-            diff=diff,
+        pr_body=published_body(
+            issue,
+            diff,
             plan=plan,
             patch=patch,
             test_report=test_report,
             review=review,
             budget=budget,
-            patch_sha256=digest,
         ),
         files=list(diff.get("files") or []),
         insertions=int(diff.get("insertions") or 0),

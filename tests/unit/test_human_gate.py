@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import io
 import json
+import os
 import tarfile
 import time
 from dataclasses import dataclass
@@ -17,9 +18,9 @@ from google.adk.events.request_input import RequestInput
 from google.adk.runners import InMemoryRunner
 from google.adk.workflow import FunctionNode, Workflow
 from google.genai import types
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from app import driver, github_client, pr_text
+from app import approval, driver, github_client, pr_text
 from app.approval import ApprovalDecision, ApprovalRequest, TerminalApprover
 from app.driver import RunCrashed, run_pipeline
 from app.environment import registry
@@ -249,6 +250,19 @@ def test_gate_yields_a_status_then_the_approval_request(bench):
     assert "approved by" not in request.pr_body
 
 
+def test_one_helper_renders_the_body_shown_and_the_body_published(bench):
+    *_, request_input = human_gate(
+        None, issue=LIVE_ISSUE, diff=LIVE_DIFF, patch_sha256=DIGEST, **GATE_STATE
+    )
+    shown = ApprovalRequest.model_validate(request_input.payload).pr_body
+    assert finish.patch_hash(LIVE_DIFF) == DIGEST
+    assert shown == finish.published_body(LIVE_ISSUE, LIVE_DIFF, **GATE_STATE)
+    published = finish.published_body(
+        LIVE_ISSUE, LIVE_DIFF, approver="octocat", **GATE_STATE
+    )
+    assert published.replace(", approved by @octocat", "") == shown != published
+
+
 def test_gate_refuses_a_hash_that_is_not_the_diffs(bench):
     with pytest.raises(RuntimeError, match="patch hash"):
         list(
@@ -445,6 +459,177 @@ async def test_terminal_approver_shows_control_characters_visibly(tmp_path):
 def test_terminal_approver_needs_a_login():
     with pytest.raises(ValueError, match="login"):
         TerminalApprover("  ")
+
+
+async def _shown(tmp_path, **over) -> str:
+    out = io.StringIO()
+    request = _request(tmp_path, **over)
+    await TerminalApprover("octocat", stdin=io.StringIO(""), stdout=out)(request)
+    return out.getvalue()
+
+
+async def test_bidi_overrides_and_line_separators_are_shown_escaped(tmp_path):
+    shown = await _shown(
+        tmp_path,
+        patch=DIFF + "+x = 'abc\u202edef'\u2028y = 1\n",
+        pr_title="[issue-to-pr] Parser \u202eloses\u2028rows",
+    )
+    assert "\u202e" not in shown and "\u2028" not in shown
+    title = next(line for line in shown.splitlines() if "Planned title" in line)
+    assert title == "Planned title: [issue-to-pr] Parser \\u{202e}loses\\u{2028}rows"
+    assert "+x = 'abc\\u{202e}def'\\u{2028}y = 1" in shown
+
+
+# Default_Ignorable_Code_Point characters outside category Cf, Zl and Zp: each
+# renders as nothing, or as a line break, in a terminal.
+INVISIBLE = [
+    "\u034f",
+    "\u115f",
+    "\u1160",
+    "\u17b4",
+    "\u17b5",
+    "\u180b",
+    "\u180c",
+    "\u180d",
+    "\u180e",
+    "\u180f",
+    "\u2029",
+    "\u2065",
+    "\u3164",
+    "\ufe0f",
+    "\uffa0",
+    "\ufff0",
+    "\U000e0100",
+]
+
+
+@pytest.mark.parametrize("char", INVISIBLE, ids=lambda c: f"U+{ord(c):04X}")
+async def test_invisible_characters_are_shown_escaped(tmp_path, char):
+    shown = await _shown(
+        tmp_path, patch=DIFF + f"+name{char} = 1\n", pr_body=f"body{char}\n"
+    )
+    assert char not in shown
+    assert f"+name\\u{{{ord(char):04x}}} = 1" in shown
+    assert f"body\\u{{{ord(char):04x}}}" in shown
+
+
+async def test_a_long_line_is_cut(tmp_path):
+    shown = await _shown(tmp_path, patch=DIFF + "+" + "x" * 199_999 + "\n")
+    line = next(line for line in shown.splitlines() if line.startswith("+xxx"))
+    assert line == "+" + "x" * 499 + "[199500 more characters]"
+    assert len(shown) < 10_000
+
+
+async def test_a_long_line_of_escapes_is_cut_on_what_is_shown(tmp_path):
+    shown = await _shown(tmp_path, pr_body="\u202e" * 200_000 + "\n")
+    escape = "\\u{202e}"  # 8 characters: 62 fit in 500
+    line = next(line for line in shown.splitlines() if line.startswith(escape))
+    assert line == escape * 62 + f"[{200_000 - 62} more characters]"
+
+
+async def test_a_long_file_list_is_cut(tmp_path):
+    files = [f"pkg/module_{n:04d}.py" for n in range(5000)]
+    shown = await _shown(tmp_path, files=files)
+    assert "pkg/module_0099.py" in shown and "pkg/module_0100.py" not in shown
+    assert "[4900 more files]" in shown
+    assert "Diff: 5000 files" in shown
+
+
+class FakeTerminal(io.StringIO):
+    """A stdin that says it is a terminal, on a made-up file descriptor."""
+
+    def __init__(self, answer: str, out: io.StringIO) -> None:
+        super().__init__(answer)
+        self.out = out
+        self.read_after: list[str] = []
+
+    def isatty(self) -> bool:
+        return True
+
+    def fileno(self) -> int:
+        return 99
+
+    def readline(self, *args) -> str:
+        self.read_after.append(self.out.getvalue())
+        return super().readline(*args)
+
+
+class FakeTermios:
+    TCIFLUSH = 0
+
+    def __init__(self, out: io.StringIO) -> None:
+        self.out = out
+        self.flushes: list[tuple[int, int, str]] = []
+
+    def tcflush(self, fd: int, queue: int) -> None:
+        self.flushes.append((fd, queue, self.out.getvalue()))
+
+
+async def test_type_ahead_is_discarded_on_a_terminal(tmp_path, monkeypatch):
+    out = io.StringIO()
+    termios = FakeTermios(out)
+    monkeypatch.setattr(approval, "termios", termios)
+    stdin = FakeTerminal("approve\n", out)
+    request = _request(tmp_path)
+    decision = await TerminalApprover("octocat", stdin=stdin, stdout=out)(request)
+    assert decision.approved is True
+    [(fd, queue, printed)] = termios.flushes
+    assert (fd, queue) == (99, FakeTermios.TCIFLUSH)
+    # Just before the prompt: everything else is shown, the prompt is not yet.
+    assert "Run so far" in printed and PROMPT not in printed
+    assert stdin.read_after[0].endswith(PROMPT)
+
+
+async def test_nothing_is_flushed_when_stdin_is_not_a_terminal(tmp_path, monkeypatch):
+    out = io.StringIO()
+    termios = FakeTermios(out)
+    monkeypatch.setattr(approval, "termios", termios)
+    request = _request(tmp_path)
+    approver = TerminalApprover("octocat", stdin=io.StringIO("approve\n"), stdout=out)
+    assert (await approver(request)).approved is True
+    assert termios.flushes == []
+
+
+@pytest.mark.skipif(
+    approval.termios is None or not hasattr(os, "openpty"), reason="needs a pty"
+)
+async def test_type_ahead_on_a_real_terminal_does_not_answer(tmp_path):
+    master, slave = os.openpty()
+    stdin = open(slave, encoding="utf-8")  # closed in finally
+    try:
+        os.write(master, b"approve\n")  # typed while the run was going
+        await asyncio.sleep(0.05)
+        out = io.StringIO()
+        asked = asyncio.create_task(
+            TerminalApprover("octocat", stdin=stdin, stdout=out)(_request(tmp_path))
+        )
+        for _ in range(500):
+            if out.getvalue().endswith(PROMPT):
+                break
+            await asyncio.sleep(0.01)
+        os.write(master, b"no\n")  # typed after the prompt
+        decision = await asyncio.wait_for(asked, 5)
+        assert decision.approved is False
+    finally:
+        stdin.close()
+        os.close(master)
+
+
+async def test_a_platform_without_termios_still_asks(tmp_path, monkeypatch):
+    monkeypatch.setattr(approval, "termios", None)
+    out = io.StringIO()
+    stdin = FakeTerminal("approve\n", out)
+    request = _request(tmp_path)
+    decision = await TerminalApprover("octocat", stdin=stdin, stdout=out)(request)
+    assert decision.approved is True
+
+
+@pytest.mark.parametrize("loose", ["true", "yes", 1, "1", "on"], ids=repr)
+def test_a_decision_needs_a_real_boolean(loose):
+    with pytest.raises(ValidationError):
+        ApprovalDecision.model_validate(
+            {"approved": loose, "approver": "octocat", "patch_sha256": DIGEST}
+        )
 
 
 # --- the driver: pause, ask, resume --------------------------------------------------
@@ -745,6 +930,25 @@ async def test_rejected_run_opens_nothing_and_comments_once(live):
     assert comment["number"] == 7 and "Decision by @octocat." in comment["body"]
     assert record.comment_posted is True and record.pr_url is None
     assert live.stored["outcome"] == "rejected"
+
+
+async def test_a_loose_approval_fails_closed(live):
+    def loose(request):
+        return {
+            "approved": "true",
+            "approver": "octocat",
+            "patch_sha256": request.patch_sha256,
+        }
+
+    with pytest.raises(RunCrashed) as crashed:
+        await run_live(FakeApprover(loose))
+    assert isinstance(crashed.value.__cause__, ValidationError)
+    assert (crashed.value.record.outcome, crashed.value.record.failure_kind) == (
+        "failed",
+        "infra",
+    )
+    assert live.stored["outcome"] == "failed"
+    assert live.github.pulls == [] and live.github.commits == []
 
 
 async def test_approval_for_a_different_patch_is_rejected(live):

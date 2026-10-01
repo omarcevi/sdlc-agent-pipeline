@@ -40,8 +40,39 @@ def _issue_number(issue: dict) -> int | None:
     return int(number) if number is not None else None
 
 
-def _patch_hash(diff: dict) -> str:
+def patch_hash(diff: dict) -> str:
+    """SHA-256 of the full diff (UTF-8): what deliver_patch records, the approval
+    binds to and open_pr checks."""
     return hashlib.sha256(diff["unified_diff"].encode("utf-8")).hexdigest()
+
+
+def published_body(
+    issue: dict,
+    diff: dict,
+    *,
+    plan: dict | None = None,
+    patch: dict | None = None,
+    test_report: dict | None = None,
+    review: dict | None = None,
+    budget: dict | None = None,
+    approver: str | None = None,
+) -> str:
+    """The pull request body: `pr_body.md` and the approval gate show it without an
+    approver, `open_pr` publishes it with the approver in the footer. One function,
+    so what the human approves is what is published."""
+    return pr_text.pr_body(
+        run_id=issue["run_id"],
+        issue_number=_issue_number(issue),
+        subject=issue.get("task_id"),
+        diff=diff,
+        plan=plan,
+        patch=patch,
+        test_report=test_report,
+        review=review,
+        budget=budget,
+        approver=approver,
+        patch_sha256=patch_hash(diff),
+    )
 
 
 def deliver_patch(
@@ -58,18 +89,15 @@ def deliver_patch(
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / "patch.diff"
     path.write_text(diff["unified_diff"])
-    digest = _patch_hash(diff)
-    body = pr_text.pr_body(
-        run_id=issue["run_id"],
-        issue_number=_issue_number(issue),
-        subject=issue.get("task_id"),
-        diff=diff,
+    digest = patch_hash(diff)
+    body = published_body(
+        issue,
+        diff,
         plan=plan,
         patch=patch,
         test_report=test_report,
         review=review,
         budget=budget,
-        patch_sha256=digest,
     )
     (run_dir / "pr_body.md").write_text(body)
     outcome = {
@@ -233,7 +261,7 @@ async def open_pr(
 
     if decided("approved") is not True:
         raise RuntimeError("refusing to open a pull request: not approved")
-    digest = _patch_hash(diff)
+    digest = patch_hash(diff)
     if not (digest == patch_sha256 == decided("patch_sha256")):
         raise RuntimeError("refusing to open a pull request: the patch hash differs")
     protected = set(protected_paths or [])
@@ -245,18 +273,15 @@ async def open_pr(
     repo = issue["repo"]
     number = int(issue["issue_number"])
     run_id = issue["run_id"]
-    approver = decided("approver")
-    body = pr_text.pr_body(
-        run_id=run_id,
-        issue_number=number,
-        diff=diff,
+    body = published_body(
+        issue,
+        diff,
         plan=plan,
         patch=patch,
         test_report=test_report,
         review=review,
         budget=budget,
-        approver=approver,
-        patch_sha256=digest,
+        approver=decided("approver"),
     )
     async with GitHubClient.from_token_file() as client:
         commit_sha = await client.create_commit(

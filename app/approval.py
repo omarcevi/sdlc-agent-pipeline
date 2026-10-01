@@ -9,15 +9,18 @@ to that patch and nothing else (`route_approval` and `open_pr` check it).
 
 import asyncio
 import hashlib
+import importlib
 import sys
 import unicodedata
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool
 
 MAX_PATCH_LINES = 400
+MAX_LINE_CHARS = 500  # per shown line, escapes included
+MAX_FILES = 100  # file names listed in the diff stat
 APPROVE_WORD = "approve"
 PROMPT = f'Type "{APPROVE_WORD}" to open this pull request; anything else rejects: '
 
@@ -50,9 +53,11 @@ class ApprovalRequest(BaseModel):
 
 class ApprovalDecision(BaseModel):
     """The approver's answer. `patch_sha256` is the hash of the patch they were shown.
-    An empty `approver` means no one decided (the approval timed out)."""
+    An empty `approver` means no one decided (the approval timed out). `approved`
+    must be a real boolean: a malformed answer such as "true" fails validation
+    instead of approving."""
 
-    approved: bool
+    approved: StrictBool
     approver: str
     patch_sha256: str
     note: str | None = None
@@ -61,16 +66,78 @@ class ApprovalDecision(BaseModel):
 Approver = Callable[[ApprovalRequest], Awaitable[ApprovalDecision]]
 
 
+def _load_termios() -> Any:
+    try:
+        return importlib.import_module("termios")
+    except ImportError:  # not POSIX: type-ahead is not discarded
+        return None
+
+
+termios: Any = _load_termios()
+
+# Shown escaped besides newline and tab: categories Cc (controls), Cf (format:
+# bidi overrides, zero-width characters, tags), Zl and Zp (U+2028, U+2029).
+_ESCAPED_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+# The Default_Ignorable_Code_Point characters outside category Cf (Unicode 15.1,
+# DerivedCoreProperties.txt). They render as nothing, so text can hide in them.
+_IGNORABLE_RANGES = (
+    (0x034F, 0x034F),  # combining grapheme joiner
+    (0x115F, 0x1160),  # Hangul choseong and jungseong fillers
+    (0x17B4, 0x17B5),  # Khmer inherent vowels
+    (0x180B, 0x180F),  # Mongolian free variation selectors (and the vowel separator)
+    (0x2065, 0x2065),  # reserved
+    (0x3164, 0x3164),  # Hangul filler
+    (0xFE00, 0xFE0F),  # variation selectors
+    (0xFFA0, 0xFFA0),  # halfwidth Hangul filler
+    (0xFFF0, 0xFFF8),  # reserved
+    (0xE0000, 0xE0FFF),  # tags, variation selectors supplement, reserved
+)
+
+
+def _escaped(char: str) -> bool:
+    if char == "\t":
+        return False
+    if unicodedata.category(char) in _ESCAPED_CATEGORIES:
+        return True
+    code = ord(char)
+    return any(low <= code <= high for low, high in _IGNORABLE_RANGES)
+
+
+def _shown_line(line: str) -> str:
+    """One line as the terminal shows it: every character that could move the
+    cursor, erase or hide text shown as an escape, and the line cut once it reaches
+    MAX_LINE_CHARS shown characters."""
+    shown: list[str] = []
+    width = 0
+    for index, char in enumerate(line):
+        piece = f"\\u{{{ord(char):04x}}}" if _escaped(char) else char
+        if width + len(piece) > MAX_LINE_CHARS:
+            shown.append(f"[{len(line) - index} more characters]")
+            break
+        shown.append(piece)
+        width += len(piece)
+    return "".join(shown)
+
+
 def _visible(text: str) -> str:
-    """`text` with every control or format character except newline and tab shown
-    as an escape, so a patch or a body cannot move the cursor, erase lines or
-    otherwise change what the terminal shows the approver."""
-    return "".join(
-        char
-        if char in "\n\t" or unicodedata.category(char) not in ("Cc", "Cf")
-        else f"\\u{{{ord(char):04x}}}"
-        for char in text
-    )
+    """`text` as the terminal shows it, line by line (see `_shown_line`), so a patch
+    or a body cannot change what the approver sees or flood the terminal."""
+    return "\n".join(_shown_line(line) for line in text.split("\n"))
+
+
+def _discard_type_ahead(stream: TextIO) -> None:
+    """Drop whatever was typed into the terminal while the run was going, so only
+    an answer typed after the prompt counts. A stream that is not a terminal, or a
+    platform without termios, is left alone."""
+    if termios is None:
+        return
+    try:
+        if not stream.isatty():
+            return
+        fd = stream.fileno()
+    except (AttributeError, OSError, ValueError):
+        return
+    termios.tcflush(fd, termios.TCIFLUSH)
 
 
 class TerminalApprover:
@@ -115,8 +182,10 @@ class TerminalApprover:
             f"Diff: {len(request.files)} files, "
             f"+{request.insertions} -{request.deletions}"
         )
-        for path in request.files:
+        for path in request.files[:MAX_FILES]:
             self._show(f"  {path}")
+        if len(request.files) > MAX_FILES:
+            self._show(f"  [{len(request.files) - MAX_FILES} more files]")
         self._show(f"Patch SHA-256: {shown_sha256}")
         if len(lines) > MAX_PATCH_LINES:
             self._show(f"--- patch: first {MAX_PATCH_LINES} of {len(lines)} lines ---")
@@ -137,6 +206,8 @@ class TerminalApprover:
         self._show(
             f"Run so far: ${request.cost_usd:.4f}, {request.tool_calls} tool calls"
         )
+        self._stdout.flush()
+        _discard_type_ahead(self._stdin)
         print(_visible(PROMPT), end="", file=self._stdout, flush=True)
         answer = await asyncio.to_thread(self._stdin.readline)
         return ApprovalDecision(
