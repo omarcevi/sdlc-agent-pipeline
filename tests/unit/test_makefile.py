@@ -160,6 +160,20 @@ def test_terraform_apply_and_destroy_auto_approve_and_init_plan_take_no_input():
     assert {"init", "plan", "apply", "destroy"} <= seen
 
 
+def test_teardown_names_the_engine_from_terraform_on_every_step():
+    """An exported SANDBOX_ENGINE must never redirect a teardown step."""
+    engine = (
+        '"$(terraform -chdir=deployment/terraform/single-project output -raw '
+        'agent_runtime_resource_name)"'
+    )
+    for name in ("teardown", "teardown-dry-run"):
+        steps = [line for line in _recipe(name) if "sandbox_infra.py" in line]
+        assert len(steps) >= 3, name
+        for line in steps:
+            flag = "--name" if "delete-engine" in line else "--engine"
+            assert f"{flag} {engine}" in line, line
+
+
 def test_budget_targets_require_the_lira_amount_and_pass_it():
     for name in ("budget-plan", "budget-apply"):
         prereqs, _ = TARGETS[name]

@@ -8,6 +8,9 @@ SI = $(WITH_PROJECT) uv run python scripts/sandbox_infra.py
 TF_SP = terraform -chdir=deployment/terraform/single-project
 TF_BUDGET = terraform -chdir=deployment/terraform/budget
 BUDGET_VARS = -var project_id=$(PROJECT) -var budget_amount_try=$(BUDGET_TRY)
+# Teardown names the engine from Terraform on every step, never from SANDBOX_ENGINE;
+# an empty output makes sandbox_infra.py exit 2.
+TF_ENGINE = "$$($(TF_SP) output -raw agent_runtime_resource_name)"
 # Teardown waits for deletes to finish: WAIT_TRIES polls, WAIT_SECONDS apart.
 WAIT_TRIES ?= 30
 WAIT_SECONDS ?= 10
@@ -131,22 +134,22 @@ smoke-deployed: require-project
 
 teardown-dry-run: require-project
 	@echo "will: list what teardown would remove; nothing changes"
-	$(SI) sweep --all --dry-run
-	$(SI) prune-templates --all --dry-run
-	$(SI) delete-engine --name "$$($(TF_SP) output -raw agent_runtime_resource_name)" --expect-display-name issue-to-pr --dry-run
+	$(SI) sweep --all --dry-run --engine $(TF_ENGINE)
+	$(SI) prune-templates --all --dry-run --engine $(TF_ENGINE)
+	$(SI) delete-engine --name $(TF_ENGINE) --expect-display-name issue-to-pr --dry-run
 	$(TF_SP) plan -destroy -input=false -var project_id=$(PROJECT)
 	gcloud storage ls --project=$(PROJECT) gs://$(PROJECT)_cloudbuild
 
 teardown: require-project require-confirm
 	@echo "will: DELETE all sandboxes, all templates, the engine, the single-project root and the cloudbuild bucket (owner approval)"
 	@echo "step 1/5: sandboxes"
-	$(SI) sweep --all
-	$(call wait-clear,$(SI) sweep --all --dry-run,sandboxes)
+	$(SI) sweep --all --engine $(TF_ENGINE)
+	$(call wait-clear,$(SI) sweep --all --dry-run --engine $(TF_ENGINE),sandboxes)
 	@echo "step 2/5: templates"
-	$(SI) prune-templates --all
-	$(call wait-clear,$(SI) prune-templates --all --dry-run,templates)
-	@echo "step 3/5: engine"
-	$(SI) delete-engine --name "$$($(TF_SP) output -raw agent_runtime_resource_name)" --expect-display-name issue-to-pr
+	$(SI) prune-templates --all --engine $(TF_ENGINE)
+	$(call wait-clear,$(SI) prune-templates --all --dry-run --engine $(TF_ENGINE),templates)
+	@echo "step 3/5: engine (waits until it is gone)"
+	$(SI) delete-engine --name $(TF_ENGINE) --expect-display-name issue-to-pr
 	@echo "step 4/5: single-project Terraform root"
 	$(TF_SP) destroy -auto-approve -var project_id=$(PROJECT)
 	@echo "step 5/5: cloudbuild bucket"
