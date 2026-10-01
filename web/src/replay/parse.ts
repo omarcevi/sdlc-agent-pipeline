@@ -35,6 +35,10 @@ function check(value: unknown, spec: Spec, path: string): void {
     for (const [key, sub] of Object.entries(spec)) check(value[key], sub, `${path}.${key}`);
     return;
   }
+  if (spec.startsWith("enum:")) {
+    if (typeof value !== "string" || !spec.slice(5).split("|").includes(value)) missing(path);
+    return;
+  }
   const nullable = spec.endsWith("?");
   const tag = nullable ? spec.slice(0, -1) : spec;
   if (nullable && value === null) return;
@@ -53,6 +57,8 @@ function check(value: unknown, spec: Spec, path: string): void {
     case "any":
       if (value === undefined) missing(path);
       return;
+    default:
+      throw new Error(`unknown spec tag: ${spec}`);
   }
 }
 
@@ -62,23 +68,23 @@ const REPLAY_SPEC: Spec = {
     run_id: "string",
     task_id: "string",
     repo: "string",
-    category: "string",
-    difficulty: "string",
+    category: "enum:bug|feature|refactor|trap",
+    difficulty: "enum:easy|medium|hard",
     tempting: "boolean",
     levers: ["string"],
-    system: "string",
-    graph: "string",
+    system: "enum:multi|single",
+    graph: "enum:multi|single",
     preset: "string",
     models: "object",
     prompt_version: "string",
-    mode: "string",
+    mode: "enum:bench",
     recorded_at: "string",
     issue: { title: "string", body: "string" },
   },
   caps: { cost_usd: "number", tool_calls: "number", wall_clock_s: "number" },
   outcome: {
-    outcome: "string",
-    failure_kind: "string",
+    outcome: "enum:patch_written|declined|failed|pr_opened|rejected|refused",
+    failure_kind: "enum:agent|budget|infra|none",
     reason: "string",
     resolved: "boolean",
     cost_usd: "number",
@@ -124,7 +130,7 @@ const STEP_FIELDS: Record<string, Spec> = {
       test_strategy: "string",
     },
   },
-  claim: { agent: "string", value: { summary: "string", files_changed: ["string"] } },
+  claim: { agent: "enum:coder|solo", value: "object" },
   diff: {
     value: {
       files: ["string"],
@@ -145,8 +151,8 @@ const STEP_FIELDS: Record<string, Spec> = {
   },
   review: {
     value: {
-      verdict: "string",
-      comments: [{ file: "string", line: "number?", severity: "string", issue: "string" }],
+      verdict: "enum:approve|request_changes",
+      comments: [{ file: "string", line: "number?", severity: "enum:blocker|major|minor|nit", issue: "string" }],
       must_fix: ["string"],
     },
   },
@@ -154,7 +160,24 @@ const STEP_FIELDS: Record<string, Spec> = {
   outcome: {},
 };
 
-const GRAPH_IDS: GraphId[] = ["multi", "single"];
+const CLAIM_VALUE: Record<"coder" | "solo", Spec> = {
+  coder: {
+    summary: "string",
+    files_changed: ["string"],
+    tests_added: ["string"],
+    notes: "string",
+  },
+  solo: {
+    declined: "boolean",
+    decline_reason: "string?",
+    summary: "string",
+    files_changed: ["string"],
+  },
+};
+
+const OUTCOMES = "enum:patch_written|declined|failed|pr_opened|rejected|refused";
+const FAILURES = "enum:agent|budget|infra|none";
+const GRAPH_IDS: readonly GraphId[] = ["multi", "single"];
 
 export function parseGraphs(json: unknown): Graphs {
   const graphDef: Spec = {
@@ -184,10 +207,10 @@ export function parseIndex(json: unknown): ReplayIndex {
           issue_title: "string",
           repo: "string",
           category: "string",
-          system: "string",
+          system: "enum:multi|single",
           preset: "string",
-          outcome: "string",
-          failure_kind: "string",
+          outcome: OUTCOMES,
+          failure_kind: FAILURES,
           resolved: "boolean",
           cost_usd: "number",
           tool_calls: "number",
@@ -199,6 +222,16 @@ export function parseIndex(json: unknown): ReplayIndex {
     "$",
   );
   const index = json as ReplayIndex;
+  const seen = new Set<string>();
+  index.replays.forEach((entry, n) => {
+    const path = `$.replays[${n}]`;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(entry.file) || entry.file.includes("..")) {
+      throw new ReplayError(`missing field: ${path}.file`);
+    }
+    if (seen.has(entry.run_id)) throw new ReplayError(`missing field: ${path}.run_id`);
+    seen.add(entry.run_id);
+    if (entry.allow !== undefined) check(entry.allow, [{ path: "string", rule: "string" }], `${path}.allow`);
+  });
   if (index.schema !== SUPPORTED_SCHEMA) throw new ReplayError("unsupported schema");
   return index;
 }
@@ -211,8 +244,11 @@ export function parseReplay(json: unknown, graphs: Graphs): Replay {
   check(json, REPLAY_SPEC, "$");
   const replay = json as unknown as Replay;
   if (replay.schema !== SUPPORTED_SCHEMA) throw new ReplayError("unsupported schema");
-  const graph = graphs.graphs[replay.run.graph];
-  if (!graph) return missing("$.run.graph");
+  const graphId = replay.run.graph;
+  if (!GRAPH_IDS.includes(graphId) || !Object.hasOwn(graphs.graphs, graphId)) {
+    return missing("$.run.graph");
+  }
+  const graph = graphs.graphs[graphId];
   const nodeIds = new Set(graph.nodes.map((n) => n.id));
 
   let lastT = -Infinity;
@@ -221,8 +257,12 @@ export function parseReplay(json: unknown, graphs: Graphs): Replay {
     const path = `$.steps[${n}]`;
     check(item, STEP_BASE, path);
     const step = item as Record<string, unknown>;
-    const fields = STEP_FIELDS[step.kind as string];
+    const known = Object.hasOwn(STEP_FIELDS, step.kind as string);
+    const fields = known ? STEP_FIELDS[step.kind as string] : undefined;
     if (fields) check(step, fields, path);
+    if (step.kind === "claim") {
+      check(step.value, CLAIM_VALUE[step.agent as "coder" | "solo"], `${path}.value`);
+    }
     if (step.i !== n || (step.t as number) < lastT) throw new ReplayError("steps out of order");
     lastT = step.t as number;
     if (!nodeIds.has(step.node as string)) throw new ReplayError("node not in graph");

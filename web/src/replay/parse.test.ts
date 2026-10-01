@@ -77,4 +77,81 @@ describe("parseReplay", () => {
       expect((e as Error).message).toBe("missing field: $.caps");
     }
   });
+
+  it("maps prototype-key kinds to other and never throws a TypeError", () => {
+    for (const kind of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+      const r = raw();
+      r.steps[3] = { ...r.steps[3], kind };
+      const step = parseReplay(r, graphs).steps[3];
+      expect(step.kind).toBe("other");
+    }
+    for (const graph of ["__proto__", "constructor", "toString", "nope"]) {
+      const r = raw();
+      r.run.graph = graph;
+      expect(() => parseReplay(r, graphs)).toThrow(ReplayError);
+    }
+  });
+
+  it("rejects a value outside an enum", () => {
+    const verdict = raw();
+    verdict.steps[16].value.verdict = "lgtm";
+    expect(() => parseReplay(verdict, graphs)).toThrow("missing field: $.steps[16].value.verdict");
+    const category = raw();
+    category.run.category = "x";
+    expect(() => parseReplay(category, graphs)).toThrow("missing field: $.run.category");
+    const outcome = raw();
+    outcome.outcome.failure_kind = "oops";
+    expect(() => parseReplay(outcome, graphs)).toThrow("missing field: $.outcome.failure_kind");
+  });
+
+  it("validates a claim as exactly one of the two shapes", () => {
+    const partial = raw();
+    delete partial.steps[10].value.notes;
+    expect(() => parseReplay(partial, graphs)).toThrow("missing field: $.steps[10].value.notes");
+    const wrongAgent = raw();
+    wrongAgent.steps[10].agent = "evil";
+    expect(() => parseReplay(wrongAgent, graphs)).toThrow("missing field: $.steps[10].agent");
+    const solo = raw("single");
+    delete solo.steps[5].value.declined;
+    expect(() => parseReplay(solo, graphs)).toThrow("missing field: $.steps[5].value.declined");
+  });
+
+  it("rejects non-object steps and steps that are not an array", () => {
+    const notObj = raw();
+    notObj.steps[2] = 5;
+    expect(() => parseReplay(notObj, graphs)).toThrow("missing field: $.steps[2]");
+    const nul = raw();
+    nul.steps[2] = null;
+    expect(() => parseReplay(nul, graphs)).toThrow(ReplayError);
+    const notArr = raw();
+    notArr.steps = { length: 0 };
+    expect(() => parseReplay(notArr, graphs)).toThrow("missing field: $.steps");
+  });
+});
+
+describe("parseIndex", () => {
+  const idx = () => JSON.parse(JSON.stringify(makeIndex())) as Record<string, any>;
+
+  it("rejects file names that are not plain file names", () => {
+    for (const file of ["../x.json", "a/b.json", "https://x.test/a.json", "..", ".hidden", "", "a\\b.json"]) {
+      const i = idx();
+      i.replays[0].file = file;
+      expect(() => parseIndex(i), file).toThrow(ReplayError);
+    }
+  });
+
+  it("rejects duplicate run ids, bad enums and a bad allow list", () => {
+    const dup = idx();
+    dup.replays[1].run_id = dup.replays[0].run_id;
+    expect(() => parseIndex(dup)).toThrow(ReplayError);
+    const en = idx();
+    en.replays[0].outcome = "weird";
+    expect(() => parseIndex(en)).toThrow("missing field: $.replays[0].outcome");
+    const allow = idx();
+    allow.replays[0].allow = [{ path: "$" }];
+    expect(() => parseIndex(allow)).toThrow("missing field: $.replays[0].allow[0].rule");
+    const ok = idx();
+    ok.replays[0].allow = [{ path: "$.x", rule: "email" }];
+    expect(() => parseIndex(ok)).not.toThrow();
+  });
 });
