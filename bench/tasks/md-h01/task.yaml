@@ -1,34 +1,20 @@
 repo: mdlite
-title: "Numbered sub-steps are numbered from the parent step"
+title: "Heading anchors run words together around a no-break space"
 body: |
-  Our install guides use numbered steps with numbered sub-steps:
+  Our French docs put a no-break space (U+00A0) between a number and its unit, and
+  before `?`, `!` and `:`. Headings that contain one get anchors with the words glued
+  together, so the links we write by hand (`#délai-de-10-jours`) go nowhere:
 
-      1. Download the archive
-      2. Configure
-         1. Copy the sample file
-         2. Edit the paths
-      3. Run
+      >>> mdlite.to_html("## Délai de 10\u00a0jours")
+      '<h2 id="délai-de-10jours">Délai de 10\xa0jours</h2>\n'
+      >>> mdlite.toc("## Délai de 10\u00a0jours")
+      [(2, 'Délai de 10\xa0jours', 'délai-de-10jours')]
 
-  In the browser the two sub-steps under step 2 show up as 2 and 3 instead of 1 and 2.
-  The HTML has a `start` on the inner list:
+  With an ordinary space the anchor is `délai-de-10-jours`, as we expect. A colleague
+  says the same thing happens with a tab between two words of a heading.
 
-      >>> print(mdlite.to_html(guide), end="")
-      <ol>
-      <li>Download the archive</li>
-      <li>Configure
-      <ol start="2">
-      <li>Copy the sample file</li>
-      <li>Edit the paths</li>
-      </ol>
-      </li>
-      <li>Run</li>
-      </ol>
-
-  Sub-steps under step 1 look right. Under step 3 they would start at 3, and so on.
-
-  Expected: a numbered sub-list is numbered from its own first item, the same way a
-  numbered list that is not nested is, so the example gives a plain `<ol>` for the
-  sub-steps.
+  Expected: words separated by a no-break space, or by any other kind of space, stay
+  separate in the anchor, just as they do with an ordinary space.
 category: bug
 difficulty: hard
 split: heldout

@@ -1,20 +1,23 @@
 repo: mdlite
-title: "Refactor: give code block nodes their language"
+title: "Refactor: let the command line run on streams we pass in"
 body: |
-  Our docs build runs the code samples in our Markdown. It parses each page with
-  `mdlite.blocks.parse(text)`, walks the tree and picks out the fenced code blocks
-  written in a given language. To find a block's language we copied mdlite's rule for
-  turning the fence's info string into the word that ends up in
-  `class="language-..."`, and our copy has already drifted from yours once.
+  We embed mdlite's command line in our own tool and call `mdlite.cli.main` directly.
+  It always talks to the process's standard streams, so our tool swaps `sys.stdin`,
+  `sys.stdout` and `sys.stderr` around every call, and our tests patch them too.
 
-  Please make that rule live in one place, on the node: every `CodeBlock` in a parsed
-  tree should have a `language` attribute holding exactly the word that goes into the
-  class (before any HTML escaping), or `None` when the fence has no info string. The
-  HTML renderer should get the class from that attribute instead of working the word
-  out on its own, so that there is a single copy of the rule.
+  Please let the caller hand the streams in:
 
-  This is a refactor: the HTML, and everything else about the library that a user can
-  observe today, must stay exactly as it is.
+      status = mdlite.cli.main(["-"], stdin=source, stdout=sink, stderr=log)
+
+  - `stdin` is a binary stream, read when the file argument is `-`; `stdout` is a
+    binary stream that receives the HTML; `stderr` is a text stream that receives
+    every message `main` prints, including the usage message for wrong arguments.
+  - Each of the three is optional. A stream that is not passed is the process's own,
+    as today.
+
+  This is a refactor: apart from where the output goes, nothing may change. The same
+  bytes, the same messages and the same exit codes (wrong arguments still end in
+  `SystemExit` with code 2), and `python -m mdlite` works exactly as before.
 category: refactor
 difficulty: medium
 split: heldout
