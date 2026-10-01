@@ -34,7 +34,7 @@ function inFormControl(target: EventTarget | null, key: string): boolean {
   if (target.isContentEditable) return true;
   const tag = target.tagName;
   if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return true;
-  return tag === "BUTTON" && key === " ";
+  return key === " " && target.closest("button,summary,a,[role=button]") !== null;
 }
 
 /** Mount this keyed by run id: the player state starts fresh for each run. */
@@ -68,6 +68,7 @@ export function RunPage({ entry, replay, graphs, startT }: RunPageProps) {
       const p = live.current;
       switch (e.key) {
         case " ":
+          if (e.repeat) break;
           if (p.playing) p.pause();
           else p.play();
           break;

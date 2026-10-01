@@ -88,6 +88,31 @@ describe("RunPage", () => {
     expect(screen.getByText("00:00 / 00:41")).toBeTruthy();
   });
 
+  it("Space on a focused summary, link or role=button does not toggle play", () => {
+    show("multi", 0);
+    for (const el of [
+      document.querySelector("summary")!,
+      screen.getAllByRole("link")[0],
+    ]) {
+      fireEvent.keyDown(el, { key: " " });
+      expect(screen.getByRole("button", { name: "Play" })).toBeTruthy();
+    }
+    const fake = document.createElement("span");
+    fake.setAttribute("role", "button");
+    document.body.appendChild(fake);
+    fireEvent.keyDown(fake, { key: " " });
+    expect(screen.getByRole("button", { name: "Play" })).toBeTruthy();
+    fake.remove();
+  });
+
+  it("ignores an auto-repeated Space", () => {
+    show("multi", 0);
+    fireEvent.keyDown(document.body, { key: " ", repeat: true });
+    expect(screen.getByRole("button", { name: "Play" })).toBeTruthy();
+    fireEvent.keyDown(document.body, { key: " " });
+    expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy();
+  });
+
   it("shows the outcome banner only at the end", () => {
     show("multi", 16.5);
     expect(screen.queryByTestId("outcome")).toBeNull();

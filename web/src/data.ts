@@ -23,5 +23,7 @@ export async function loadReplay(
 ): Promise<Replay | null> {
   const entry = index.replays.find((e) => e.run_id === runId);
   if (!entry) return null;
-  return parseReplay(await getJson(`replays/${entry.file}`, fetchFn), graphs);
+  const replay = parseReplay(await getJson(`replays/${entry.file}`, fetchFn), graphs);
+  if (replay.run.run_id !== entry.run_id) throw new Error("replay run id does not match its index entry");
+  return replay;
 }

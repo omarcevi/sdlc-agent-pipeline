@@ -33,6 +33,17 @@ describe("data", () => {
     expect(replay?.run.run_id).toBe(entry.run_id);
   });
 
+  it("refuses a replay whose run id differs from its index entry", async () => {
+    const index = makeIndex();
+    const entry = index.replays[0];
+    const other = { ...makeReplay("multi"), run: { ...makeReplay("multi").run, run_id: "someone-else" } };
+    const fetchFn = vi.fn().mockResolvedValue(ok(other));
+    await expect(
+      loadReplay(index, entry.run_id, fixtureGraphs(), fetchFn as unknown as typeof fetch),
+    ).rejects.toThrow(/run id/);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
   it("loads and parses the index from replays/index.json", async () => {
     const fetchFn = vi.fn().mockResolvedValue(ok(makeIndex()));
     const index = await loadIndex(fetchFn as unknown as typeof fetch);
