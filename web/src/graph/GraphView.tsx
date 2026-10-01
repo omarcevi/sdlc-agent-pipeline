@@ -135,13 +135,19 @@ function FunctionNode({ data }: NodeProps<FlowNode>) {
 
 function RouterNode({ data }: NodeProps<FlowNode>) {
   return (
-    <div data-testid={`node-${data.id}`} data-state={data.state} className="flex flex-col items-center text-center">
+    <div
+      data-testid={`node-${data.id}`}
+      data-state={data.state}
+      className="relative flex h-[72px] w-[110px] items-center justify-center text-center"
+    >
       <div className={`h-9 w-9 rotate-45 rounded-lg border-2 ${STATE_CLASS[data.state]}`} />
-      <span className="mt-1 text-[11px] font-medium text-slate-700 dark:text-slate-200">
-        {data.id}
-        <Visits n={data.visits} />
-      </span>
-      <span className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">{data.state}</span>
+      <div className="absolute left-0 right-0 top-full flex flex-col items-center">
+        <span className="mt-1 text-[11px] font-medium text-slate-700 dark:text-slate-200">
+          {data.id}
+          <Visits n={data.visits} />
+        </span>
+        <span className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">{data.state}</span>
+      </div>
       <Handles />
     </div>
   );
@@ -199,9 +205,10 @@ const nodeTypes = {
 };
 const edgeTypes = { routeEdge: RouteEdge };
 
-function handlesFor(from: { x: number; y: number }, to: { x: number; y: number }) {
-  if (to.x < from.x) return { sourceHandle: "ts", targetHandle: "tt" }; // loop back, curving above
-  if (to.y > from.y + 50) return { sourceHandle: "bs", targetHandle: "l" }; // drop to report_failure
+/** Edges into a node below the main path drop from the bottom handle, whatever the x order; back edges curve above. */
+export function handlesFor(from: { x: number; y: number }, to: { x: number; y: number }) {
+  if (to.y > from.y + 50) return { sourceHandle: "bs", targetHandle: "tt" };
+  if (to.x < from.x) return { sourceHandle: "ts", targetHandle: "tt" };
   return { sourceHandle: "r", targetHandle: "l" };
 }
 

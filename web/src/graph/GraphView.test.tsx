@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
-import { GraphView } from "./GraphView";
+import { GraphView, handlesFor } from "./GraphView";
+import { LAYOUT } from "./layout";
 import { fixtureGraphs, makeState } from "../test/factories";
 import type { GraphId, NodeState } from "../replay/types";
 
@@ -17,7 +18,7 @@ async function show(graphId: GraphId, state = makeState(), onNodeClick = vi.fn()
     </div>,
   );
   // React Flow draws edges after it has measured the nodes (the ResizeObserver mock reports them).
-  await screen.findByTestId(`edge-${graph.edges[0].from}-${graph.edges[0].to}`);
+  for (const e of graph.edges) await screen.findByTestId(`edge-${e.from}-${e.to}`);
   return { graph, onNodeClick };
 }
 
@@ -97,5 +98,41 @@ describe("GraphView", () => {
   it("labels START as issue", async () => {
     await show("single");
     expect(within(screen.getByTestId("node-START")).queryByText("issue")).not.toBeNull();
+  });
+
+  it("draws every edge into report_failure from the bottom handle, dropping below the main path", () => {
+    for (const graphId of ["multi", "single"] as GraphId[]) {
+      const edges = fixtureGraphs().graphs[graphId].edges.filter((e) => e.to === "report_failure");
+      expect(edges.length).toBeGreaterThan(1);
+      for (const e of edges) {
+        const h = handlesFor(LAYOUT[graphId][e.from], LAYOUT[graphId].report_failure);
+        expect(h, `${graphId} ${e.from}`).toEqual({ sourceHandle: "bs", targetHandle: "tt" });
+      }
+    }
+  });
+
+  it("keeps the fail and changes loops above the main path", () => {
+    expect(handlesFor(LAYOUT.multi.run_tests, LAYOUT.multi.coder).sourceHandle).toBe("ts");
+    expect(handlesFor(LAYOUT.multi.route_review, LAYOUT.multi.coder).sourceHandle).toBe("ts");
+    expect(handlesFor(LAYOUT.single.run_tests, LAYOUT.single.solo).sourceHandle).toBe("ts");
+  });
+
+  it("renders START done with its edge taken (F9)", async () => {
+    await show(
+      "multi",
+      makeState({
+        nodeStates: { START: "done", fetch_issue: "active" },
+        takenEdges: [{ from: "START", to: "fetch_issue", route: null }],
+      }),
+    );
+    expect(attr(screen.getByTestId("node-START"), "data-state")).toBe("done");
+    expect(attr(screen.getByTestId("edge-START-fetch_issue"), "data-taken")).toBe("true");
+  });
+
+  it("shows a node that is both stopped and the end node as stopped (F10)", async () => {
+    await show("multi", makeState({ nodeStates: { coder: "stopped" } }));
+    const el = screen.getByTestId("node-coder");
+    expect(attr(el, "data-state")).toBe("stopped");
+    expect(within(el).queryByText("end")).toBeNull();
   });
 });
