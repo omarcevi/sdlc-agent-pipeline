@@ -98,6 +98,11 @@ This project follows the `agents-cli` lifecycle: scaffold → build → evaluate
 | Make a bad probe from a task's `shortcut/` | `uv run python -m bench.probes from-overlay --task TASK_ID --id rp-NN` |
 | List single-agent runs that could become probes | `uv run python -m bench.probes candidates results/<single>.json [...] [--runs-dir runs]` (run ids and task ids only) |
 | Run reviewer probes (spends credits: planner and reviewer per run) | `uv run python -m bench.review_probe [--probes rp-01,...] [--repeats 3] [--preset flash] [--concurrency 1] [--out results] [--report PATH] [--quiet] [--skip-validate]`. Validates first (exit 2 on problems); results go to `results/<stamp>-review-probe-<preset>.json` |
+| Build the demo repository locally (no GitHub access) | `uv run python -m bench.demo export --repo REPO --out DIR` makes a repository at `DIR/REPO`: `main` (the clean repo) and `demo/<task-id>` per dev task (base + `plant/` only, a root commit, your own commit identity, no trailers). Pushing it is an owner-approved step |
+| Print each demo task's expected tree | `uv run python -m bench.demo trees` prints `<task-id> <tree-sha>` for every dev task; held-out tasks are never listed |
+| Check a fetched demo repository | `uv run python -m bench.demo verify --dir DIR/REPO` compares `origin/main` and `origin/demo/<task-id>` with the expected trees (`<branch>: ok` or `mismatch`, exit 1 on a mismatch) |
+| Write a demo issue's text | `uv run python -m bench.demo issue --task TASK_ID --repo OWNER/NAME --out DIR` writes `title.txt` and `body.md` verbatim and prints the `gh issue create` command for the owner to run |
+| Score a recorded run | `uv run python -m bench.score_run --run-id ID [--task TASK_ID] [--runs-dir runs] [--out results/live]` scores `runs/<id>/record.json` in sandboxes and writes `<out>/<id>.json` (matrix fields plus `mode`, `pr_url`, `approval_wait_s`, `issue_text_differs`). The task comes from `--task` or from a `demo/<task-id>` `base_ref`. Exit 2 for a held-out task, a record whose `base_tree_sha` is not the task's demo tree, an unknown task or a missing record |
 
 The smoke-run prompt must be `RunRequest` JSON (`task_id`, `run_id`). It calls a real model, and a sandbox started this way is not released by the driver: only its TTL (`SANDBOX_TTL_S`) cleans it up.
 
