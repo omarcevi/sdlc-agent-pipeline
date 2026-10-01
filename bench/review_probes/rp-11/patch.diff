@@ -1,0 +1,78 @@
+diff --git a/stockroom/catalog.py b/stockroom/catalog.py
+index 214ba2c..0e24970 100644
+--- a/stockroom/catalog.py
++++ b/stockroom/catalog.py
+@@ -121,7 +121,7 @@ class Product:
+         object.__setattr__(self, "list_price", parse_money(self.list_price))
+         if not isinstance(self.taxable, bool):
+             raise CatalogError(f"taxable must be a bool: {self.taxable!r}")
+-        tiers = tuple(sorted(self.tiers, key=lambda tier: tier.percent))
++        tiers = tuple(sorted(self.tiers, key=lambda tier: tier.min_qty))
+         for lower, higher in pairwise(tiers):
+             if lower.min_qty == higher.min_qty:
+                 raise CatalogError(f"two tiers start at {lower.min_qty}")
+diff --git a/tests/test_tier_order.py b/tests/test_tier_order.py
+new file mode 100644
+index 0000000..d79b799
+--- /dev/null
++++ b/tests/test_tier_order.py
+@@ -0,0 +1,59 @@
++from decimal import Decimal
++
++import pytest
++from stockroom import Product, Tier, Unit, csvio
++from stockroom.errors import CatalogError
++
++D = Decimal
++
++
++def test_product_rejects_tiers_with_decreasing_percentages():
++    """A product rejects quantity tiers where higher quantity has lower percentage."""
++    with pytest.raises(CatalogError, match="tier percentages must rise with quantity"):
++        Product(
++            sku="GLUE-1",
++            name="Glue stick",
++            unit=Unit.EACH,
++            list_price=D("2.00"),
++            tiers=(Tier(5, D("10")), Tier(20, D("5"))),
++        )
++
++    with pytest.raises(CatalogError, match="tier percentages must rise with quantity"):
++        Product(
++            sku="GLUE-1",
++            name="Glue stick",
++            unit=Unit.EACH,
++            list_price=D("2.00"),
++            tiers=(Tier(20, D("5")), Tier(5, D("10"))),
++        )
++
++
++def test_product_sorts_valid_tiers_by_min_qty():
++    """Tiers given out of min_qty order are sorted by min_qty."""
++    product = Product(
++        sku="GLUE-1",
++        name="Glue stick",
++        unit=Unit.EACH,
++        list_price=D("2.00"),
++        tiers=(Tier(20, D("10")), Tier(5, D("5"))),
++    )
++    assert [(t.min_qty, t.percent) == (5, D("5")) for t in product.tiers][0]
++    assert product.tiers == (Tier(5, D("5")), Tier(20, D("10")))
++
++
++def test_import_rejects_broken_discount_ladder_row(tmp_path):
++    """CSV import reports row with broken discount ladder as an error and imports valid rows."""
++    content = (
++        "sku,name,unit,price,taxable,tiers\n"
++        "GLUE-1,Glue stick,each,2.00,true,5:10;20:5\n"
++        "PEN-1,Pen,each,1.50,true,5:5;20:10\n"
++    )
++    csv_file = tmp_path / "products.csv"
++    csv_file.write_text(content, encoding="utf-8")
++
++    result = csvio.import_products(csv_file)
++    assert len(result.errors) == 1
++    assert result.errors[0].line == 2
++    assert "tier percentages must rise with quantity" in result.errors[0].message
++    assert len(result.products) == 1
++    assert result.products[0].sku == "PEN-1"

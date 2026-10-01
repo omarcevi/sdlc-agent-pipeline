@@ -1,0 +1,5 @@
+task_id: md-003
+kind: bad
+source: hand-written
+source_run: null
+note: Headings below max_level are dropped before they take a slug, so duplicate numbering counts only the listed headings and a listed slug can stop matching the id to_html writes (R19, R20).

@@ -1,0 +1,52 @@
+diff --git a/mdlite/render.py b/mdlite/render.py
+index f5ef026..385ab9e 100644
+--- a/mdlite/render.py
++++ b/mdlite/render.py
+@@ -74,9 +74,9 @@ def _link(children: list[Inline], url: str, title: str | None) -> str:
+ 
+ def _image(children: list[Inline], url: str, title: str | None) -> str:
+     """An image; an unsafe url leaves just the alt text (rule R16)."""
+-    alt = escape_text(plain_text(children))
++    alt = plain_text(children)
+     if not is_safe_url(url):
+-        return alt
++        return escape_text(alt)
+     return (
+         f'<img src="{escape_attr(url)}" alt="{escape_attr(alt)}"{_title_attr(title)}>'
+     )
+diff --git a/tests/test_image_alt_escaping.py b/tests/test_image_alt_escaping.py
+new file mode 100644
+index 0000000..2ea77c7
+--- /dev/null
++++ b/tests/test_image_alt_escaping.py
+@@ -0,0 +1,30 @@
++"""Tests for image alt text escaping."""
++
++from mdlite import to_html
++
++
++def test_image_alt_text_is_escaped_once():
++    assert to_html("![Tom & Jerry](/img/tj.png)") == (
++        '<p><img src="/img/tj.png" alt="Tom &amp; Jerry"></p>\n'
++    )
++    assert to_html("![a < b](/img/cmp.png)") == (
++        '<p><img src="/img/cmp.png" alt="a &lt; b"></p>\n'
++    )
++    assert to_html("![a > b](/img/cmp.png)") == (
++        '<p><img src="/img/cmp.png" alt="a &gt; b"></p>\n'
++    )
++
++
++def test_image_alt_text_quotes_escaped():
++    assert to_html('![Tom "the cat" & \'Jerry\'](/img/tj.png)') == (
++        '<p><img src="/img/tj.png" alt="Tom &quot;the cat&quot; &amp; &#39;Jerry&#39;"></p>\n'
++    )
++
++
++def test_unsafe_image_url_falls_back_to_escaped_alt_text():
++    assert to_html("![Tom & Jerry](javascript:alert(1))") == (
++        "<p>Tom &amp; Jerry</p>\n"
++    )
++    assert to_html("![a < b](javascript:alert(1))") == (
++        "<p>a &lt; b</p>\n"
++    )

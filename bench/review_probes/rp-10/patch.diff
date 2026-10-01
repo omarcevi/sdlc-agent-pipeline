@@ -1,0 +1,43 @@
+diff --git a/stockroom/csvio.py b/stockroom/csvio.py
+index f760d70..1463421 100644
+--- a/stockroom/csvio.py
++++ b/stockroom/csvio.py
+@@ -144,7 +144,7 @@ def export_stock(store: "Store", path: str | Path) -> None:
+         writer.writerow(EXPORT_COLUMNS)
+         for product in store.catalog.products():
+             level = store.inventory.level(product.sku)
+-            value: Decimal = product.list_price * level.available
++            value: Decimal = product.list_price * level.on_hand
+             writer.writerow(
+                 [
+                     product.sku,
+diff --git a/tests/test_stock_export_valuation.py b/tests/test_stock_export_valuation.py
+new file mode 100644
+index 0000000..70edd1a
+--- /dev/null
++++ b/tests/test_stock_export_valuation.py
+@@ -0,0 +1,24 @@
++from decimal import Decimal
++
++from stockroom import Product, Store, Unit
++
++
++def test_export_stock_values_on_hand_units_when_reserved(tmp_path):
++    store = Store()
++    store.add_product(Product("PEN-1", "Pen", Unit.EACH, Decimal("1.50")))
++    store.receive("PEN-1", 100)
++    order = store.create_order([("PEN-1", 40)])
++    store.reserve_order(order.id)
++
++    path = tmp_path / "stock.csv"
++    store.export_stock(path)
++
++    lines = path.read_text().splitlines()
++    assert lines[0] == "sku,name,unit,on_hand,reserved,available,stock_value"
++    assert lines[1] == "PEN-1,Pen,each,100,40,60,150.00"
++
++    # When order is fulfilled, stock leaves and stock_value drops
++    store.fulfil_order(order.id)
++    store.export_stock(path)
++    lines = path.read_text().splitlines()
++    assert lines[1] == "PEN-1,Pen,each,60,0,60,90.00"

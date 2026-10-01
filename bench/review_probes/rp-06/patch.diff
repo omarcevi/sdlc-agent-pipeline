@@ -1,0 +1,220 @@
+diff --git a/stockroom/csvio.py b/stockroom/csvio.py
+index 1463421..90b32fd 100644
+--- a/stockroom/csvio.py
++++ b/stockroom/csvio.py
+@@ -4,11 +4,14 @@ Import file columns, in any order: `sku,name,unit,price,taxable,tiers`.
+ `taxable` is `true` or `false`. `tiers` is empty or a `;`-separated list of
+ `min_qty:percent` steps such as `10:5;50:12.5`.
+ 
++Stocktake file columns, in any order: `sku,counted`.
++
+ Export file columns: `sku,name,unit,on_hand,reserved,available,stock_value`,
+ one row per product, sorted by SKU, with `\\n` line endings.
+ """
+ 
+ import csv
++import re
+ from collections.abc import Container
+ from dataclasses import dataclass
+ from decimal import Decimal
+@@ -16,13 +19,15 @@ from pathlib import Path
+ from typing import TYPE_CHECKING
+ 
+ from .catalog import Product, Tier, Unit, normalize_sku
+-from .errors import CatalogError, CsvFormatError, StockroomError
++from .errors import CatalogError, CsvFormatError, InvalidQuantity, StockroomError
+ from .money import format_money, parse_percent
+ 
+ if TYPE_CHECKING:
+     from .store import Store
+ 
+ IMPORT_COLUMNS = ("sku", "name", "unit", "price", "taxable", "tiers")
++STOCKTAKE_COLUMNS = ("sku", "counted")
++_COUNT = re.compile(r"[0-9]+")
+ EXPORT_COLUMNS = (
+     "sku",
+     "name",
+@@ -114,14 +119,19 @@ def import_products(path: str | Path, existing: Container[str] = ()) -> ImportRe
+     return ImportResult(tuple(products), tuple(errors))
+ 
+ 
+-def _parse_row(
+-    row: dict[str, str | None], seen: set[str], existing: Container[str]
+-) -> Product:
++def row_fields(row: dict[str, str | None]) -> dict[str, str]:
++    """The row's values, or an error if it has more or fewer fields than the header."""
+     if None in row:
+         raise CatalogError("row has more fields than the header")
+     if any(value is None for value in row.values()):
+         raise CatalogError("row has fewer fields than the header")
+-    fields = {key: value or "" for key, value in row.items()}
++    return {key: value or "" for key, value in row.items()}
++
++
++def _parse_row(
++    row: dict[str, str | None], seen: set[str], existing: Container[str]
++) -> Product:
++    fields = row_fields(row)
+     sku = normalize_sku(fields["sku"])
+     if sku in seen or sku in existing:
+         raise CatalogError(f"duplicate SKU: {sku}")
+@@ -135,6 +145,35 @@ def _parse_row(
+     )
+ 
+ 
++def read_stocktake(path: str | Path) -> list[tuple[int, dict[str, str | None]]]:
++    """Read a stocktake CSV file as (line, row) pairs, the header being line 1.
++
++    A file that is empty, not UTF-8, malformed for the csv module, or lacks
++    exactly the expected columns raises `CsvFormatError`."""
++    try:
++        with open(path, newline="", encoding="utf-8") as handle:
++            reader = csv.DictReader(handle)
++            header = reader.fieldnames
++            if header is None:
++                raise CsvFormatError("the file is empty")
++            if sorted(name.strip() for name in header) != sorted(STOCKTAKE_COLUMNS):
++                raise CsvFormatError(f"expected columns {','.join(STOCKTAKE_COLUMNS)}")
++            reader.fieldnames = [name.strip() for name in header]
++            return [(reader.line_num, row) for row in reader]
++    except UnicodeDecodeError:
++        raise CsvFormatError("the file is not valid UTF-8") from None
++    except csv.Error as exc:
++        raise CsvFormatError(f"the file is not valid CSV: {exc}") from None
++
++
++def parse_count(text: str) -> int:
++    """A counted number of units: a whole number of 0 or more."""
++    value = text.strip()
++    if not _COUNT.fullmatch(value):
++        raise InvalidQuantity(f"count must be a whole number of 0 or more: {text!r}")
++    return int(value)
++
++
+ def export_stock(store: "Store", path: str | Path) -> None:
+     """Write one row per product with its stock levels and stock value.
+ 
+diff --git a/stockroom/store.py b/stockroom/store.py
+index 8586cc5..f0e836f 100644
+--- a/stockroom/store.py
++++ b/stockroom/store.py
+@@ -6,7 +6,7 @@ from pathlib import Path
+ 
+ from . import csvio
+ from .catalog import Catalog, Product, merge_items
+-from .errors import UnknownCoupon
++from .errors import StockroomError, UnknownCoupon
+ from .inventory import Inventory, StockLevel
+ from .ledger import Ledger
+ from .money import parse_percent
+@@ -14,6 +14,7 @@ from .orders import Order, OrderBook
+ from .pricing import Coupon, Quote, quote_items
+ 
+ DEFAULT_TAX_PERCENT = Decimal("8.25")
++STOCKTAKE_REASON = "stocktake"
+ 
+ 
+ class Store:
+@@ -47,6 +48,25 @@ class Store:
+         """Write the stock levels of every product to a CSV file."""
+         csvio.export_stock(self, path)
+ 
++    def import_stocktake(self, path: str | Path) -> tuple[csvio.RowError, ...]:
++        """Set on-hand counts from a stocktake CSV file (`sku,counted`).
++
++        Each count that differs from the units on hand is recorded as one
++        adjustment with the reason `stocktake`; products not in the file are
++        left alone. A bad row is skipped and returned, in file order."""
++        errors: list[csvio.RowError] = []
++        for line, row in csvio.read_stocktake(path):
++            try:
++                fields = csvio.row_fields(row)
++                counted = csvio.parse_count(fields["counted"])
++                sku = fields["sku"]
++                delta = counted - self.inventory.on_hand(sku)
++                if delta:
++                    self.inventory.adjust(sku, delta, STOCKTAKE_REASON)
++            except StockroomError as exc:
++                errors.append(csvio.RowError(line, str(exc)))
++        return tuple(errors)
++
+     # Stock
+     def receive(self, sku: str, quantity: int, reason: str = "received") -> None:
+         """Add units to stock."""
+diff --git a/tests/test_import_stocktake.py b/tests/test_import_stocktake.py
+new file mode 100644
+index 0000000..8b0eeb9
+--- /dev/null
++++ b/tests/test_import_stocktake.py
+@@ -0,0 +1,71 @@
++from decimal import Decimal
++
++import pytest
++from stockroom import Product, Store, Unit
++from stockroom.errors import CsvFormatError
++
++
++def make_store():
++    store = Store(tax_percent="0")
++    store.add_product(Product("PEN-1", "Pen", Unit.EACH, Decimal("1.50")))
++    store.add_product(Product("BOOK-1", "Notebook", Unit.EACH, Decimal("4.99")))
++    store.receive("PEN-1", 100)
++    store.receive("BOOK-1", 20)
++    return store
++
++
++def write(tmp_path, text):
++    path = tmp_path / "stocktake.csv"
++    path.write_text(text, encoding="utf-8")
++    return path
++
++
++def stocktake_entries(store):
++    return [
++        (entry.sku, entry.quantity)
++        for entry in store.ledger.entries()
++        if entry.reason == "stocktake"
++    ]
++
++
++def test_issue_example_sets_the_counted_units(tmp_path):
++    store = make_store()
++    errors = store.import_stocktake(
++        write(tmp_path, "sku,counted\nPEN-1,97\nBOOK-1,24\n")
++    )
++    assert errors == ()
++    assert store.stock("PEN-1").on_hand == 97
++    assert store.stock("BOOK-1").on_hand == 24
++    assert sorted(stocktake_entries(store)) == [("BOOK-1", 4), ("PEN-1", -3)]
++
++
++def test_matching_count_records_nothing(tmp_path):
++    store = make_store()
++    errors = store.import_stocktake(write(tmp_path, "counted,sku\n100,pen-1\n"))
++    assert errors == ()
++    assert stocktake_entries(store) == []
++
++
++def test_unknown_sku_and_bad_count_are_reported_with_their_lines(tmp_path):
++    store = make_store()
++    errors = store.import_stocktake(
++        write(tmp_path, "sku,counted\nNOPE-1,4\nPEN-1,98\nBOOK-1,lots\n")
++    )
++    assert [error.line for error in errors] == [2, 4]
++    assert store.stock("PEN-1").on_hand == 98
++    assert store.stock("BOOK-1").on_hand == 20
++
++
++def test_stocktake_cannot_go_below_reserved_units(tmp_path):
++    store = make_store()
++    store.reserve_order(store.create_order([("PEN-1", 30)]).id)
++    errors = store.import_stocktake(write(tmp_path, "sku,counted\nPEN-1,25\n"))
++    assert [error.line for error in errors] == [2]
++    assert store.stock("PEN-1").on_hand == 100
++
++
++def test_file_with_other_columns_is_refused(tmp_path):
++    store = make_store()
++    with pytest.raises(CsvFormatError):
++        store.import_stocktake(write(tmp_path, "sku,counted,shelf\nPEN-1,97,A3\n"))
++    assert store.stock("PEN-1").on_hand == 100

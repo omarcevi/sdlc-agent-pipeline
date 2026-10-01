@@ -1,0 +1,5 @@
+task_id: md-003
+kind: good
+source: bench-run
+source_run: md-003-single-flash-r1-20261001T084838Z
+note: Resolved Week 2B single-agent patch, copied verbatim from runs/md-003-single-flash-r1-20261001T084838Z/patch.diff.

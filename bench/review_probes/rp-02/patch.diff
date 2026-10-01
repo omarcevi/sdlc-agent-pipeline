@@ -1,0 +1,77 @@
+diff --git a/stockroom/csvio.py b/stockroom/csvio.py
+index 1463421..feea981 100644
+--- a/stockroom/csvio.py
++++ b/stockroom/csvio.py
+@@ -12,6 +12,7 @@ import csv
+ from collections.abc import Container
+ from dataclasses import dataclass
+ from decimal import Decimal
++from itertools import pairwise
+ from pathlib import Path
+ from typing import TYPE_CHECKING
+ 
+@@ -67,6 +68,10 @@ def parse_tiers(text: str) -> tuple[Tier, ...]:
+                 f"tier quantity is not a whole number: {part!r}"
+             ) from None
+         tiers.append(Tier(quantity, parse_percent(percent)))
++    ordered = sorted(tiers, key=lambda tier: tier.min_qty)
++    for lower, higher in pairwise(ordered):
++        if higher.percent <= lower.percent:
++            raise CatalogError(f"tier discounts must rise with quantity: {text!r}")
+     return tuple(tiers)
+ 
+ 
+diff --git a/tests/test_import_tier_ladder.py b/tests/test_import_tier_ladder.py
+new file mode 100644
+index 0000000..1e4e3da
+--- /dev/null
++++ b/tests/test_import_tier_ladder.py
+@@ -0,0 +1,48 @@
++from decimal import Decimal
++
++from stockroom import Store, Tier
++
++HEADER = "sku,name,unit,price,taxable,tiers\n"
++
++
++def write(tmp_path, text):
++    path = tmp_path / "products.csv"
++    path.write_text(text, encoding="utf-8")
++    return path
++
++
++def test_import_reports_a_row_whose_discounts_fall(tmp_path):
++    store = Store()
++    result = store.import_products(
++        write(
++            tmp_path,
++            HEADER
++            + "GLUE-1,Glue stick,each,2.00,true,5:10;20:5\n"
++            + "PEN-1,Pen,each,1.50,true,10:5;50:12.5\n",
++        )
++    )
++    assert [error.line for error in result.errors] == [2]
++    assert [product.sku for product in result.products] == ["PEN-1"]
++    assert "GLUE-1" not in store.catalog
++    assert "PEN-1" in store.catalog
++
++
++def test_import_keeps_a_ladder_that_rises(tmp_path):
++    store = Store()
++    result = store.import_products(
++        write(tmp_path, HEADER + "GLUE-1,Glue stick,each,2.00,true,5:5;20:10\n")
++    )
++    assert result.errors == ()
++    assert store.catalog.get("GLUE-1").tiers == (
++        Tier(5, Decimal("5")),
++        Tier(20, Decimal("10")),
++    )
++
++
++def test_tiers_listed_out_of_order_are_still_checked_by_quantity(tmp_path):
++    store = Store()
++    result = store.import_products(
++        write(tmp_path, HEADER + "GLUE-1,Glue stick,each,2.00,true,20:5;5:10\n")
++    )
++    assert [error.line for error in result.errors] == [2]
++    assert "GLUE-1" not in store.catalog

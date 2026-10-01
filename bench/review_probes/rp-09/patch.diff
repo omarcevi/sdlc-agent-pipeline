@@ -1,0 +1,136 @@
+diff --git a/mdlite/toc.py b/mdlite/toc.py
+index e4c7a56..20be5dd 100644
+--- a/mdlite/toc.py
++++ b/mdlite/toc.py
+@@ -17,14 +17,25 @@ def iter_headings(blocks: list[Block]) -> Iterator[Heading]:
+             yield from iter_headings(block.children)
+ 
+ 
+-def toc(text: str) -> list[tuple[int, str, str]]:
++def toc(text: str, max_level: int | None = None) -> list[tuple[int, str, str]]:
+     """The table of contents of `text`: (level, plain text, slug) per heading.
+ 
+     The slugs are the ids `mdlite.to_html` puts on the same headings.
++    If `max_level` is given, only headings of level 1 through `max_level`
++    are returned.
+     """
++    if max_level is not None:
++        if (
++            isinstance(max_level, bool)
++            or not isinstance(max_level, int)
++            or not (1 <= max_level <= 6)
++        ):
++            raise ValueError("max_level must be a whole number from 1 to 6")
+     slugger = Slugger()
+     entries = []
+     for heading in iter_headings(parse(text).children):
+         title = plain_text(parse_inline(heading.text))
+-        entries.append((heading.level, title, slugger.unique(title)))
++        slug = slugger.unique(title)
++        if max_level is None or heading.level <= max_level:
++            entries.append((heading.level, title, slug))
+     return entries
+diff --git a/tests/test_toc_max_level.py b/tests/test_toc_max_level.py
+new file mode 100644
+index 0000000..6bbe8cf
+--- /dev/null
++++ b/tests/test_toc_max_level.py
+@@ -0,0 +1,98 @@
++"""Tests for toc() with max_level filtering."""
++
++import pytest
++from mdlite import to_html, toc
++
++
++def test_toc_max_level_filtering():
++    """R20: max_level limits headings to those of level 1 through max_level."""
++    source = (
++        "# Level 1\n\n"
++        "## Level 2A\n\n"
++        "### Level 3\n\n"
++        "#### Level 4\n\n"
++        "## Level 2B\n\n"
++        "# Another Level 1\n"
++    )
++    assert toc(source, max_level=2) == [
++        (1, "Level 1", "level-1"),
++        (2, "Level 2A", "level-2a"),
++        (2, "Level 2B", "level-2b"),
++        (1, "Another Level 1", "another-level-1"),
++    ]
++    assert toc(source, max_level=1) == [
++        (1, "Level 1", "level-1"),
++        (1, "Another Level 1", "another-level-1"),
++    ]
++    assert toc(source, max_level=3) == [
++        (1, "Level 1", "level-1"),
++        (2, "Level 2A", "level-2a"),
++        (3, "Level 3", "level-3"),
++        (2, "Level 2B", "level-2b"),
++        (1, "Another Level 1", "another-level-1"),
++    ]
++    assert toc(source, max_level=6) == toc(source)
++
++
++def test_toc_without_max_level_returns_all_headings():
++    """R20: without max_level or with max_level=None, all headings are returned."""
++    source = "# A\n## B\n### C\n#### D\n##### E\n###### F\n"
++    expected = [
++        (1, "A", "a"),
++        (2, "B", "b"),
++        (3, "C", "c"),
++        (4, "D", "d"),
++        (5, "E", "e"),
++        (6, "F", "f"),
++    ]
++    assert toc(source) == expected
++    assert toc(source, max_level=None) == expected
++
++
++def test_toc_max_level_slug_deduplication_matches_html():
++    """R20: filtered-out headings still consume duplicate slugs so ids match HTML."""
++    source = "# Section\n### Section\n# Section\n"
++    assert toc(source, max_level=1) == [
++        (1, "Section", "section"),
++        (1, "Section", "section-2"),
++    ]
++    html = to_html(source)
++    assert 'id="section"' in html
++    assert 'id="section-1"' in html
++    assert 'id="section-2"' in html
++
++
++def test_toc_max_level_with_block_quotes():
++    """R20: headings in block quotes are filtered by max_level properly."""
++    source = "# Top\n> ## Quoted 2\n> ### Quoted 3\n## Next"
++    assert toc(source, max_level=2) == [
++        (1, "Top", "top"),
++        (2, "Quoted 2", "quoted-2"),
++        (2, "Next", "next"),
++    ]
++    assert toc(source, max_level=1) == [
++        (1, "Top", "top"),
++    ]
++
++
++def test_toc_max_level_none_matching():
++    """R20: if no headings are within max_level, an empty list is returned."""
++    source = "### Only Deep Heading\n#### Another Deep"
++    assert toc(source, max_level=2) == []
++    assert toc("", max_level=2) == []
++    assert toc("no headings here", max_level=1) == []
++
++
++def test_toc_positional_and_keyword_argument():
++    """R20: max_level can be passed positionally or by keyword."""
++    source = "# One\n## Two\n### Three"
++    expected = [(1, "One", "one"), (2, "Two", "two")]
++    assert toc(source, 2) == expected
++    assert toc(source, max_level=2) == expected
++
++
++@pytest.mark.parametrize("invalid_level", [0, 7, -1, 100, "2", 1.5, True, False])
++def test_toc_invalid_max_level_raises(invalid_level):
++    """R20: max_level must be a whole number from 1 to 6."""
++    with pytest.raises(ValueError):
++        toc("# Heading", max_level=invalid_level)

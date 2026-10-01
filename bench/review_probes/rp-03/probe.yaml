@@ -1,0 +1,5 @@
+task_id: md-001
+kind: bad
+source: hand-written
+source_run: null
+note: The scheme rule is widened only in the autolink parser; url_scheme still stops at + . -, so a Markdown link or image whose url uses such a scheme is still treated as scheme-less and gets an href or src (R16).

@@ -1,0 +1,89 @@
+diff --git a/mdlite/toc.py b/mdlite/toc.py
+index e4c7a56..e40db61 100644
+--- a/mdlite/toc.py
++++ b/mdlite/toc.py
+@@ -17,14 +17,22 @@ def iter_headings(blocks: list[Block]) -> Iterator[Heading]:
+             yield from iter_headings(block.children)
+ 
+ 
+-def toc(text: str) -> list[tuple[int, str, str]]:
++def toc(text: str, max_level: int = 6) -> list[tuple[int, str, str]]:
+     """The table of contents of `text`: (level, plain text, slug) per heading.
+ 
+-    The slugs are the ids `mdlite.to_html` puts on the same headings.
++    Only headings of level `max_level` or less are listed. `max_level` is a whole
++    number from 1 to 6. The slugs are the ids `mdlite.to_html` puts on the same
++    headings.
+     """
++    if isinstance(max_level, bool) or not isinstance(max_level, int):
++        raise ValueError(f"max_level must be a whole number: {max_level!r}")
++    if not 1 <= max_level <= 6:
++        raise ValueError(f"max_level must be from 1 to 6: {max_level}")
+     slugger = Slugger()
+     entries = []
+     for heading in iter_headings(parse(text).children):
++        if heading.level > max_level:
++            continue
+         title = plain_text(parse_inline(heading.text))
+         entries.append((heading.level, title, slugger.unique(title)))
+     return entries
+diff --git a/tests/test_toc_sidebar_levels.py b/tests/test_toc_sidebar_levels.py
+new file mode 100644
+index 0000000..051dfa3
+--- /dev/null
++++ b/tests/test_toc_sidebar_levels.py
+@@ -0,0 +1,54 @@
++"""`toc(text, max_level=...)` lists only the top heading levels."""
++
++import pytest
++from mdlite import toc
++
++PAGE = """# mdlite
++
++Small Markdown renderer.
++
++## Quick start
++
++### Requirements
++
++#### Python versions
++
++## Reference
++
++### Rendering
++"""
++
++
++def test_max_level_two_lists_levels_one_and_two():
++    assert toc(PAGE, max_level=2) == [
++        (1, "mdlite", "mdlite"),
++        (2, "Quick start", "quick-start"),
++        (2, "Reference", "reference"),
++    ]
++
++
++def test_max_level_three_keeps_document_order():
++    assert toc(PAGE, max_level=3) == [
++        (1, "mdlite", "mdlite"),
++        (2, "Quick start", "quick-start"),
++        (3, "Requirements", "requirements"),
++        (2, "Reference", "reference"),
++        (3, "Rendering", "rendering"),
++    ]
++
++
++def test_toc_without_max_level_is_unchanged():
++    assert [entry[2] for entry in toc(PAGE)] == [
++        "mdlite",
++        "quick-start",
++        "requirements",
++        "python-versions",
++        "reference",
++        "rendering",
++    ]
++
++
++@pytest.mark.parametrize("level", [0, 7, -1, 2.0, "2", True])
++def test_max_level_must_be_a_whole_number_from_1_to_6(level):
++    with pytest.raises(ValueError):
++        toc(PAGE, max_level=level)

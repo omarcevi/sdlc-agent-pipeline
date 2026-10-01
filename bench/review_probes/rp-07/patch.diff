@@ -1,0 +1,74 @@
+diff --git a/mdlite/escape.py b/mdlite/escape.py
+index 81ea946..68e5b97 100644
+--- a/mdlite/escape.py
++++ b/mdlite/escape.py
+@@ -16,7 +16,7 @@ _ATTR_TABLE = str.maketrans(
+ # ("java\tscript:"), so U+0000 to U+0020 and U+007F are deleted before the scheme is
+ # read. Other characters, such as U+00A0, are kept and end the scheme.
+ _IGNORED_IN_SCHEME = re.compile(r"[\x00-\x20\x7f]")
+-_SCHEME = re.compile(r"([A-Za-z][A-Za-z0-9]*):")
++_SCHEME = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*):")
+ 
+ SAFE_SCHEMES = frozenset({"http", "https", "mailto"})
+ 
+diff --git a/tests/test_scheme_characters.py b/tests/test_scheme_characters.py
+new file mode 100644
+index 0000000..1e8996b
+--- /dev/null
++++ b/tests/test_scheme_characters.py
+@@ -0,0 +1,55 @@
++"""Tests for URL schemes containing plus, dot, and hyphen characters."""
++
++from mdlite import to_html
++from mdlite.escape import is_safe_url, url_scheme
++from mdlite.inline import parse_inline
++from mdlite.nodes import Link, Text
++
++
++def test_url_scheme_with_special_characters():
++    """R16: scheme can contain letters, digits, +, ., and - after the initial letter."""
++    assert url_scheme("git+https://github.com/acme/tool.git") == "git+https"
++    assert url_scheme("x-man-page://ls") == "x-man-page"
++    assert url_scheme("com.example.app:settings") == "com.example.app"
++    assert url_scheme("A+B.c-D:foo") == "a+b.c-d"
++    assert url_scheme("+git:foo") is None
++    assert url_scheme("-git:foo") is None
++    assert url_scheme(".git:foo") is None
++
++
++def test_autolinks_with_complex_schemes():
++    """R17: Autolinks with +, -, and . in schemes are recognized and stripped of brackets."""
++    assert (
++        to_html("Or install from source: <git+https://github.com/acme/tool.git>")
++        == "<p>Or install from source: git+https://github.com/acme/tool.git</p>\n"
++    )
++    assert to_html("<x-man-page://ls>") == "<p>x-man-page://ls</p>\n"
++    assert to_html("<com.example.app:settings>") == "<p>com.example.app:settings</p>\n"
++    assert to_html("<ftp://files.example.com/a.txt>") == "<p>ftp://files.example.com/a.txt</p>\n"
++
++
++def test_autolink_invalid_scheme_start():
++    """R16/R17: Schemes must start with a letter; otherwise literal angle brackets remain."""
++    assert to_html("<+git:foo>") == "<p>&lt;+git:foo&gt;</p>\n"
++    assert to_html("<-git:foo>") == "<p>&lt;-git:foo&gt;</p>\n"
++    assert to_html("<.git:foo>") == "<p>&lt;.git:foo&gt;</p>\n"
++
++
++def test_complex_scheme_safety():
++    """R16: Schemes with +, -, and . are unsafe unless safe schemes, so rendered as text."""
++    assert not is_safe_url("git+https://github.com/acme/tool.git")
++    assert not is_safe_url("x-man-page://ls")
++    assert not is_safe_url("com.example.app:settings")
++    assert to_html("[click](git+https://github.com/acme/tool.git)") == "<p>click</p>\n"
++
++
++def test_autolink_scheme_length_with_special_characters():
++    """R17: Scheme length must be between 2 and 32 characters."""
++    min_scheme = "a+:x"
++    assert parse_inline(f"<{min_scheme}>") == [Link([Text(min_scheme)], min_scheme)]
++
++    max_scheme = "a" * 29 + "+.-:x"
++    assert parse_inline(f"<{max_scheme}>") == [Link([Text(max_scheme)], max_scheme)]
++
++    too_long = "a" * 30 + "+.-:x"
++    assert parse_inline(f"<{too_long}>") == [Text(f"<{too_long}>")]

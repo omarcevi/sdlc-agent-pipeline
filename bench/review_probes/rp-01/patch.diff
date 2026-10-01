@@ -1,0 +1,50 @@
+diff --git a/mdlite/render.py b/mdlite/render.py
+index f5ef026..5b6c577 100644
+--- a/mdlite/render.py
++++ b/mdlite/render.py
+@@ -77,9 +77,8 @@ def _image(children: list[Inline], url: str, title: str | None) -> str:
+     alt = escape_text(plain_text(children))
+     if not is_safe_url(url):
+         return alt
+-    return (
+-        f'<img src="{escape_attr(url)}" alt="{escape_attr(alt)}"{_title_attr(title)}>'
+-    )
++    # alt is already escaped above; escaping it again doubled every `&`.
++    return f'<img src="{escape_attr(url)}" alt="{alt}"{_title_attr(title)}>'
+ 
+ 
+ class _Renderer:
+diff --git a/tests/test_image_alt_text.py b/tests/test_image_alt_text.py
+new file mode 100644
+index 0000000..d2fdf8c
+--- /dev/null
++++ b/tests/test_image_alt_text.py
+@@ -0,0 +1,28 @@
++"""Image alt text is escaped once, like the rest of the output."""
++
++from mdlite import to_html
++
++
++def test_ampersand_in_alt_text_is_escaped_once():
++    assert to_html("![Tom & Jerry](/img/tj.png)") == (
++        '<p><img src="/img/tj.png" alt="Tom &amp; Jerry"></p>\n'
++    )
++
++
++def test_angle_brackets_in_alt_text_are_escaped_once():
++    assert to_html("![a < b](/img/cmp.png)") == (
++        '<p><img src="/img/cmp.png" alt="a &lt; b"></p>\n'
++    )
++    assert to_html("![a > b](/img/cmp.png)") == (
++        '<p><img src="/img/cmp.png" alt="a &gt; b"></p>\n'
++    )
++
++
++def test_alt_text_with_emphasis_keeps_only_the_text():
++    assert to_html("![*Fish* & chips](/img/f.png)") == (
++        '<p><img src="/img/f.png" alt="Fish &amp; chips"></p>\n'
++    )
++
++
++def test_refused_image_url_still_shows_the_alt_text_escaped_once():
++    assert to_html("![Tom & Jerry](javascript:alert(1))") == "<p>Tom &amp; Jerry</p>\n"

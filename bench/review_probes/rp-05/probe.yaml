@@ -1,0 +1,5 @@
+task_id: md-004
+kind: bad
+source: hand-written
+source_run: null
+note: Explicit ids are never registered with the slugger, so a generated id further down the document can collide with an explicit one.

@@ -1,0 +1,5 @@
+task_id: md-002
+kind: bad
+source: shortcut
+source_run: null
+note: The task's shortcut overlay (alt is put in the attribute without attribute escaping, so quotes in alt text are not escaped), extended with a new test file for the issue's own examples, because every pipeline patch adds tests and a bad probe without them could be told apart by that alone.

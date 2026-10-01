@@ -1,0 +1,68 @@
+diff --git a/mdlite/inline.py b/mdlite/inline.py
+index c3d9109..2abbb96 100644
+--- a/mdlite/inline.py
++++ b/mdlite/inline.py
+@@ -33,6 +33,7 @@ _ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
+ _BACKTICK_RUN = re.compile(r"`+")
+ _AUTOLINK_FORBIDDEN = re.compile(r"[\s<]")
+ _EMAIL = re.compile(r"^[^\s<>@]+@[^\s<>@]+$")
++_OTHER_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*:")
+ MAX_IMAGE_DEPTH = 10
+ MAX_EMPHASIS_DEPTH = 20
+ _MIN_SCHEME = 2
+@@ -220,6 +221,13 @@ class _Scanner:
+                 self._emit(Link([Text(candidate)], "mailto:" + candidate))
+                 self.pos = close + 1
+                 return
++            other = _OTHER_SCHEME.match(candidate)
++            if other and _MIN_SCHEME <= other.end() - 1 <= _MAX_SCHEME:
++                # Schemes like git+https or x-man-page: show the address as text,
++                # the same as any other unsafe autolink.
++                self.buffer.append(candidate)
++                self.pos = close + 1
++                return
+         self._literal("<")
+ 
+ 
+diff --git a/tests/test_autolink_brackets.py b/tests/test_autolink_brackets.py
+new file mode 100644
+index 0000000..357ec76
+--- /dev/null
++++ b/tests/test_autolink_brackets.py
+@@ -0,0 +1,36 @@
++"""Autolinks whose scheme has `+`, `.` or `-` lose their angle brackets."""
++
++import pytest
++from mdlite import to_html
++
++
++def test_install_url_from_the_docs():
++    source = "Or install from source: <git+https://github.com/acme/tool.git>"
++    assert to_html(source) == (
++        "<p>Or install from source: git+https://github.com/acme/tool.git</p>\n"
++    )
++
++
++@pytest.mark.parametrize(
++    "url",
++    [
++        "x-man-page://ls",
++        "com.example.app:settings",
++        "ftp://files.example.com/a.txt",
++    ],
++)
++def test_other_schemes_render_as_plain_addresses(url):
++    assert to_html(f"<{url}>") == f"<p>{url}</p>\n"
++
++
++def test_http_and_mailto_autolinks_are_still_links():
++    assert to_html("<https://example.com/docs>") == (
++        '<p><a href="https://example.com/docs">https://example.com/docs</a></p>\n'
++    )
++    assert to_html("<mailto:team@example.org>") == (
++        '<p><a href="mailto:team@example.org">mailto:team@example.org</a></p>\n'
++    )
++
++
++def test_a_scheme_must_start_with_a_letter():
++    assert to_html("<1password://item>") == "<p>&lt;1password://item&gt;</p>\n"

@@ -1,0 +1,5 @@
+task_id: sr-002
+kind: bad
+source: shortcut
+source_run: null
+note: The task's shortcut overlay (the rising-discount check lives only in the CSV tier parser, so a Product built in code still accepts a falling ladder), extended with a new test file for the issue's own examples, because every pipeline patch adds tests and a bad probe without them could be told apart by that alone.

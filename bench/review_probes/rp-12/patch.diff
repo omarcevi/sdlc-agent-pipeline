@@ -1,0 +1,214 @@
+diff --git a/stockroom/catalog.py b/stockroom/catalog.py
+index 0e24970..7c58a59 100644
+--- a/stockroom/catalog.py
++++ b/stockroom/catalog.py
+@@ -160,6 +160,19 @@ class Catalog:
+         """All products, sorted by SKU."""
+         return [self._products[sku] for sku in sorted(self._products)]
+ 
++    def resolve_items(
++        self, items: Iterable[tuple[str, int]]
++    ) -> list[tuple[Product, int]]:
++        """Turn (sku, quantity) pairs into (product, quantity) pairs.
++
++        Repeated SKUs are merged in order of first appearance with quantities
++        added up. Each product is the catalog's current entry for that SKU.
++        """
++        return [
++            (self.get(sku), quantity)
++            for sku, quantity in merge_items(items).items()
++        ]
++
+     def __contains__(self, sku: object) -> bool:
+         if not isinstance(sku, str):
+             return False
+diff --git a/stockroom/orders.py b/stockroom/orders.py
+index 953b353..f47dd67 100644
+--- a/stockroom/orders.py
++++ b/stockroom/orders.py
+@@ -18,7 +18,6 @@ from .catalog import (
+     Catalog,
+     Product,
+     check_quantity,
+-    merge_items,
+     normalize_sku,
+ )
+ from .errors import (
+@@ -96,16 +95,14 @@ class OrderBook:
+ 
+         Repeated SKUs are merged into one line, in order of first appearance,
+         before pricing. Nothing is recorded if any item is invalid."""
+-        merged = merge_items(items)
+-        if not merged:
++        resolved = self.catalog.resolve_items(items)
++        if not resolved:
+             raise InvalidQuantity("an order needs at least one line")
+         lines = tuple(
+-            OrderLine(self.catalog.get(sku), quantity)
+-            for sku, quantity in merged.items()
+-        )
+-        quote = quote_items(
+-            [(line.product, line.quantity) for line in lines], coupon, tax_percent
++            OrderLine(product, quantity)
++            for product, quantity in resolved
+         )
++        quote = quote_items(resolved, coupon, tax_percent)
+         order = Order(
+             id=f"ORD-{len(self._orders) + 1:04d}",
+             lines=lines,
+diff --git a/stockroom/store.py b/stockroom/store.py
+index 8586cc5..80a661c 100644
+--- a/stockroom/store.py
++++ b/stockroom/store.py
+@@ -5,7 +5,7 @@ from decimal import Decimal
+ from pathlib import Path
+ 
+ from . import csvio
+-from .catalog import Catalog, Product, merge_items
++from .catalog import Catalog, Product
+ from .errors import UnknownCoupon
+ from .inventory import Inventory, StockLevel
+ from .ledger import Ledger
+@@ -85,10 +85,7 @@ class Store:
+         """Price (sku, quantity) pairs without creating an order.
+ 
+         Repeated SKUs are merged first, exactly as `create_order` does."""
+-        pairs = [
+-            (self.catalog.get(sku), quantity)
+-            for sku, quantity in merge_items(items).items()
+-        ]
++        pairs = self.catalog.resolve_items(items)
+         return quote_items(pairs, self._coupon(coupon_code), self.tax_percent)
+ 
+     # Orders
+diff --git a/tests/test_resolve_items.py b/tests/test_resolve_items.py
+new file mode 100644
+index 0000000..0978a96
+--- /dev/null
++++ b/tests/test_resolve_items.py
+@@ -0,0 +1,125 @@
++from decimal import Decimal
++from unittest.mock import patch
++
++import pytest
++from stockroom import Product, Store, Unit
++from stockroom.catalog import Catalog
++from stockroom.errors import InvalidQuantity, InvalidSku, UnknownSku
++
++
++def make_product(sku="A-1", price="2.00"):
++    return Product(sku, name="Item", unit=Unit.EACH, list_price=Decimal(price))
++
++
++def test_resolve_items_returns_product_quantity_pairs_in_appearance_order():
++    catalog = Catalog()
++    prod_a = make_product("A-1")
++    prod_b = make_product("B-1")
++    prod_c = make_product("C-1")
++    catalog.add(prod_a)
++    catalog.add(prod_b)
++    catalog.add(prod_c)
++
++    items = [("B-1", 2), ("A-1", 5), ("C-1", 1)]
++    resolved = catalog.resolve_items(items)
++
++    assert isinstance(resolved, list)
++    assert resolved == [(prod_b, 2), (prod_a, 5), (prod_c, 1)]
++
++
++def test_resolve_items_merges_repeated_skus_any_case():
++    catalog = Catalog()
++    prod_pen = make_product("PEN-1")
++    prod_book = make_product("BOOK-1")
++    catalog.add(prod_pen)
++    catalog.add(prod_book)
++
++    items = [("pen-1", 2), ("BOOK-1", 3), ("  PEN-1 ", 5), ("Book-1", 1)]
++    resolved = catalog.resolve_items(items)
++
++    assert resolved == [(prod_pen, 7), (prod_book, 4)]
++
++
++def test_resolve_items_empty_iterable():
++    catalog = Catalog()
++    catalog.add(make_product("A-1"))
++
++    assert catalog.resolve_items([]) == []
++    assert catalog.resolve_items(()) == []
++
++    def empty_gen():
++        return
++        yield
++
++    assert catalog.resolve_items(empty_gen()) == []
++
++
++def test_resolve_items_generator_input():
++    catalog = Catalog()
++    prod_a = make_product("A-1")
++    catalog.add(prod_a)
++
++    def gen():
++        yield ("a-1", 3)
++        yield ("A-1", 4)
++
++    assert catalog.resolve_items(gen()) == [(prod_a, 7)]
++
++
++def test_resolve_items_returns_current_catalog_entry():
++    catalog = Catalog()
++    catalog.add(make_product("PEN-1", price="1.00"))
++    catalog.set_price("PEN-1", "3.50")
++
++    resolved = catalog.resolve_items([("PEN-1", 2)])
++    assert resolved[0][0].list_price == Decimal("3.50")
++
++
++@pytest.mark.parametrize("bad_qty", [0, -1, -100, 1.5, "2", True, False, None])
++def test_resolve_items_rejects_invalid_quantity(bad_qty):
++    catalog = Catalog()
++    catalog.add(make_product("PEN-1"))
++
++    with pytest.raises(InvalidQuantity):
++        catalog.resolve_items([("PEN-1", bad_qty)])
++
++
++@pytest.mark.parametrize("bad_sku", ["", "a--b", "-a", "a-", "a b", "a_b", "x" * 21, 123, None])
++def test_resolve_items_rejects_malformed_sku(bad_sku):
++    catalog = Catalog()
++    catalog.add(make_product("PEN-1"))
++
++    with pytest.raises(InvalidSku):
++        catalog.resolve_items([(bad_sku, 1)])
++
++
++def test_resolve_items_rejects_unknown_sku():
++    catalog = Catalog()
++    catalog.add(make_product("PEN-1"))
++
++    with pytest.raises(UnknownSku):
++        catalog.resolve_items([("PEN-1", 1), ("GHOST", 2)])
++
++
++def test_resolve_items_validation_order_matches_quoting():
++    catalog = Catalog()
++    # A valid-format unknown SKU followed by an invalid quantity
++    # Quoting validates quantities and sku syntax during merging, before catalog lookup
++    with pytest.raises(InvalidQuantity):
++        catalog.resolve_items([("UNKNOWN-1", 1), ("UNKNOWN-2", 0)])
++
++
++def test_quoting_goes_through_resolve_items(store):
++    with patch.object(store.catalog, "resolve_items", wraps=store.catalog.resolve_items) as mock:
++        quote = store.quote([("PEN-1", 12)])
++        assert mock.called
++        assert mock.call_args[0][0] == [("PEN-1", 12)]
++        assert quote.lines[0].sku == "PEN-1"
++
++
++def test_order_creation_goes_through_resolve_items(store):
++    with patch.object(store.catalog, "resolve_items", wraps=store.catalog.resolve_items) as mock:
++        order = store.create_order([("PEN-1", 12)])
++        assert mock.called
++        assert mock.call_args[0][0] == [("PEN-1", 12)]
++        assert order.lines[0].product.sku == "PEN-1"

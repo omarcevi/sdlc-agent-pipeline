@@ -1,0 +1,5 @@
+task_id: sr-003
+kind: bad
+source: hand-written
+source_run: null
+note: A SKU that appears again on a later line is applied (the last count wins) instead of being rejected with its line number.
