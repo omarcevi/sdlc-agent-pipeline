@@ -151,3 +151,7 @@ class RunRecord(BaseModel):
     base_ref: str | None = None
     base_sha: str | None = None
     base_tree_sha: str | None = None
+    pr_url: str | None = None
+    # Time spent waiting for the approver of a live run; duration_s excludes it.
+    approval_wait_s: float = 0.0
+    comment_posted: bool = False

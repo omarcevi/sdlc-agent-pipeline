@@ -1,10 +1,16 @@
-"""Runs one pipeline instance end to end and always releases its sandbox."""
+"""Runs one pipeline instance end to end and always releases its sandbox.
+
+A live run pauses at the approval gate: the first pass ends with a pending
+`adk_request_input` call. The driver then releases the sandbox, asks the approver,
+and resumes the same session with the decision as that call's function response.
+"""
 
 import asyncio
 import logging
 import os
 import time
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -20,9 +26,11 @@ from google.genai import types
 from opentelemetry import trace
 from pydantic import ValidationError
 
+from app.approval import ApprovalDecision, ApprovalRequest, Approver
 from app.budget import BudgetExceeded, BudgetPlugin
 from app.environment import registry
 from app.environment.base import InfraError
+from app.github_client import GitHubError
 from app.guardrails import GuardrailPlugin
 from app.models import RoleModels
 from app.nodes.finish import runs_dir
@@ -34,18 +42,38 @@ from app.tracing import ROOT_SPAN_NAME, TRACER_NAME
 USER_ID = "bench"
 logger = logging.getLogger(__name__)
 
+# The function call ADK emits for a RequestInput. tests/unit/test_human_gate.py
+# pins it on a minimal workflow.
+REQUEST_INPUT = "adk_request_input"
+RESUME_TIMEOUT_S = 300.0  # the cap on the pass after the approval (delivery only)
+APPROVAL_TIMED_OUT = ApprovalDecision(
+    approved=False, approver="", patch_sha256="", note="approval timed out"
+)
+
+
+def _positive_seconds(name: str, raw: str) -> float:
+    try:
+        value = float(raw)
+    except ValueError:
+        value = float("nan")
+    if not value > 0 or value == float("inf"):
+        raise ValueError(f"{name} must be a positive number, got {raw!r}")
+    return value
+
+
+def approval_timeout_s() -> float:
+    """How long the driver waits for the approver, from APPROVAL_TIMEOUT_S (default
+    3600 s). Anything that is not a positive number is a configuration error."""
+    raw = os.environ.get("APPROVAL_TIMEOUT_S", "3600")
+    return _positive_seconds("APPROVAL_TIMEOUT_S", raw)
+
 
 def run_timeout_s() -> float:
     """The wall-clock cap for one run, from RUN_TIMEOUT_S (default 1500 s, below the
     sandbox TTL so the driver releases the sandbox first). Anything that is not a
     positive number is a configuration error."""
     raw = os.environ.get("RUN_TIMEOUT_S", "1500")
-    try:
-        value = float(raw)
-    except ValueError:
-        value = float("nan")
-    if not value > 0 or value == float("inf"):
-        raise ValueError(f"RUN_TIMEOUT_S must be a positive number, got {raw!r}")
+    value = _positive_seconds("RUN_TIMEOUT_S", raw)
     ttl_raw = os.environ.get("SANDBOX_TTL_S", "1800")  # the Docker backend's default
     try:
         ttl = float(ttl_raw)
@@ -195,6 +223,10 @@ def classify_failure(
             return "budget", str(error)
         if isinstance(error, InfraError):
             return "infra", str(error)
+        if isinstance(error, GitHubError):
+            # Only open_pr lets one escape (live intake turns them into refusals, the
+            # failure comment logs them). A fixed reason: no response text.
+            return "infra", "GitHub refused the pull request"
         if isinstance(error, genai_errors.ClientError) and error.code in (400, 413):
             # The agent built a request the model cannot take, e.g. a context overflow.
             return "agent", f"model rejected the request: {error.code} {error.message}"
@@ -235,11 +267,14 @@ async def run_pipeline(
     workflow: Workflow | None = None,
     tracer: trace.Tracer | None = None,
     on_event: Callable[[Event], None] | None = None,
+    approver: Approver | None = None,
 ) -> RunRecord:
     """Run one pipeline inside a root span that carries the run's outcome.
 
     `on_event`, when given, sees every event after its line is in events.jsonl.
     It is display-only: an exception from it is logged once and never affects the run.
+    `approver` answers the live graph's approval gate; a run that reaches the gate
+    without one ends at once as an infra failure.
     """
     tracer = tracer or trace.get_tracer(TRACER_NAME)
     with tracer.start_as_current_span(
@@ -247,7 +282,7 @@ async def run_pipeline(
         attributes={"task_id": request.subject_id, "run_id": request.run_id},
     ) as span:
         try:
-            record = await _run(request, workflow, on_event)
+            record = await _run(request, workflow, on_event, approver)
         except RunCrashed as crashed:
             _set_record_attributes(span, crashed.record)
             raise
@@ -270,12 +305,138 @@ def _set_record_attributes(span: trace.Span, record: RunRecord) -> None:
     )
 
 
+class _EventLog:
+    """Writes each event to events.jsonl, then shows it to `on_event`. The first
+    pass truncates the file; the pass after an approval appends to it."""
+
+    def __init__(self, path: Path, on_event: Callable[[Event], None] | None) -> None:
+        self.path = path
+        self._on_event = on_event
+        self._warned = False
+
+    async def drain(
+        self, runner: InMemoryRunner, session_id: str, message: types.Content, mode: str
+    ) -> list[Event]:
+        events: list[Event] = []
+        with self.path.open(mode) as log:
+            async for event in runner.run_async(
+                user_id=USER_ID, session_id=session_id, new_message=message
+            ):
+                log.write(event.model_dump_json(exclude_none=True) + "\n")
+                log.flush()
+                events.append(event)
+                self._show(event)
+        return events
+
+    def _show(self, event: Event) -> None:
+        if self._on_event is None:
+            return
+        try:
+            self._on_event(event)
+        except Exception as exc:
+            if not self._warned:
+                self._warned = True
+                logger.warning(
+                    "on_event callback failed; further failures ignored: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+
+
+def _pending_approval(events: list[Event]) -> types.FunctionCall | None:
+    """The `adk_request_input` call the run stopped at: a long-running call of that
+    name with no later function response for it."""
+    pending: dict[str, types.FunctionCall] = {}
+    for event in events:
+        long_running = event.long_running_tool_ids or set()
+        for call in event.get_function_calls():
+            if call.name == REQUEST_INPUT and call.id in long_running:
+                pending[call.id] = call
+        for response in event.get_function_responses():
+            pending.pop(response.id, None)
+    return next(iter(pending.values()), None)
+
+
+async def _release_sandbox(sandbox_id: str | None) -> None:
+    if not sandbox_id:
+        return
+    # A failed release must not replace the run's real outcome or stop record.json
+    # from being written. The sandbox removes itself at its TTL.
+    try:
+        await registry.release(sandbox_id)
+    except Exception as exc:
+        logger.warning(
+            "could not release sandbox %s: %s: %s",
+            sandbox_id,
+            type(exc).__name__,
+            exc,
+        )
+
+
+async def _session_state(runner: InMemoryRunner, session_id: str) -> dict:
+    session = await runner.session_service.get_session(
+        app_name="app", user_id=USER_ID, session_id=session_id
+    )
+    return dict(session.state) if session else {}
+
+
+async def _ask(
+    approver: Approver, call: types.FunctionCall, limit_s: float
+) -> ApprovalDecision:
+    """The approver's decision on the gate's request; no answer within `limit_s`
+    rejects. A timeout names no approver, so no one is mentioned on the issue."""
+    request = ApprovalRequest.model_validate((call.args or {}).get("payload"))
+    try:
+        async with asyncio.timeout(limit_s) as cap:
+            return ApprovalDecision.model_validate(await approver(request))
+    except TimeoutError:
+        if not cap.expired():
+            raise
+        return APPROVAL_TIMED_OUT
+
+
+async def _resume(
+    runner: InMemoryRunner,
+    session_id: str,
+    call_id: str,
+    decision: ApprovalDecision,
+    log: _EventLog,
+    tracker: _ActiveAgentTracker,
+) -> tuple[tuple[FailureKind, str] | None, Exception | None]:
+    """Continue the paused session with the decision as the gate call's response:
+    route_approval, then open_pr or report_failure. Returns (failure, crash)."""
+    message = types.Content(
+        role="user",
+        parts=[
+            types.Part(
+                function_response=types.FunctionResponse(
+                    id=call_id, name=REQUEST_INPUT, response=decision.model_dump()
+                )
+            )
+        ],
+    )
+    try:
+        async with asyncio.timeout(RESUME_TIMEOUT_S) as cap:
+            await log.drain(runner, session_id, message, "a")
+    except TimeoutError as exc:
+        if cap.expired():
+            # No model runs after the gate: a stalled delivery is infra, not spend.
+            reason = f"resumed run exceeded {RESUME_TIMEOUT_S:g} s wall clock"
+            return ("infra", reason), None
+        return _classify_or_crash(exc, tracker, session_id)
+    except Exception as exc:
+        return _classify_or_crash(exc, tracker, session_id)
+    return None, None
+
+
 async def _run(
     request: RunRequest,
     workflow: Workflow | None,
     on_event: Callable[[Event], None] | None = None,
+    approver: Approver | None = None,
 ) -> RunRecord:
     timeout_s = run_timeout_s()
+    approval_limit_s = approval_timeout_s()
     budget = BudgetPlugin()
     tracker = _ActiveAgentTracker()
     app = App(
@@ -289,67 +450,66 @@ async def _run(
     )
     run_dir = runs_dir() / request.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    log = _EventLog(run_dir / "events.jsonl", on_event)
     message = types.Content(
         role="user", parts=[types.Part.from_text(text=request.model_dump_json())]
     )
 
     started = time.monotonic()
+    waited_s = 0.0
+    paused = False
     failure: tuple[FailureKind, str] | None = None
     refused: str | None = None
     crash: Exception | None = None
-    on_event_warned = False
     try:
-        # The cap bounds the whole event loop; on expiry the in-flight work (a hung
-        # model call included) is cancelled. asyncio.timeout turns only its own
-        # expiry into TimeoutError, so an outer cancellation still propagates.
-        async with asyncio.timeout(timeout_s) as cap:
-            with (run_dir / "events.jsonl").open("w") as log:
-                async for event in runner.run_async(
-                    user_id=USER_ID, session_id=session.id, new_message=message
-                ):
-                    log.write(event.model_dump_json(exclude_none=True) + "\n")
-                    log.flush()
-                    if on_event is not None:
-                        try:
-                            on_event(event)
-                        except Exception as exc:
-                            if not on_event_warned:
-                                on_event_warned = True
-                                logger.warning(
-                                    "on_event callback failed; further failures "
-                                    "ignored: %s: %s",
-                                    type(exc).__name__,
-                                    exc,
-                                )
-    except TimeoutError as exc:
-        if cap.expired():
-            failure = ("budget", f"run exceeded {timeout_s:g} s wall clock")
-        else:
-            failure, crash = _classify_or_crash(exc, tracker, session.id)
-    except Exception as exc:
-        # Checked before classification: a refusal is no failure of the system.
-        refused = _refusal(exc)
-        if refused is None:
-            failure, crash = _classify_or_crash(exc, tracker, session.id)
+        events: list[Event] = []
+        try:
+            # The cap bounds the whole event loop; on expiry the in-flight work (a
+            # hung model call included) is cancelled. asyncio.timeout turns only its
+            # own expiry into TimeoutError, so an outer cancellation still propagates.
+            async with asyncio.timeout(timeout_s) as cap:
+                events = await log.drain(runner, session.id, message, "w")
+        except TimeoutError as exc:
+            if cap.expired():
+                failure = ("budget", f"run exceeded {timeout_s:g} s wall clock")
+            else:
+                failure, crash = _classify_or_crash(exc, tracker, session.id)
+        except Exception as exc:
+            # Checked before classification: a refusal is no failure of the system.
+            refused = _refusal(exc)
+            if refused is None:
+                failure, crash = _classify_or_crash(exc, tracker, session.id)
+
+        stopped = failure is not None or refused is not None
+        call = None if stopped else _pending_approval(events)
+        if call is not None:
+            paused = True
+            # Nothing after the gate needs the sandbox; release it before waiting.
+            state = await _session_state(runner, session.id)
+            await _release_sandbox(state.get("sandbox_id"))
+            if approver is None:
+                failure = ("infra", "approval needed but no approver")
+            else:
+                asked = time.monotonic()
+                decision: ApprovalDecision | None = None
+                try:
+                    decision = await _ask(approver, call, approval_limit_s)
+                except Exception as exc:
+                    failure, crash = _classify_or_crash(exc, tracker, session.id)
+                waited_s = time.monotonic() - asked
+                if decision is not None:
+                    failure, crash = await _resume(
+                        runner, session.id, call.id, decision, log, tracker
+                    )
     finally:
-        final = await runner.session_service.get_session(
-            app_name="app", user_id=USER_ID, session_id=session.id
-        )
-        state = dict(final.state) if final else {}
-        if sandbox_id := state.get("sandbox_id"):
-            # A failed release must not replace the run's real outcome or stop
-            # record.json from being written. The sandbox removes itself at its TTL.
-            try:
-                await registry.release(sandbox_id)
-            except Exception as exc:
-                logger.warning(
-                    "could not release sandbox %s: %s: %s",
-                    sandbox_id,
-                    type(exc).__name__,
-                    exc,
-                )
+        state = await _session_state(runner, session.id)
+        # Already released at the gate when the run paused; releasing is idempotent.
+        await _release_sandbox(state.get("sandbox_id"))
 
     outcome = state.get("outcome") or {}
+    if paused and outcome.get("outcome") == "patch_written":
+        # deliver_patch's outcome: the run never got past the approval gate.
+        outcome = {}
     if refused is not None:
         outcome = {
             "outcome": "refused",
@@ -387,11 +547,14 @@ async def _run(
         tokens_out=usage.tokens_out,
         cost_usd=round(usage.cost_usd, 4),
         tool_calls=usage.tool_calls,
-        duration_s=round(time.monotonic() - started, 2),
+        duration_s=round(time.monotonic() - started - waited_s, 2),
         mode=request.mode,
         base_ref=issue.get("base_ref"),
         base_sha=issue.get("base_sha"),
         base_tree_sha=issue.get("base_tree_sha"),
+        pr_url=outcome.get("pr_url"),
+        approval_wait_s=round(waited_s, 2),
+        comment_posted=bool(outcome.get("comment_posted", False)),
     )
     (run_dir / "record.json").write_text(record.model_dump_json(indent=2))
     if crash is not None:

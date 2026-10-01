@@ -116,6 +116,25 @@ def test_baseline_workflow_shape():
     assert wf.input_schema is RunRequest
 
 
+def test_baseline_graph_edges_are_unchanged():
+    """The compiled baseline graph: deliver_patch is its end, and it has no approval
+    gate, so a baseline run never pauses."""
+    workflow = build_baseline_workflow(FakeLlm([]))
+    edges = [(e.from_node.name, e.to_node.name, e.route) for e in workflow.graph.edges]
+    assert edges == [
+        ("__START__", "fetch_issue", None),
+        ("fetch_issue", "provision_sandbox", None),
+        ("provision_sandbox", "solo", None),
+        ("solo", "route_solo", None),
+        ("route_solo", "collect_diff", "done"),
+        ("route_solo", "report_failure", "declined"),
+        ("collect_diff", "run_tests", None),
+        ("run_tests", "deliver_patch", "pass"),
+        ("run_tests", "solo", "fail"),
+        ("run_tests", "report_failure", "exhausted"),
+    ]
+
+
 @pytest.mark.parametrize("declined", [True, False])
 def test_route_solo(declined):
     result = SoloResult(declined=declined, decline_reason="why", summary="s")

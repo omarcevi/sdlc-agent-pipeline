@@ -727,6 +727,38 @@ async def test_transport_timeout_is_infra_not_the_wall_clock_budget(bench, monke
     assert env.closed
 
 
+BENCH_EDGES = [
+    ("__START__", "fetch_issue", None),
+    ("fetch_issue", "provision_sandbox", None),
+    ("provision_sandbox", "planner", None),
+    ("planner", "route_plan", None),
+    ("route_plan", "coder", "actionable"),
+    ("route_plan", "report_failure", "declined"),
+    ("coder", "collect_diff", None),
+    ("collect_diff", "run_tests", None),
+    ("run_tests", "reviewer", "pass"),
+    ("run_tests", "coder", "fail"),
+    ("run_tests", "report_failure", "exhausted"),
+    ("reviewer", "route_review", None),
+    ("route_review", "deliver_patch", "approve"),
+    ("route_review", "coder", "changes"),
+    ("route_review", "report_failure", "exhausted"),
+]
+
+
+def test_bench_graph_edges_are_unchanged():
+    """The compiled bench graph, the default and with live=False: deliver_patch is
+    its end, and it has no approval gate, so a bench run never pauses."""
+    models = RoleModels(planner=FakeLlm([]), coder=FakeLlm([]), reviewer=FakeLlm([]))
+    for workflow in (build_workflow(models), build_workflow(models, live=False)):
+        edges = [
+            (e.from_node.name, e.to_node.name, e.route) for e in workflow.graph.edges
+        ]
+        assert edges == BENCH_EDGES
+        fetch = next(n for n in workflow.graph.nodes if n.name == "fetch_issue")
+        assert fetch._func is intake.fetch_issue
+
+
 @pytest.mark.parametrize(
     ("timeout", "ttl", "ok"),
     [("3000", "3300", True), ("3000", None, False), ("1500", None, True)],
