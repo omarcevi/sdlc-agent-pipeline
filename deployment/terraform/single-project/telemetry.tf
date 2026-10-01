@@ -25,7 +25,7 @@ resource "google_bigquery_dataset" "telemetry_dataset" {
   default_partition_expiration_ms = 2592000000
   delete_contents_on_destroy      = true
 
-  depends_on    = [google_project_service.services]
+  depends_on = [google_project_service.services]
 }
 
 # BigQuery connection for accessing GCS telemetry data
@@ -67,7 +67,7 @@ resource "google_logging_project_sink" "genai_logs_to_bq" {
   destination = "bigquery.googleapis.com/projects/${var.project_id}/datasets/${google_bigquery_dataset.telemetry_dataset.dataset_id}"
   # Match GenAI completion logs on the event.name label (the log id, and hence
   # the BigQuery sink table name, varies by deployment target).
-  filter      = "labels.\"event.name\"=\"gen_ai.client.inference.operation.details\" AND (labels.\"gen_ai.input.messages_ref\" =~ \".*${var.project_name}.*\" OR labels.\"gen_ai.output.messages_ref\" =~ \".*${var.project_name}.*\")"
+  filter = "labels.\"event.name\"=\"gen_ai.client.inference.operation.details\" AND (labels.\"gen_ai.input.messages_ref\" =~ \".*${var.project_name}.*\" OR labels.\"gen_ai.output.messages_ref\" =~ \".*${var.project_name}.*\")"
 
   unique_writer_identity = true
 

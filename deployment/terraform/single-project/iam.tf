@@ -67,9 +67,9 @@ resource "google_project_iam_member" "vertex_ai_sa_permissions" {
     join(",", pair) => pair[1]
   }
 
-  project = var.project_id
-  role    = each.value
-  member  = google_project_service_identity.vertex_sa.member
+  project    = var.project_id
+  role       = each.value
+  member     = google_project_service_identity.vertex_sa.member
   depends_on = [resource.google_project_service.services]
 }
 

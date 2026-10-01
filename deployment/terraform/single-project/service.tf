@@ -105,7 +105,7 @@ resource "google_vertex_ai_reasoning_engine" "app" {
         value = google_storage_bucket.logs_data_bucket.name
       }
       env {
-        name  = "BQ_ANALYTICS_CONNECTION_ID"
+        name = "BQ_ANALYTICS_CONNECTION_ID"
         # Format: {location}.{connection_id}
         value = "${var.region}.${google_bigquery_connection.genai_telemetry_connection.connection_id}"
       }
