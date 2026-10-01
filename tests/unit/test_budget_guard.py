@@ -443,14 +443,21 @@ def test_disable_billing_error_is_logged_and_raised_after_enabled_read(main, con
     assert lines[0]["result"] == "error"
 
 
-def test_dry_run_permission_error_is_logged_and_raised(main, config):
+def test_dry_run_client_error_is_logged_and_acknowledged(main, config):
+    """Never re-raised: Eventarc would retry the test message for up to a day."""
     clients = FakeClients(error=RuntimeError("iam"), fail=("granted_permissions",))
     lines: list[dict] = []
     attributes = real_attributes(itp_dry_run="1")
-    with pytest.raises(RuntimeError, match="iam"):
-        main.handle(event(payload(), attributes), config, clients, lines.append)
-    assert len(lines) == 1
-    assert lines[0]["result"] == "error"
+    result = main.handle(event(payload(), attributes), config, clients, lines.append)
+    assert lines == [result]
+    assert (result["decision"], result["result"], result["severity"]) == (
+        "dry_run",
+        "error",
+        "ERROR",
+    )
+    assert result["error"] == "RuntimeError"
+    assert "iam" not in json.dumps(result)
+    assert "disable_billing" not in clients.names()
 
 
 @pytest.mark.parametrize("value", [10**400, -(10**400)])

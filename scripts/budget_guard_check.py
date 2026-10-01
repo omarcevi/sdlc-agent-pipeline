@@ -5,8 +5,8 @@
 Publishes ONE test message to the budget topic and waits for the function's log line
 with that message id. The message always carries `itp_dry_run=1` and never a
 `billingAccountId`, so the function cannot disable billing: it only reads the billing
-state and tests its own permissions. Exits 0 only when the logged decision is `dry_run`
-and both permissions are granted. The project comes from GOOGLE_CLOUD_PROJECT; the topic,
+state and tests its own permissions. Exits 0 only when the logged decision is `dry_run`,
+billing is enabled and both permissions are granted. The project comes from GOOGLE_CLOUD_PROJECT; the topic,
 the budget id and the amount come from the budget root's Terraform outputs
 (`budget_topic`, `budget_id`, `budget_amount_try`). Standard library only.
 """
@@ -72,8 +72,11 @@ def publish_args(
 
 
 def passed(log_line: dict) -> bool:
+    """A dry run that saw billing enabled and both permissions granted."""
     permissions = log_line.get("permissions")
     if log_line.get("decision") != "dry_run" or not isinstance(permissions, dict):
+        return False
+    if log_line.get("billing_enabled") is not True:
         return False
     return all(permissions.get(name) is True for name in PERMISSIONS)
 
@@ -210,7 +213,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(json.dumps(line, indent=2))
         print(
-            "PASS" if code == 0 else "FAIL: not a dry run with both permissions granted"
+            "PASS"
+            if code == 0
+            else "FAIL: not a dry run with billing enabled and both permissions granted"
         )
     return code
 

@@ -160,6 +160,10 @@ def handle(
             message=f"billing guard failed on {project}: {type(error).__name__}",
         )
         log(line)
+        if decision.action == "dry_run":
+            # Acknowledged: a re-raise makes Eventarc retry the test message for up
+            # to a day. budget_guard_check.py reads this line and fails.
+            return line
         raise
     log(line)
     return line

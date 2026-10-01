@@ -67,7 +67,11 @@ def test_publish_args_are_exact(check):
 
 
 def test_passed_needs_dry_run_and_both_permissions(check):
-    good = {"decision": "dry_run", "permissions": dict(PERMISSIONS)}
+    good = {
+        "decision": "dry_run",
+        "billing_enabled": True,
+        "permissions": dict(PERMISSIONS),
+    }
     assert check.passed(good) is True
     assert check.passed({**good, "decision": "disable"}) is False
     assert check.passed({**good, "decision": "none"}) is False
@@ -77,6 +81,15 @@ def test_passed_needs_dry_run_and_both_permissions(check):
         )
     assert check.passed({"decision": "dry_run"}) is False
     assert check.passed({"decision": "dry_run", "permissions": {}}) is False
+
+
+@pytest.mark.parametrize("enabled", [False, None, "true", 1, "missing"])
+def test_passed_needs_billing_enabled_to_be_true(check, enabled):
+    """Plan Task 10 Step 6: the dry run must also see billing enabled."""
+    line = {"decision": "dry_run", "permissions": dict(PERMISSIONS)}
+    if enabled != "missing":
+        line["billing_enabled"] = enabled
+    assert check.passed(line) is False
 
 
 class Gcloud:
@@ -134,6 +147,7 @@ def test_check_passes_on_a_good_dry_run_line(check):
     line = {
         "decision": "dry_run",
         "message_id": "4242",
+        "billing_enabled": True,
         "permissions": dict(PERMISSIONS),
     }
     code, found = run_check(check, Gcloud([line]))
