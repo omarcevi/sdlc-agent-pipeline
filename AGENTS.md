@@ -21,6 +21,7 @@ Read the spec before making architectural changes. If the code and the spec disa
    - Never tune prompts against `split: heldout` tasks, and never open or print their contents during development.
    - Never edit `hidden_tests/` to make a run pass.
    - Run `bench validate` after changing anything under `bench/repos/`.
+   - The held-out run is dropped for now (owner, 2026-10-01; spec §19). Until the owner decides otherwise, the seal below still applies.
    - Held-out task directories (`bench/tasks/*-h[0-9][0-9]/`) are sealed: never open, print or diff them, not even as file names in a diff stat. Exclude them from review diffs with the pathspec `':(exclude,glob)bench/tasks/*-h[0-9][0-9]/**'`; a pattern without `/**` does not exclude the files inside.
    - Held-out tasks are never published, put in an eval dataset or probe, or audited.
    - Keep git output quiet around them: `git commit -q`, `git cherry-pick ... >/dev/null`, `git merge --no-stat`. Run pytest with `--tb=no` when held-out tasks are collected. Never review a held-out change in a GitHub PR's file view.

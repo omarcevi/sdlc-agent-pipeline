@@ -410,3 +410,8 @@ Controls: the per-run budget cap, sandbox TTL plus sweeper, no always-on instanc
 4. The comparison ran with `RUN_TIMEOUT_S=3000` and `SANDBOX_TTL_S=3300` for both systems, by owner decision, because the 1,500 s default would likely have stopped only multi-agent runs. The defaults are unchanged.
 5. Result: multi 34/45 ($19.29), single 36/45 ($17.05). The $1.00 per-run cost cap binds on the three multi-file features for both systems (nine runs each): long single-agent and coder turns pass a million input tokens. Whether to raise the cap for features is an open question for the owner; it changes the default, so it needs approval (AGENTS.md rule 6).
 6. New guard: `MODEL_CALL_TIMEOUT_S` (default 480 s, from a measured 237.7 s maximum) ends a model call that has not finished, retries it once, and on a second stall fails the run as infra (`ModelCallStalled`). `RunRecord.model_stalls` counts stalls, and the report lists runs that stalled twice. Two multi-agent runs in this comparison stalled at the provider and were ended by the wall-clock cap instead (amends §6.3, §6.4).
+
+**2026-10-01, owner decision: the held-out run is dropped for now.**
+
+1. The one-time held-out run (§9.1, §15) is not part of Week 3, and §15's "never cut: the held-out split" no longer holds. Reason: this is a demo repository, and prompts were never tuned on benchmark results (frozen through Weeks 2A and 2B; the Week 2C change only delimits issue text), so the dev-split numbers are not tuned to the tasks they measure.
+2. The five held-out tasks stay sealed and unrun until the owner decides otherwise. If the repository is published first, they are published as they are, and the README says they were written sealed and never run.
