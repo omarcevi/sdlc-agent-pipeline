@@ -1,6 +1,9 @@
 """Replay-site tooling.
 
 uv run python -m bench.replay graphs [--out PATH] [--check]
+uv run python -m bench.replay build [--manifest web/replays.yaml] [--runs-dir runs]
+                                    [--results-dir results] [--out web/public/replays]
+uv run python -m bench.replay check [paths ...]
 
 `graphs` exports the multi-agent and single-agent graphs to the JSON file the replay
 site draws. It needs no model, no sandbox and no network.
@@ -8,6 +11,12 @@ site draws. It needs no model, no sandbox and no network.
 `convert_run` turns one recorded run (`events.jsonl`, `record.json` and its results
 row) into one replay (design sections 4 and 5). The replay is built field by field
 from an allowlist: nothing is copied from an event as a whole.
+
+`build` converts every run the manifest lists (design 5.2 and 6.1), all or nothing,
+and writes the replays and `index.json`; `check` runs the leak check
+(`bench/replay_check.py`). Both load `.env` for the exact values of the leak check.
+A held-out run is refused by its id before any file is opened, and the task list is
+never read.
 
 All `app` imports sit at the top of the module, as in `bench.run`, so nothing under
 `app` looks at the environment after a `.env` file has been loaded.
@@ -18,12 +27,15 @@ import json
 import math
 import re
 import sys
+import tempfile
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeVar
 
+import yaml
+from dotenv import load_dotenv
 from google.adk.agents import BaseAgent
 from google.adk.models.base_llm import BaseLlm
 from google.adk.models.llm_request import LlmRequest
@@ -46,8 +58,21 @@ from app.schemas import (
     TestReport,
 )
 from app.task_store import TaskSpec
+from bench import replay_check
+from bench.probes import _HELDOUT_ID, dev_task
 from bench.progress import PIPELINE_AUTHOR, call_detail
-from bench.replay_check import Hit, exact_pattern, scan_value
+from bench.replay_check import (
+    EXACT_RULES_OFF,
+    RULES,
+    UNCLEARABLE,
+    Hit,
+    ReplayFileError,
+    check_paths,
+    exact_pattern,
+    project_value,
+    redact_values,
+    scan_value,
+)
 
 SCHEMA = 1
 GRAPHS_PATH = Path("web/src/graph/graphs.json")
@@ -164,6 +189,7 @@ RESULT_WITHOUT_CALL = "tool result without a call"
 RECORD_ROW_DIFFER = "record and results row disagree"
 LEAK_FOUND = "leak check failed"
 LOG_UNREADABLE = "event log cannot be read"
+NOT_FINITE = "a number is not finite"
 
 SET_MODEL_RESPONSE = "set_model_response"
 ANSWER_LABEL = "answer"
@@ -328,12 +354,20 @@ class _CutList:
 
 
 @dataclass(frozen=True)
+class _CutDict:
+    """An object in a tool value: its keys are `_Cut` names, its entries are capped."""
+
+    entries: tuple
+
+
+@dataclass(frozen=True)
 class _CutDiff:
     text: str
 
 
 # (limit, head, tail) per kind of content
 TOOL_CAP = (4000, 3000, 800)
+NAME_CAP = (300, 200, 60)  # tool, agent and model names, and keys in tool values
 ANSWER_CAP = (4000, 3000, 800)
 DECLINE_CAP = (1000, 800, 150)
 MESSAGE_CAP = (300, 200, 60)
@@ -394,8 +428,21 @@ def _materialize(value, *, cut: bool):
             more = f"[... {len(items) - LIST_CAP:,} more items ...]"
             return [_materialize(item, cut=cut) for item in items[:LIST_CAP]] + [more]
         return [_materialize(item, cut=cut) for item in items]
+    if isinstance(value, _CutDict):
+        entries = value.entries
+        kept = entries[:LIST_CAP] if cut else entries
+        out = {
+            _materialize(key, cut=cut): _materialize(item, cut=cut)
+            for key, item in kept
+        }
+        if len(kept) < len(entries):
+            out[f"[... {len(entries) - LIST_CAP:,} more entries ...]"] = None
+        return out
     if isinstance(value, dict):
-        return {key: _materialize(item, cut=cut) for key, item in value.items()}
+        return {
+            _materialize(key, cut=cut): _materialize(item, cut=cut)
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [_materialize(item, cut=cut) for item in value]
     return value
@@ -497,7 +544,7 @@ class _Steps:
         self.route: _Cut | None = None
         self.call_ids: dict[str, str] = {}
         self.next_call = 1
-        self.models: dict[str, str] = {}
+        self.models: dict[_Cut, _Cut] = {}
         self.issue: dict | None = None
         self.decline_reason: str | None = None
         self.outcome_from_report_failure = False
@@ -510,6 +557,9 @@ class _Steps:
 
     def answer(self, value: str) -> _Cut:
         return self.text(value, ANSWER_CAP)
+
+    def name(self, value: str) -> _Cut:
+        return self.text(value, NAME_CAP)
 
     def answers(self, values: list[str]) -> _CutList:
         return _CutList([self.answer(v) for v in values])
@@ -526,10 +576,12 @@ class _Steps:
         if isinstance(value, float):
             return value if math.isfinite(value) else None
         if isinstance(value, dict):
-            return {
-                self.scrub(str(key)): self.tool_value(item)
-                for key, item in value.items()
-            }
+            return _CutDict(
+                tuple(
+                    (self.name(str(key)), self.tool_value(item))
+                    for key, item in value.items()
+                )
+            )
         if isinstance(value, list):
             return _CutList([self.tool_value(item) for item in value])
         return self.text(str(value), TOOL_CAP)
@@ -625,7 +677,7 @@ class _Steps:
             calls.append(
                 {
                     "id": number,
-                    "tool": tool,
+                    "tool": _Cut(tool, *NAME_CAP),
                     "label": _Cut(label, *TOOL_CAP),
                     "args": args,
                 }
@@ -633,9 +685,9 @@ class _Steps:
         usage = _obj(event.get("usage_metadata"))
         text = _texts(parts)
         model = event.get("model_version")
-        model = self.scrub(model) if isinstance(model, str) else ""
-        agent = self.scrub(author)
-        if model:
+        model = self.name(model) if isinstance(model, str) else self.name("")
+        agent = self.name(author)
+        if model.text:
             self.models.setdefault(agent, model)
         self.step(
             "model_call",
@@ -666,7 +718,7 @@ class _Steps:
         self.step(
             "tool_result",
             call=number,
-            tool=self.scrub(name or "?"),
+            tool=self.name(name or "?"),
             error=None if error is None else self.text(error, TOOL_CAP),
             result=self.tool_value({k: v for k, v in payload.items() if k != "error"}),
         )
@@ -815,9 +867,26 @@ def convert_run(
         hits += scan_value(replay, file=name, exact=exact, allow=allow)
     except RecursionError:
         raise ReplayRefused(LOG_UNREADABLE) from None
+    if not _all_finite(replay):
+        raise ReplayRefused(NOT_FINITE)
     if hits:
         raise ReplayRefused(LEAK_FOUND, list(dict.fromkeys(hits)))
     return replay
+
+
+def _all_finite(value) -> bool:
+    """No NaN or infinity anywhere: a record or a state delta may hold one (pydantic
+    accepts them), and JSON cannot."""
+    stack = [value]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, float) and not math.isfinite(node):
+            return False
+        if isinstance(node, dict):
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    return True
 
 
 def _build(inputs: RunInputs, graphs: dict, scrub: _Rewriter) -> dict:
@@ -900,7 +969,375 @@ def dumps(replay: dict) -> str:
     return json.dumps(replay, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
 
 
+# --- manifest and build (design 5.1, 5.2 and 6.1) -----------------------------------
+
+MANIFEST_PATH = Path("web/replays.yaml")
+OUT_DIR = Path("web/public/replays")
+RUNS_DIR = Path("runs")
+RESULTS_DIR = Path("results")
+INDEX_FILE = "index.json"
+RUN_ID = re.compile(
+    r"^(md|sr|tc)-\d{3}-(multi|single)-(flash|pro|mixed)-r\d+-\d{8}T\d{6}Z$", re.ASCII
+)
+CAP_KEYS = ("cost_usd", "tool_calls", "wall_clock_s")
+CLEARABLE = frozenset(RULES) - UNCLEARABLE
+CAPTION_MAX = 140
+SIZE_WARN_BYTES = 300 * 1024
+SIZE_LIMIT_BYTES = 1024 * 1024
+
+# Fixed refusal messages. Entry problems are prefixed with "entry <n>: ", n being the
+# entry's 1-based position in the manifest; none names a task, a file or content.
+MANIFEST_UNREADABLE = "manifest cannot be read"
+ENTRY_INVALID = "entry fields are not valid"
+ENTRY_TWICE = "run is listed twice"
+NOT_DEV_RUN = "not a dev bench run"
+RUN_FILES_MISSING = "run files missing"
+RECORD_MISMATCH = "record does not match the run id"
+NO_SINGLE_ROW = "no single results row"
+ROW_NOT_SCORED = "results row is not a scored dev run"
+BAD_PAIR = "pair is not the same task on the other system"
+BAD_CAPTION = f"caption must be one line of 1 to {CAPTION_MAX} characters"
+TOO_BIG = "replay over 1 MB"
+
+
+@dataclass(frozen=True)
+class ManifestEntry:
+    run_id: str
+    caption: str
+    pair: str | None
+    caps: dict | None  # overrides the manifest's caps, key by key
+    allow: tuple[tuple[str, str], ...]  # (JSON path, rule)
+
+
+@dataclass(frozen=True)
+class Manifest:
+    note: str
+    caps: dict
+    replays: tuple[ManifestEntry, ...]
+
+
+def _number_ok(value, *, whole: bool) -> bool:
+    if isinstance(value, bool) or not isinstance(value, int if whole else (int, float)):
+        return False
+    return math.isfinite(value) and value > 0
+
+
+def _caps_ok(caps, *, partial: bool) -> bool:
+    if not isinstance(caps, dict):
+        return False
+    keys = set(caps)
+    if not (keys <= set(CAP_KEYS) if partial else keys == set(CAP_KEYS)):
+        return False
+    return all(_number_ok(caps[k], whole=k != "cost_usd") for k in keys)
+
+
+def _allow(value) -> tuple[tuple[str, str], ...] | None:
+    if not isinstance(value, list):
+        return None
+    pairs = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"path", "rule"}:
+            return None
+        path, rule = item["path"], item["rule"]
+        if not isinstance(path, str) or not path.startswith("$"):
+            return None
+        if not isinstance(rule, str) or rule not in CLEARABLE:
+            return None
+        pairs.append((path, rule))
+    return tuple(pairs)
+
+
+def _entry(item) -> ManifestEntry | None:
+    if not isinstance(item, dict):
+        return None
+    keys = set(item)
+    if (
+        not {"run_id", "caption"}
+        <= keys
+        <= {"run_id", "caption", "pair", "caps", "allow"}
+    ):
+        return None
+    run_id, caption, pair = item["run_id"], item["caption"], item.get("pair")
+    caps = item.get("caps")
+    allow = _allow(item.get("allow", []))
+    if not isinstance(run_id, str) or not isinstance(caption, str) or allow is None:
+        return None
+    if pair is not None and not isinstance(pair, str):
+        return None
+    if caps is not None and not _caps_ok(caps, partial=True):
+        return None
+    return ManifestEntry(
+        run_id=run_id,
+        caption=caption,
+        pair=pair,
+        caps=None if caps is None else dict(caps),
+        allow=allow,
+    )
+
+
+def load_manifest(path: Path) -> Manifest:
+    """The manifest's shape only; the checks of design 5.2 are `build`'s."""
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        raise ReplayRefused(MANIFEST_UNREADABLE) from None
+    if not isinstance(doc, dict) or set(doc) != {"note", "caps", "replays"}:
+        raise ReplayRefused(MANIFEST_UNREADABLE)
+    note, caps, items = doc["note"], doc["caps"], doc["replays"]
+    if not isinstance(note, str) or not isinstance(items, list):
+        raise ReplayRefused(MANIFEST_UNREADABLE)
+    if not _caps_ok(caps, partial=False):
+        raise ReplayRefused(MANIFEST_UNREADABLE)
+    entries: list[ManifestEntry] = []
+    for n, item in enumerate(items, 1):
+        parsed = _entry(item)
+        if parsed is None:
+            raise ReplayRefused(f"entry {n}: {ENTRY_INVALID}")
+        if any(e.run_id == parsed.run_id for e in entries):
+            raise ReplayRefused(f"entry {n}: {ENTRY_TWICE}")
+        entries.append(parsed)
+    return Manifest(note=note, caps=dict(caps), replays=tuple(entries))
+
+
+def _task_and_system(run_id: str) -> tuple[str, str] | None:
+    """(task id, system) of a dev bench run id; None for any other shape."""
+    match = RUN_ID.fullmatch(run_id)
+    if match is None:
+        return None
+    task_id = "-".join(run_id.split("-", 2)[:2])
+    if _HELDOUT_ID.search(task_id):
+        return None
+    return task_id, match.group(2)
+
+
+def _read_rows(path: Path) -> list:
+    """One results file's rows. A seam: a test replaces it to watch which keys are read."""
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def find_row(results_dir: Path, run_id: str) -> dict:
+    """The one row of `results_dir/*.json` with this run id.
+
+    A row of a held-out task is skipped by its `task_id` before any other key of it
+    is read.
+    """
+    found = []
+    for path in sorted(results_dir.glob("*.json")):
+        try:
+            rows = _read_rows(path)
+        except (OSError, UnicodeDecodeError, ValueError, RecursionError):
+            raise ReplayRefused(NO_SINGLE_ROW) from None
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            task_id = row.get("task_id")
+            if isinstance(task_id, str) and _HELDOUT_ID.search(task_id):
+                continue
+            if row.get("run_id") == run_id:
+                found.append(row)
+    if len(found) != 1:
+        raise ReplayRefused(NO_SINGLE_ROW)
+    return found[0]
+
+
+def _is_pair(entry: ManifestEntry, entries: Sequence[ManifestEntry]) -> bool:
+    mine = _task_and_system(entry.run_id)
+    for other in entries:
+        if other is entry or other.run_id != entry.pair:
+            continue
+        theirs = _task_and_system(other.run_id)
+        return (
+            mine is not None
+            and theirs is not None
+            and theirs[0] == mine[0]
+            and theirs[1] != mine[1]
+        )
+    return False
+
+
+def _caption_ok(caption: str) -> bool:
+    """One line of plain text: no line break, control or format character."""
+    return (
+        0 < len(caption) <= CAPTION_MAX
+        and caption.strip() != ""
+        and caption.splitlines() == [caption]
+        and not any(_escaped(c) for c in caption)
+    )
+
+
+def _inputs(
+    entry: ManifestEntry, manifest: Manifest, runs_dir: Path, results_dir: Path
+) -> RunInputs:
+    """Checks 2 to 6 of design 5.2, in order (check 1 is done for every entry first)."""
+    shape = _task_and_system(entry.run_id)
+    if shape is None:
+        raise ReplayRefused(NOT_DEV_RUN)
+    task_id = shape[0]
+    try:
+        task = dev_task(task_id)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, ValidationError, TypeError):
+        raise ReplayRefused(NOT_DEV_RUN) from None
+    if task is None:
+        raise ReplayRefused(NOT_DEV_RUN)
+
+    run_dir = runs_dir / entry.run_id
+    record_path, events_path = run_dir / "record.json", run_dir / "events.jsonl"
+    if not (record_path.is_file() and events_path.is_file()):
+        raise ReplayRefused(RUN_FILES_MISSING)
+    try:
+        record = RunRecord.model_validate_json(record_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValidationError):
+        raise ReplayRefused(RECORD_MISMATCH) from None
+    if (record.run_id, record.task_id, record.mode) != (entry.run_id, task_id, "bench"):
+        raise ReplayRefused(RECORD_MISMATCH)
+
+    row = find_row(results_dir, entry.run_id)
+    retries = row.get("infra_retries")
+    if (
+        row.get("split") != "dev"
+        or row.get("crashed") is not False
+        or type(retries) is not int
+        or retries != 0
+    ):
+        raise ReplayRefused(ROW_NOT_SCORED)
+    if entry.pair is not None and not _is_pair(entry, manifest.replays):
+        raise ReplayRefused(BAD_PAIR)
+    if not _caption_ok(entry.caption):
+        raise ReplayRefused(BAD_CAPTION)
+    return RunInputs(
+        run_id=entry.run_id,
+        events_path=events_path,
+        record=record,
+        row=row,
+        task=task,
+        caps={**manifest.caps, **(entry.caps or {})},
+        allow=entry.allow,
+    )
+
+
+def _index_entry(entry: ManifestEntry, data: dict) -> dict:
+    """Design 4.6: the summary is copied from the replay, plus `allow` when set."""
+    run, outcome = data["run"], data["outcome"]
+    item = {
+        "run_id": entry.run_id,
+        "file": f"{entry.run_id}.json",
+        "caption": entry.caption,
+        "pair": entry.pair,
+        "task_id": run["task_id"],
+        "issue_title": run["issue"]["title"],
+        "repo": run["repo"],
+        "category": run["category"],
+        "system": run["system"],
+        "preset": run["preset"],
+        "outcome": outcome["outcome"],
+        "failure_kind": outcome["failure_kind"],
+        "resolved": outcome["resolved"],
+        "cost_usd": outcome["cost_usd"],
+        "tool_calls": outcome["tool_calls"],
+        "duration_s": outcome["duration_s"],
+        "recorded_at": run["recorded_at"],
+    }
+    if entry.allow:
+        item["allow"] = [{"path": path, "rule": rule} for path, rule in entry.allow]
+    return item
+
+
+def _publish(files: dict[str, str], out_dir: Path, exact: Sequence[str]) -> None:
+    """Check the finished files (raw text included), then replace `out_dir/*.json`."""
+    with tempfile.TemporaryDirectory(prefix="replays-") as staging:
+        for name, text in files.items():
+            (Path(staging) / name).write_bytes(text.encode("utf-8"))
+        try:
+            hits = check_paths([Path(staging)], exact=exact)
+        except ReplayFileError:
+            raise ReplayRefused(LEAK_FOUND) from None
+    if hits:
+        raise ReplayRefused(LEAK_FOUND, hits)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name, text in files.items():
+        (out_dir / name).write_bytes(text.encode("utf-8"))
+    for old in sorted(out_dir.glob("*.json")):
+        if old.name not in files:
+            old.unlink()
+
+
+def build(
+    manifest_path: Path, runs_dir: Path, results_dir: Path, out_dir: Path
+) -> list[str]:
+    """Every manifest entry as a replay, plus `index.json`, or `ReplayRefused`.
+
+    All or nothing: `out_dir` changes only when every entry converted and the
+    finished files passed the leak check. Returns the lines to print: one per
+    replay (`<run-id>: <n> steps, <k> KB`) and the warnings, led by
+    `EXACT_RULES_OFF` when neither GOOGLE_CLOUD_PROJECT nor REPLAY_REDACT is set.
+    A converter hit's JSON path refers to the replay before its cuts, so it can
+    name a list item or a part of a string the published file no longer holds.
+    """
+    manifest = load_manifest(manifest_path)
+    for n, entry in enumerate(manifest.replays, 1):
+        if _task_and_system(entry.run_id) is None:  # before any run file is opened
+            raise ReplayRefused(f"entry {n}: {NOT_DEV_RUN}")
+    project, redact = project_value(), redact_values()
+    exact = tuple(v for v in (project, *redact) if v)
+    lines = [] if exact else [EXACT_RULES_OFF]
+    graphs = export_graphs()
+    files: dict[str, str] = {}
+    index: list[dict] = []
+    for n, entry in enumerate(manifest.replays, 1):
+        try:
+            inputs = _inputs(entry, manifest, runs_dir, results_dir)
+            data = convert_run(
+                inputs,
+                graphs=graphs,
+                project=project or None,
+                redact=redact,
+                repo_root=REPO_ROOT,
+                home=Path.home(),
+            )
+        except ReplayRefused as err:
+            raise ReplayRefused(f"entry {n}: {err}", err.hits) from None
+        text = dumps(data)
+        size = len(text.encode("utf-8"))
+        if size > SIZE_LIMIT_BYTES:
+            raise ReplayRefused(f"entry {n}: {TOO_BIG}")
+        kb = math.ceil(size / 1024)
+        lines.append(f"{entry.run_id}: {len(data['steps'])} steps, {kb} KB")
+        if size > SIZE_WARN_BYTES:
+            lines.append(f"entry {n}: replay is {kb} KB (over 300 KB)")
+        files[f"{entry.run_id}.json"] = text
+        index.append(_index_entry(entry, data))
+    files[INDEX_FILE] = dumps(
+        {"schema": SCHEMA, "note": manifest.note, "replays": index}
+    )
+    _publish(files, out_dir, exact)
+    return lines
+
+
 # --- command line ---------------------------------------------------------------
+
+
+def _build_command(args: argparse.Namespace) -> int:
+    try:
+        lines = build(
+            Path(args.manifest),
+            Path(args.runs_dir),
+            Path(args.results_dir),
+            Path(args.out),
+        )
+    except ReplayRefused as err:
+        print(err, file=sys.stderr)
+        for hit in err.hits:
+            print(hit, file=sys.stderr)
+        return 1
+    for line in lines:
+        print(line)
+    return 0
+
+
+def _check_command(args: argparse.Namespace) -> int:
+    return replay_check.main(list(args.paths))
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -912,11 +1349,28 @@ def _parser() -> argparse.ArgumentParser:
         "--check", action="store_true", help="exit 1 if the file differs from the code"
     )
     graphs.set_defaults(run=_graphs_command)
+
+    build_cmd = commands.add_parser(
+        "build", help="convert the manifest's runs into the site's replay files"
+    )
+    build_cmd.add_argument("--manifest", default=str(MANIFEST_PATH))
+    build_cmd.add_argument("--runs-dir", default=str(RUNS_DIR))
+    build_cmd.add_argument("--results-dir", default=str(RESULTS_DIR))
+    build_cmd.add_argument("--out", default=str(OUT_DIR))
+    build_cmd.set_defaults(run=_build_command)
+
+    check = commands.add_parser("check", help="run the leak check on replay files")
+    check.add_argument(
+        "paths", nargs="*", help=f"files or directories (default {OUT_DIR})"
+    )
+    check.set_defaults(run=_check_command)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command in ("build", "check"):
+        load_dotenv()  # GOOGLE_CLOUD_PROJECT and REPLAY_REDACT, for the exact values
     return args.run(args)
 
 

@@ -8,7 +8,8 @@ Documented limits (not detected): lower-case 32-hex secrets, upper-case 64-hex
 or 12-hex container ids, URL-encoded paths and addresses, look-alike
 (homoglyph) letters, and a secret diluted below 4.0 bits per character by a
 long low-entropy run next to it. A file with a repeated JSON key is refused. The invisible-character second
-scan covers Cf (format) characters only.
+scan covers Cf (format) characters only. A string that is exactly a bench run id
+(or ``<run-id>.json``) is exempt from the ``high-entropy`` rule, and from no other.
 """
 
 from __future__ import annotations
@@ -70,6 +71,15 @@ _SANDBOX = re.compile(
     r"itp-[0-9a-fA-F]{12}|(?<![A-Za-z0-9])[0-9a-f]{64}(?![A-Za-z0-9])"
 )
 _PLAIN_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,39}")
+# A run id is a public identifier by design (index.json, file names), and some trip
+# the entropy rule. A string that is exactly a run id, or its file name, is exempt
+# from `high-entropy` only. Its free parts are two lower-case letters and digits, so
+# it cannot carry a mixed-case token; every other rule still applies to it.
+_RUN_ID_SHAPE = re.compile(
+    r"[a-z]{2}-\d{3}-(?:multi|single|review)-(?:flash|pro|mixed)(?:-rp-\d{2})?"
+    r"-r\d+-\d{8}T\d{6}Z(?:\.json)?",
+    re.ASCII,
+)
 _RAW_RULES = tuple(r for r in RULES if r in UNCLEARABLE)
 
 
@@ -194,7 +204,9 @@ def _rules_hit(
         "jwt": lambda: _jwt(text),
         "private-key": lambda: bool(_PRIVATE_KEY.search(text)),
         "other-token": lambda: bool(_OTHER.search(text)),
-        "high-entropy": lambda: _high_entropy(text),
+        "high-entropy": lambda: (
+            _RUN_ID_SHAPE.fullmatch(text) is None and _high_entropy(text)
+        ),
         "email": lambda: _email(text),
         "sandbox": lambda: bool(_SANDBOX.search(text)),
     }

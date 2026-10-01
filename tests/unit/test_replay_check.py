@@ -444,3 +444,70 @@ def test_hit_file_is_relative_to_the_scanned_root(tmp_path):
     assert files == ["a/x.json", "b/x.json"]
     (single,) = check_paths([tmp_path / "a" / "x.json"])
     assert single.file == "x.json"
+
+
+# --- run ids (controller ruling: exempt from high-entropy by exact shape only) ----
+
+RUN_IDS = [
+    "md-001-single-flash-r1-20261001T084838Z",
+    "tc-005-single-flash-r1-20261001T084838Z",
+    "sr-003-single-flash-r1-20261001T084838Z",
+    "md-001-multi-flash-r1-20261001T062611Z",
+    "md-003-review-pro-rp-04-r12-20261001T062611Z",
+]
+
+
+def test_a_run_id_is_entropic_enough_to_need_the_exemption():
+    # without the exemption this id is a high-entropy run, so the ruling is not vacuous
+    assert rc._high_entropy(RUN_IDS[0])
+
+
+@pytest.mark.parametrize("run_id", RUN_IDS)
+def test_a_string_that_is_exactly_a_run_id_is_not_high_entropy(run_id):
+    assert scan_text(run_id) == []
+    assert scan_text(run_id + ".json") == []
+    assert scan_value({"run_id": run_id, run_id: [run_id]}, file="f") == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        ALNUM,
+        "gh" + "p_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
+        RUN_IDS[0] + ALNUM,
+        ALNUM + RUN_IDS[0],
+        RUN_IDS[0] + "-" + ALNUM,
+        RUN_IDS[0] + "\n",
+        RUN_IDS[0] + "\n" + ALNUM,
+        "x " + RUN_IDS[0],
+        RUN_IDS[0] + ".json.bak",
+        RUN_IDS[0].replace("md-", "Md-"),
+        RUN_IDS[0] + "\u200b",
+    ],
+)
+def test_token_shaped_strings_never_match_the_run_id_exemption(text):
+    assert rc._RUN_ID_SHAPE.fullmatch(text) is None
+    assert "high-entropy" in scan_text(text)
+
+
+def test_the_run_id_shape_is_ascii_only():
+    assert rc._RUN_ID_SHAPE.fullmatch(RUN_IDS[0])
+    assert not rc._RUN_ID_SHAPE.fullmatch(
+        RUN_IDS[0].replace("-001-", "-\u0661\u0662\u0663-")
+    )
+
+
+def test_index_json_run_id_file_and_pair_fields_pass(tmp_path):
+    single, multi = RUN_IDS[0], RUN_IDS[3]
+    for run_id in (single, multi):
+        doc = {"run": {"run_id": run_id}}
+        (tmp_path / f"{run_id}.json").write_text(json.dumps(doc))
+    index = {
+        "schema": 1,
+        "replays": [
+            {"run_id": multi, "file": f"{multi}.json", "pair": single},
+            {"run_id": single, "file": f"{single}.json", "pair": multi},
+        ],
+    }
+    (tmp_path / "index.json").write_text(json.dumps(index))
+    assert check_paths([tmp_path]) == []

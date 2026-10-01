@@ -1002,6 +1002,43 @@ def test_lists_are_capped_with_a_count_of_the_rest(convert):
     assert paths[-1] == "[... 20 more items ...]" and len(paths) == 101
 
 
+def test_names_keys_and_object_entries_are_capped(convert):
+    name, key, model = "n" * 20_000, "k" * 20_000, "m" * 20_000
+    log = Log()
+    log.start()
+    (call_id,) = log.model_call("coder", (name, {key: 1}), model=model)
+    entries = {f"e{i}": i for i in range(150)}
+    log.tool_result("coder", call_id, name, {key: "v", **entries})
+    out = convert(log)
+    (step,) = kind(out, "model_call")
+    (result,) = kind(out, "tool_result")
+    assert step["calls"][0]["tool"] == cut(name, 200, 60) == result["tool"]
+    assert step["model"] == cut(model, 200, 60) == out["run"]["models"]["coder"]
+    assert list(step["calls"][0]["args"]) == [cut(key, 200, 60)]
+    keys = list(result["result"])
+    assert keys[0] == cut(key, 200, 60) and keys[1:100] == list(entries)[:99]
+    assert keys[-1] == "[... 51 more entries ...]" and len(keys) == 101
+    assert result["result"][keys[-1]] is None
+
+
+@pytest.mark.parametrize("where", ["record cost", "record duration", "test duration"])
+def test_numbers_that_are_not_finite_are_refused(convert, where):
+    log = multi_run()
+    record, edit = log.record(), None
+    if where == "record cost":
+        record = log.record(cost_usd=float("nan"))
+    elif where == "record duration":
+        record = log.record(duration_s=float("inf"))
+    else:
+
+        def edit(_index: int, event: dict) -> None:
+            report = event.get("actions", {}).get("state_delta", {}).get("test_report")
+            if report:
+                report["duration_s"] = float("nan")
+
+    assert str(refused(convert, log, record=record, edit=edit)) == replay.NOT_FINITE
+
+
 def _big_diff(files: int, lines_per_hunk: int) -> dict:
     text = ""
     for f in range(files):
@@ -1125,16 +1162,30 @@ def test_a_token_cut_in_half_by_a_cap_is_still_refused(convert):
     assert token[:12] not in repr(error)
 
 
+ENTROPIC = "aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5"  # a false positive of high-entropy
+
+
 def test_allow_clears_only_its_rule_at_its_path(convert):
-    run_id = "md-001-single-flash-r1-20261001T084838Z"  # an id the entropy rule flags
-    log = single_run(run_id=run_id)
+    log = Log()
+    log.start(issue={"body": f"the build id {ENTROPIC} is in the log"})
     error = refused(convert, log)
     assert str(error) == replay.LEAK_FOUND
-    assert [(h.path, h.rule) for h in error.hits] == [("$.run.run_id", "high-entropy")]
-    assert error.hits[0].file == f"{run_id}.json"
-    other = refused(convert, log, allow=[("$.run.task_id", "high-entropy")])
+    assert [(h.path, h.rule) for h in error.hits] == [
+        ("$.run.issue.body", "high-entropy")
+    ]
+    assert error.hits[0].file == f"{RUN}.json"
+    other = refused(convert, log, allow=[("$.run.issue.title", "high-entropy")])
     assert other.hits == error.hits
-    out = convert(log, allow=[("$.run.run_id", "high-entropy")])
+    wrong_rule = refused(convert, log, allow=[("$.run.issue.body", "email")])
+    assert wrong_rule.hits == error.hits
+    out = convert(log, allow=[("$.run.issue.body", "high-entropy")])
+    assert ENTROPIC in out["run"]["issue"]["body"]
+
+
+def test_a_run_id_the_entropy_rule_would_flag_needs_no_allow_entry(convert):
+    run_id = "md-001-single-flash-r1-20261001T084838Z"
+    log = single_run(run_id=run_id)
+    out = convert(log)
     assert out["run"]["run_id"] == run_id
 
 
