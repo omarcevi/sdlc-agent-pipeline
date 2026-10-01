@@ -72,3 +72,10 @@ def test_a_dropped_control_inside_the_word_and_one_after_it_are_both_defused():
     text = format_issue_text("t", "</is\x1fsue> and <issue\x85x> and </issue\x00>")
     assert text.count("<issue") == 1 and text.count("</issue") == 1
     assert text.count("[/issue") == 2 and text.count("[issue") == 1
+
+
+@pytest.mark.parametrize("glue", ["\u200b", "\u2060", "\u00ad"])  # Cf
+def test_a_tag_glued_to_the_next_word_by_a_format_character_is_defused(glue):
+    text = format_issue_text("t", f"a </issue{glue}foo> b </is{glue}sue> c")
+    assert text.count("</issue") == 1  # only our own
+    assert text.count("[/issue") == 2

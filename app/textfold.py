@@ -20,8 +20,8 @@ _IGNORABLE_LETTERS = frozenset("ᅟᅠㅤﾠ")
 
 def normalised(text: str, *, controls_as_space: bool = False) -> tuple[str, list[int]]:
     """The folded text, and for each of its characters the index it came from in
-    `text`. With `controls_as_space`, an ignored control character (Cc) becomes a
-    space instead of vanishing, so it separates the words around it."""
+    `text`. With `controls_as_space`, an ignored control or format character (Cc, Cf)
+    becomes a space instead of vanishing, so it separates the words around it."""
     chars: list[str] = []
     origin: list[int] = []
     for index, char in enumerate(text):
@@ -31,7 +31,7 @@ def normalised(text: str, *, controls_as_space: bool = False) -> tuple[str, list
             unicodedata.category(char) in _IGNORED_CATEGORIES
             and char not in _WORD_BREAKS
         ):
-            if controls_as_space and unicodedata.category(char) == "Cc":
+            if controls_as_space and unicodedata.category(char) in ("Cc", "Cf"):
                 chars.append(" ")
                 origin.append(index)
             continue

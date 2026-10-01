@@ -64,8 +64,8 @@ def _tag_spans(text: str, *, controls_as_space: bool) -> list[tuple[int, int, bo
 def _defuse(text: str) -> str:
     """Replace the opening fragment of every issue tag in `text`, however it is
     spelled, by `[issue` or `[/issue`. Two foldings are searched, one that drops
-    ignorable control characters (`</is\x1fsue`) and one that turns them into spaces
-    (`</issue\x1ffoo`); the union of the spans is defused."""
+    ignorable control characters (`</is\\x1fsue`) and one that turns them into spaces
+    (`</issue\\x1ffoo`); the union of the spans is defused."""
     spans = sorted(
         _tag_spans(text, controls_as_space=False)
         + _tag_spans(text, controls_as_space=True)
