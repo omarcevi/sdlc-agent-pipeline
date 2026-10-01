@@ -1,0 +1,228 @@
+{
+  "schema": 1,
+  "graphs": {
+    "multi": {
+      "source": "app.pipeline.build_workflow",
+      "nodes": [
+        {
+          "id": "START",
+          "kind": "start"
+        },
+        {
+          "id": "fetch_issue",
+          "kind": "function"
+        },
+        {
+          "id": "provision_sandbox",
+          "kind": "function"
+        },
+        {
+          "id": "planner",
+          "kind": "llm"
+        },
+        {
+          "id": "route_plan",
+          "kind": "router"
+        },
+        {
+          "id": "coder",
+          "kind": "llm"
+        },
+        {
+          "id": "report_failure",
+          "kind": "function"
+        },
+        {
+          "id": "collect_diff",
+          "kind": "function"
+        },
+        {
+          "id": "run_tests",
+          "kind": "function"
+        },
+        {
+          "id": "reviewer",
+          "kind": "llm"
+        },
+        {
+          "id": "route_review",
+          "kind": "router"
+        },
+        {
+          "id": "deliver_patch",
+          "kind": "function"
+        }
+      ],
+      "edges": [
+        {
+          "from": "START",
+          "to": "fetch_issue",
+          "route": null
+        },
+        {
+          "from": "fetch_issue",
+          "to": "provision_sandbox",
+          "route": null
+        },
+        {
+          "from": "provision_sandbox",
+          "to": "planner",
+          "route": null
+        },
+        {
+          "from": "planner",
+          "to": "route_plan",
+          "route": null
+        },
+        {
+          "from": "route_plan",
+          "to": "coder",
+          "route": "actionable"
+        },
+        {
+          "from": "route_plan",
+          "to": "report_failure",
+          "route": "declined"
+        },
+        {
+          "from": "coder",
+          "to": "collect_diff",
+          "route": null
+        },
+        {
+          "from": "collect_diff",
+          "to": "run_tests",
+          "route": null
+        },
+        {
+          "from": "run_tests",
+          "to": "reviewer",
+          "route": "pass"
+        },
+        {
+          "from": "run_tests",
+          "to": "coder",
+          "route": "fail"
+        },
+        {
+          "from": "run_tests",
+          "to": "report_failure",
+          "route": "exhausted"
+        },
+        {
+          "from": "reviewer",
+          "to": "route_review",
+          "route": null
+        },
+        {
+          "from": "route_review",
+          "to": "deliver_patch",
+          "route": "approve"
+        },
+        {
+          "from": "route_review",
+          "to": "coder",
+          "route": "changes"
+        },
+        {
+          "from": "route_review",
+          "to": "report_failure",
+          "route": "exhausted"
+        }
+      ]
+    },
+    "single": {
+      "source": "app.baseline.build_baseline_workflow",
+      "nodes": [
+        {
+          "id": "START",
+          "kind": "start"
+        },
+        {
+          "id": "fetch_issue",
+          "kind": "function"
+        },
+        {
+          "id": "provision_sandbox",
+          "kind": "function"
+        },
+        {
+          "id": "solo",
+          "kind": "llm"
+        },
+        {
+          "id": "route_solo",
+          "kind": "router"
+        },
+        {
+          "id": "collect_diff",
+          "kind": "function"
+        },
+        {
+          "id": "report_failure",
+          "kind": "function"
+        },
+        {
+          "id": "run_tests",
+          "kind": "function"
+        },
+        {
+          "id": "deliver_patch",
+          "kind": "function"
+        }
+      ],
+      "edges": [
+        {
+          "from": "START",
+          "to": "fetch_issue",
+          "route": null
+        },
+        {
+          "from": "fetch_issue",
+          "to": "provision_sandbox",
+          "route": null
+        },
+        {
+          "from": "provision_sandbox",
+          "to": "solo",
+          "route": null
+        },
+        {
+          "from": "solo",
+          "to": "route_solo",
+          "route": null
+        },
+        {
+          "from": "route_solo",
+          "to": "collect_diff",
+          "route": "done"
+        },
+        {
+          "from": "route_solo",
+          "to": "report_failure",
+          "route": "declined"
+        },
+        {
+          "from": "collect_diff",
+          "to": "run_tests",
+          "route": null
+        },
+        {
+          "from": "run_tests",
+          "to": "deliver_patch",
+          "route": "pass"
+        },
+        {
+          "from": "run_tests",
+          "to": "solo",
+          "route": "fail"
+        },
+        {
+          "from": "run_tests",
+          "to": "report_failure",
+          "route": "exhausted"
+        }
+      ]
+    }
+  }
+}
