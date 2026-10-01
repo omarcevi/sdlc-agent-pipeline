@@ -1,0 +1,21 @@
+repo: mdlite
+title: "Refactor: give code block nodes their language"
+body: |
+  Our docs build runs the code samples in our Markdown. It parses each page with
+  `mdlite.blocks.parse(text)`, walks the tree and picks out the fenced code blocks
+  written in a given language. To find a block's language we copied mdlite's rule for
+  turning the fence's info string into the word that ends up in
+  `class="language-..."`, and our copy has already drifted from yours once.
+
+  Please make that rule live in one place, on the node: every `CodeBlock` in a parsed
+  tree should have a `language` attribute holding exactly the word that goes into the
+  class (before any HTML escaping), or `None` when the fence has no info string. The
+  HTML renderer should get the class from that attribute instead of working the word
+  out on its own, so that there is a single copy of the rule.
+
+  This is a refactor: the HTML, and everything else about the library that a user can
+  observe today, must stay exactly as it is.
+category: refactor
+difficulty: medium
+split: heldout
+levers: [regression_risk]

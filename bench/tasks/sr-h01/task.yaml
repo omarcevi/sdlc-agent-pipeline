@@ -1,0 +1,34 @@
+repo: stockroom
+title: "Customer's coupon is missing from the bill after a cancellation"
+body: |
+  A customer ordered 12 pens with their 10 % coupon. We could only ship 9, so the
+  rest of the order was cancelled and we billed the 9 pens. The bill has no coupon
+  discount at all, and the customer complained.
+
+  Reproduction:
+
+      from decimal import Decimal
+      from stockroom import Product, Store, Tier, Unit
+
+      store = Store(tax_percent="8.25")
+      store.add_product(Product("PEN-1", "Pen", Unit.EACH, Decimal("1.50"),
+                                tiers=(Tier(10, Decimal("5")),)))
+      store.receive("PEN-1", 100)
+      store.add_coupon("SAVE10", "10")
+
+      order = store.create_order([("PEN-1", 12)], "SAVE10")
+      store.reserve_order(order.id)
+      store.fulfil_order(order.id, {"PEN-1": 9})
+      store.cancel_order(order.id)
+      bill = store.billable(order.id)
+      print(bill.discount, bill.total)
+
+  This prints `0.00 14.61`: 9 pens at full price plus tax, as if the order had been
+  placed without the coupon. Orders that are shipped in full are billed with the
+  coupon as expected.
+
+  The coupon the customer ordered with should count on this bill too.
+category: bug
+difficulty: medium
+split: heldout
+levers: [doc_rule]

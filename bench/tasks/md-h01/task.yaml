@@ -1,0 +1,35 @@
+repo: mdlite
+title: "Numbered sub-steps are numbered from the parent step"
+body: |
+  Our install guides use numbered steps with numbered sub-steps:
+
+      1. Download the archive
+      2. Configure
+         1. Copy the sample file
+         2. Edit the paths
+      3. Run
+
+  In the browser the two sub-steps under step 2 show up as 2 and 3 instead of 1 and 2.
+  The HTML has a `start` on the inner list:
+
+      >>> print(mdlite.to_html(guide), end="")
+      <ol>
+      <li>Download the archive</li>
+      <li>Configure
+      <ol start="2">
+      <li>Copy the sample file</li>
+      <li>Edit the paths</li>
+      </ol>
+      </li>
+      <li>Run</li>
+      </ol>
+
+  Sub-steps under step 1 look right. Under step 3 they would start at 3, and so on.
+
+  Expected: a numbered sub-list is numbered from its own first item, the same way a
+  numbered list that is not nested is, so the example gives a plain `<ol>` for the
+  sub-steps.
+category: bug
+difficulty: hard
+split: heldout
+levers: [distant_symptom, regression_risk]

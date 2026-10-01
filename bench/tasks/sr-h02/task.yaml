@@ -1,0 +1,26 @@
+repo: stockroom
+title: "Products with their own tax rate"
+body: |
+  Books are taxed at a reduced rate of 5 % here, while everything else we sell uses the
+  standard rate we give `Store`. Please let a product carry its own rate:
+
+      Product("BOOK-1", "Notebook", Unit.EACH, Decimal("4.99"), tax_percent=Decimal("5"))
+
+  How it should work:
+
+  - A product with its own rate is taxed at that rate, on quotes, orders and bills
+    alike. A product without one (`tax_percent=None`, the default) is taxed at the
+    store's rate, as today. A product that is not taxable is not taxed, whatever its
+    rate.
+  - The rate is given the same way as the store's rate (percent units, from 0 to 100,
+    as a `Decimal`, an int or a string, never a float), and a bad rate is refused when
+    the product is created, with the same error a bad store rate gets.
+  - Changing a product's price keeps its rate.
+  - Our suppliers' price lists will get a `tax_percent` column. A products file may
+    have it, in any position; an empty value means the product has no rate of its
+    own. A row with a bad rate is reported like any other bad row. Files without the
+    column must keep working exactly as they do today.
+category: feature
+difficulty: hard
+split: heldout
+levers: [multi_file]
