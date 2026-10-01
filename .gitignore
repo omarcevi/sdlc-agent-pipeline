@@ -217,3 +217,7 @@ runs/
 
 # agents-cli eval outputs
 artifacts/
+
+# replay site test output
+web/test-results/
+web/playwright-report/
