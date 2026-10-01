@@ -41,6 +41,15 @@ def _no_github_token(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_config(monkeypatch):
+    """No test sees the developer's live repositories or logins. They may come from
+    .env, which a module can load mid-session (app/fast_api_app.py does at import),
+    so they are removed for every test; a test that needs them sets its own."""
+    monkeypatch.delenv("LIVE_REPOS", raising=False)
+    monkeypatch.delenv("LIVE_ALLOWED_USERS", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _reset_registry():
     yield
     registry.clear()

@@ -8,8 +8,12 @@ never reads the GitHub token; only the pipeline's own nodes do.
 
 Exit status: 0 when a run finished, whatever its outcome; 2 when the CLI refuses to
 start (stdin is not a terminal, an approver or repository that is not allowed, a bad
-setting, or another run holding the issue's lock); 1 when the run crashed (its
-record is still written); 130 when Ctrl-C stopped the run before the prompt.
+run id or timeout setting, a run directory that already exists, or another run
+holding the issue's lock); 1 when the run crashed; 130 when Ctrl-C stopped the run.
+The run's record is written in every one of the last three cases.
+
+Ctrl-C at the prompt rejects the patch. While the decision is being delivered,
+the first Ctrl-C only warns and a second one stops the run.
 """
 
 import argparse
@@ -32,6 +36,7 @@ from pydantic import ValidationError
 from app.approval import ApprovalDecision, ApprovalRequest, Approver, TerminalApprover
 from app.driver import RunCrashed, approval_timeout_s, run_pipeline, run_timeout_s
 from app.live_config import allowed_users, live_repos
+from app.live_lock import LockHeld, acquire
 from app.models import RoleModels
 from app.nodes.finish import runs_dir
 from app.pipeline import build_workflow
@@ -39,11 +44,10 @@ from app.schemas import RunRecord, RunRequest
 from app.tracing import enable_cloud_trace, flush_traces, trace_explorer_url
 from bench.progress import format_event
 
-_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
-
-
-class LockHeld(Exception):
-    """Another live run holds the issue's lock."""
+# A run id names a directory under runs/, a comment marker and a branch slug.
+MAX_RUN_ID = 64
+_RUN_ID = re.compile(rf"[A-Za-z0-9][A-Za-z0-9_.-]{{0,{MAX_RUN_ID - 1}}}")
+_NAME_IN_RUN_ID = 32  # the repository name's share of a default run id
 
 
 def lock_path(repo: str, issue_number: int) -> Path:
@@ -51,59 +55,6 @@ def lock_path(repo: str, issue_number: int) -> Path:
     matched case-insensitively, so one issue has one lock however it is spelled."""
     owner, name = repo.lower().split("/", 1)
     return runs_dir() / ".locks" / f"{owner}__{name}__{issue_number}.lock"
-
-
-def _lock_pid(path: Path) -> int | None:
-    """The PID in the lock file; None when the file holds no PID. Raises
-    FileNotFoundError when there is no lock file."""
-    text = path.read_text().strip()
-    return int(text) if text.isdigit() and int(text) > 0 else None
-
-
-def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:  # it exists, under another user
-        return True
-    return True
-
-
-def acquire_lock(path: Path) -> None:
-    """Create the lock file (O_CREAT | O_EXCL) holding this process's PID. A lock
-    whose process is gone is replaced; a lock held by a live process, or one that
-    holds no PID, raises LockHeld."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    for _ in range(5):
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        except FileExistsError:
-            try:
-                pid = _lock_pid(path)
-            except FileNotFoundError:
-                continue  # released meanwhile: try again
-            if pid is None or _alive(pid):
-                raise LockHeld(str(path)) from None
-            try:
-                if _lock_pid(path) == pid:  # still the stale lock just read
-                    path.unlink()
-            except FileNotFoundError:
-                pass
-            continue
-        with os.fdopen(fd, "w") as handle:
-            handle.write(f"{os.getpid()}\n")
-        return
-    raise LockHeld(str(path))
-
-
-def release_lock(path: Path) -> None:
-    """Remove the lock if this process holds it."""
-    try:
-        if _lock_pid(path) == os.getpid():
-            path.unlink()
-    except FileNotFoundError:
-        pass
 
 
 class TerminalLines:
@@ -156,11 +107,13 @@ class TerminalLines:
 class InterruptiblePrompt:
     """Wraps the approver so Ctrl-C at the prompt cancels the prompt only. The
     driver then records a rejection ("approval cancelled"), and the issue gets its
-    one comment; Ctrl-C at any other time stops the run."""
+    one comment. `decided` turns true once the prompt was answered, timed out or
+    was interrupted: the run is then delivering the decision."""
 
     def __init__(self, approver: Approver) -> None:
         self._approver = approver
         self._prompt: asyncio.Future[ApprovalDecision] | None = None
+        self.decided = False
 
     async def __call__(self, request: ApprovalRequest) -> ApprovalDecision:
         self._prompt = asyncio.ensure_future(self._approver(request))
@@ -168,6 +121,7 @@ class InterruptiblePrompt:
             return await self._prompt
         finally:
             self._prompt = None
+            self.decided = True
 
     def interrupt(self) -> bool:
         """Cancel a pending prompt. False when no prompt is pending."""
@@ -186,8 +140,12 @@ def _shown(text: str) -> str:
 
 
 def default_run_id(repo: str, issue_number: int) -> str:
+    """`live-<UTC stamp>-<name>-<n>`. The stamp comes first so the branch name,
+    which keeps the first 40 characters of the run id, still tells two runs on one
+    issue apart; the name is cut so the id stays within MAX_RUN_ID."""
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return f"live-{repo.split('/', 1)[1]}-{issue_number}-{stamp}"
+    name = repo.split("/", 1)[1][:_NAME_IN_RUN_ID].rstrip("._-") or "repo"
+    return f"live-{stamp}-{name}-{issue_number}"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -229,6 +187,13 @@ def _progress(label: str, stdout: TextIO) -> Callable[[Event], None]:
     return on_event
 
 
+def _stored_record(run_dir: Path) -> RunRecord | None:
+    try:
+        return RunRecord.model_validate_json((run_dir / "record.json").read_text())
+    except (OSError, ValueError):
+        return None
+
+
 def _summary(record: RunRecord, run_dir: Path) -> list[str]:
     outcome = record.outcome
     if record.failure_kind != "none":
@@ -236,10 +201,13 @@ def _summary(record: RunRecord, run_dir: Path) -> list[str]:
     return [
         f"outcome: {outcome}",
         f"reason: {_shown(record.reason) or '-'}",
-        f"pull request: {record.pr_url or '-'}",
+        f"pull request: {_shown(record.pr_url or '') or '-'}",
         f"cost: ${record.cost_usd:.4f}, {record.tool_calls} tool calls",
         f"run directory: {run_dir}",
     ]
+
+
+DELIVERING = "delivering the decision; press Ctrl-C again to abort"
 
 
 async def _drive(
@@ -247,16 +215,25 @@ async def _drive(
     prompt: InterruptiblePrompt,
     lines: TerminalLines,
     on_event: Callable[[Event], None] | None,
+    stdout: TextIO,
 ) -> RunRecord:
-    """The run, with Ctrl-C routed to the prompt while one is pending. A second
-    Ctrl-C after the run was told to stop raises KeyboardInterrupt at once."""
+    """The run, with Ctrl-C handled in steps:
+    - while the prompt is pending, Ctrl-C cancels the prompt (a rejection);
+    - while the decision is delivered, the first Ctrl-C only warns;
+    - otherwise Ctrl-C cancels the run (the driver still writes its record), and
+      a further Ctrl-C raises KeyboardInterrupt at once."""
     loop = asyncio.get_running_loop()
     run_task = asyncio.current_task()
+    warned = False
     stops = 0
 
     def on_sigint() -> None:
-        nonlocal stops
+        nonlocal warned, stops
         if prompt.interrupt():
+            return
+        if prompt.decided and not warned:
+            warned = True
+            print(f"\n{DELIVERING}", file=stdout, flush=True)
             return
         stops += 1
         if stops > 1:
@@ -301,11 +278,15 @@ def main(
         return _fail(f"approver {login!r} is not in LIVE_ALLOWED_USERS")
     if args.repo.lower() not in live_repos():
         return _fail(f"repository {args.repo!r} is not in LIVE_REPOS")
-    if args.run_id is not None and not _RUN_ID.fullmatch(args.run_id):
-        return _fail("--run-id may hold only letters, digits, '.', '_' and '-'")
+    run_id = args.run_id or default_run_id(args.repo, args.issue)
+    if not _RUN_ID.fullmatch(run_id):
+        return _fail(
+            f"--run-id must be 1 to {MAX_RUN_ID} letters, digits, '.', '_' or '-', "
+            "starting with a letter or digit"
+        )
     try:
         request = RunRequest(
-            run_id=args.run_id or default_run_id(args.repo, args.issue),
+            run_id=run_id,
             mode="live",
             repo=args.repo,
             issue_number=args.issue,
@@ -319,15 +300,24 @@ def main(
     except ValueError as exc:
         return _fail(str(exc))
 
-    lock = lock_path(args.repo, args.issue)
+    path = lock_path(args.repo, args.issue)
     try:
-        acquire_lock(lock)
+        lock = acquire(path)
     except LockHeld:
         return _fail(
-            f"another live run holds the lock for {request.subject_id} ({lock})"
+            f"another live run holds the lock for {request.subject_id} ({path})"
         )
     run_dir = runs_dir() / request.run_id
+    lines: TerminalLines | None = None
     try:
+        try:
+            # Created here, exclusively: a reused run id would overwrite an earlier
+            # run's record and reuse its comment marker and branch.
+            run_dir.mkdir(parents=True)
+        except FileExistsError:
+            return _fail(
+                f"run directory {run_dir} already exists; pick another --run-id"
+            )
         tracing_on = enable_cloud_trace()
         lines = TerminalLines(stdin)
         prompt = InterruptiblePrompt(
@@ -335,7 +325,7 @@ def main(
         )
         on_event = None if args.quiet else _progress(request.subject_id, stdout)
         try:
-            record = asyncio.run(_drive(request, prompt, lines, on_event))
+            record = asyncio.run(_drive(request, prompt, lines, on_event, stdout))
         except RunCrashed as crashed:
             print("\n".join(_summary(crashed.record, run_dir)), file=stdout)
             print(
@@ -345,13 +335,18 @@ def main(
             return 1
         except (KeyboardInterrupt, asyncio.CancelledError):
             print(file=stdout)
+            stored = _stored_record(run_dir)
+            if stored is not None:  # the driver records a cancelled run
+                print("\n".join(_summary(stored, run_dir)), file=stdout, flush=True)
             print("error: interrupted; the run was stopped", file=sys.stderr)
             return 130
         finally:
             if tracing_on:
                 flush_traces()
     finally:
-        release_lock(lock)
+        if lines is not None:
+            lines.release()  # in case the run's own release was skipped
+        lock.release()
     print(file=stdout)
     print("\n".join(_summary(record, run_dir)), file=stdout, flush=True)
     if tracing_on:

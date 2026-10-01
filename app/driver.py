@@ -64,8 +64,41 @@ APPROVAL_TIMED_OUT = ApprovalDecision(
 APPROVAL_CANCELLED = ApprovalDecision(
     approved=False, approver="", patch_sha256="", note="approval cancelled"
 )
+
+# The driver's own reasons. They hold no outside text.
+NO_APPROVER = "approval needed but no approver"
+NO_OUTCOME = "workflow ended without an outcome"
+GITHUB_REFUSED_AT_DELIVERY = "GitHub refused the pull request"
 # A GitHubUnavailable from open_pr carries GitHub's own text; the record does not.
 GITHUB_UNAVAILABLE_AT_DELIVERY = "GitHub was unavailable while opening the pull request"
+RESUME_CAP = "resumed run exceeded {limit:g} s wall clock"
+RUN_CANCELLED = "run cancelled"
+PR_MAY_BE_OPEN = "; the pull request may have been opened"
+# The only infra reasons the public failure comment repeats as they are.
+PUBLIC_INFRA_REASONS = frozenset(
+    {
+        NO_APPROVER,
+        NO_OUTCOME,
+        GITHUB_REFUSED_AT_DELIVERY,
+        GITHUB_UNAVAILABLE_AT_DELIVERY,
+        RESUME_CAP.format(limit=RESUME_TIMEOUT_S),
+    }
+)
+# What the issue is told instead of a reason that may hold outside text (exception
+# messages, sandbox or provider errors: host paths, project ids); record.json
+# keeps the full reason.
+PUBLIC_CRASH = (
+    "the pipeline stopped on an internal error; the details are in the run's local "
+    "record"
+)
+PUBLIC_INFRA = (
+    "an infrastructure error (sandbox, model service or GitHub) stopped the run; "
+    "the details are in the run's local record"
+)
+PUBLIC_AGENT = (
+    "the agents could not produce a usable answer; the details are in the run's "
+    "local record"
+)
 
 
 def _positive_seconds(name: str, raw: str) -> float:
@@ -254,7 +287,7 @@ def classify_failure(
         if isinstance(error, GitHubError):
             # Only open_pr lets one escape (live intake turns them into refusals, the
             # failure comment logs them). A fixed reason: no response text.
-            return "infra", "GitHub refused the pull request"
+            return "infra", GITHUB_REFUSED_AT_DELIVERY
         if isinstance(error, ModelCallStalled):
             # A provider stall that outlasted one retry. It is not a TimeoutError,
             # so the driver never takes it for the wall-clock cap.
@@ -307,18 +340,19 @@ async def run_pipeline(
     It is display-only: an exception from it is logged once and never affects the run.
     `approver` answers the live graph's approval gate; a run that reaches the gate
     without one ends at once as an infra failure.
+
+    A crash raises RunCrashed, and a cancellation is raised again, each after
+    record.json is written and the root span has the record's outcome.
     """
     tracer = tracer or trace.get_tracer(TRACER_NAME)
     with tracer.start_as_current_span(
         ROOT_SPAN_NAME,
         attributes={"task_id": request.subject_id, "run_id": request.run_id},
     ) as span:
-        try:
-            record = await _run(request, workflow, on_event, approver)
-        except RunCrashed as crashed:
-            _set_record_attributes(span, crashed.record)
-            raise
+        record, error = await _run(request, workflow, on_event, approver)
         _set_record_attributes(span, record)
+        if error is not None:
+            raise error
     return record
 
 
@@ -427,19 +461,28 @@ async def _ask(
         return APPROVAL_TIMED_OUT
 
 
+def _withdraw(exc: asyncio.CancelledError) -> asyncio.CancelledError:
+    """Take a cancellation in, to raise it again once the record is written. The
+    task's cancel requests are withdrawn meanwhile, so what runs before that (the
+    resumed pass, the sandbox release) runs normally; a caller's own `uncancel`
+    then ends at 0, so asyncio.run and asyncio.timeout still see their cancel."""
+    task = asyncio.current_task()
+    if task is not None:
+        while task.uncancel():
+            pass
+    return exc
+
+
 def _outer_cancellation(exc: BaseException) -> asyncio.CancelledError | None:
     """`exc` when it is a cancellation of the run itself (a cancel request on this
     task), to be raised again once the record is written; None when it came from
-    inside the ask (Ctrl-C at the prompt). The run's cancel requests are withdrawn
-    meanwhile, so the resumed pass runs as for any rejection."""
+    inside the ask (Ctrl-C at the prompt)."""
     task = asyncio.current_task()
     if not isinstance(exc, asyncio.CancelledError) or task is None:
         return None
     if not task.cancelling():
         return None
-    while task.uncancel():
-        pass
-    return exc
+    return _withdraw(exc)
 
 
 async def _resume(
@@ -451,7 +494,8 @@ async def _resume(
     tracker: _ActiveAgentTracker,
 ) -> tuple[tuple[FailureKind, str] | None, Exception | None]:
     """Continue the paused session with the decision as the gate call's response:
-    route_approval, then open_pr or report_failure. Returns (failure, crash)."""
+    route_approval, then open_pr or report_failure. Returns (failure, crash); a
+    cancellation propagates."""
     message = types.Content(
         role="user",
         parts=[
@@ -468,10 +512,10 @@ async def _resume(
     except TimeoutError as exc:
         if cap.expired():
             # No model runs after the gate: a stalled delivery is infra, not spend.
-            reason = f"resumed run exceeded {RESUME_TIMEOUT_S:g} s wall clock"
+            reason = RESUME_CAP.format(limit=RESUME_TIMEOUT_S)
             if decision.approved:
                 # open_pr may have stalled after GitHub created the pull request.
-                reason += "; the pull request may have been opened"
+                reason += PR_MAY_BE_OPEN
             return ("infra", reason), None
         return _classify_or_crash(exc, tracker, session_id)
     except Exception as exc:
@@ -482,18 +526,26 @@ async def _resume(
     return None, None
 
 
-def _driver_comments(issue: dict, record: RunRecord, crashed: bool) -> bool:
-    """Decision 10A: a live run whose issue was fetched and that ended on a cap, an
-    infra error or a crash, where the graph's report_failure never ran. Refused,
-    declined, rejected and agent-failed runs are not the driver's to comment on."""
-    if issue.get("mode") != "live":
-        return False
+def _public_reason(record: RunRecord, crashed: bool) -> str:
+    """The reason the issue is told: what happened and nothing more. A budget
+    reason is built from numbers only, and the driver's own infra reasons hold no
+    outside text; anything else (an exception's message, a sandbox, model or
+    GitHub error) may name host paths or cloud projects, so it is replaced by a
+    fixed text. record.json keeps the full reason."""
     if crashed:
-        return True
-    return record.outcome == "failed" and record.failure_kind in ("budget", "infra")
+        return PUBLIC_CRASH
+    if record.failure_kind == "budget":
+        return record.reason
+    if record.failure_kind == "agent":
+        return PUBLIC_AGENT
+    if record.reason in PUBLIC_INFRA_REASONS:
+        return record.reason
+    return PUBLIC_INFRA
 
 
-async def _comment_on_failure(issue: dict, state: dict, record: RunRecord) -> bool:
+async def _comment_on_failure(
+    issue: dict, state: dict, record: RunRecord, crashed: bool
+) -> bool:
     """Post the run's failure comment; True when it is on the issue. A failure to
     post is logged (its type only: the text could hold GitHub's) and never raised."""
     try:
@@ -502,7 +554,7 @@ async def _comment_on_failure(issue: dict, state: dict, record: RunRecord) -> bo
                 issue,
                 run_id=issue["run_id"],
                 outcome=record.outcome,
-                reason=record.reason,
+                reason=_public_reason(record, crashed),
                 plan=state.get("plan"),
                 test_report=state.get("test_report"),
                 budget=state.get("budget"),
@@ -521,7 +573,9 @@ async def _run(
     workflow: Workflow | None,
     on_event: Callable[[Event], None] | None = None,
     approver: Approver | None = None,
-) -> RunRecord:
+) -> tuple[RunRecord, BaseException | None]:
+    """The run's record, written to record.json, and the error to raise once the
+    root span has the record's outcome: RunCrashed, a cancellation, or None."""
     timeout_s = run_timeout_s()
     approval_limit_s = approval_timeout_s()
     check_model_call_timeout(timeout_s)
@@ -552,64 +606,88 @@ async def _run(
     failure: tuple[FailureKind, str] | None = None
     refused: str | None = None
     crash: Exception | None = None
-    # A cancellation of the whole run while it waited for the approver: raised again
-    # once the rejection is delivered and the record written.
+    decision: ApprovalDecision | None = None
+    # A cancellation, raised again once the record is written: of the whole run, at
+    # any point; Ctrl-C at the prompt is a rejection instead (see the ask below).
     cancelled: asyncio.CancelledError | None = None
+    # Set when a cancellation stopped the run itself: no comment is posted for it.
+    run_cancelled = False
     try:
-        events: list[Event] = []
         try:
-            # The cap bounds the whole event loop; on expiry the in-flight work (a
-            # hung model call included) is cancelled. asyncio.timeout turns only its
-            # own expiry into TimeoutError, so an outer cancellation still propagates.
-            async with asyncio.timeout(timeout_s) as cap:
-                events = await log.drain(runner, session.id, message, "w")
-        except TimeoutError as exc:
-            if cap.expired():
-                failure = ("budget", f"run exceeded {timeout_s:g} s wall clock")
-            else:
-                failure, crash = _classify_or_crash(exc, tracker, session.id)
-        except Exception as exc:
-            # Checked before classification: a refusal is no failure of the system.
-            refused = _refusal(exc)
-            if refused is None:
-                failure, crash = _classify_or_crash(exc, tracker, session.id)
-
-        stopped = failure is not None or refused is not None
-        call = None if stopped else _pending_approval(events)
-        if call is not None:
-            paused = True
-            # Nothing after the gate needs the sandbox; release it before waiting.
-            state = await _session_state(runner, session.id)
-            await _release_sandbox(state.get("sandbox_id"))
-            if approver is None:
-                failure = ("infra", "approval needed but no approver")
-            else:
-                asked = time.monotonic()
-                decision: ApprovalDecision | None = None
-                try:
-                    decision = await _ask(approver, call, approval_limit_s)
-                except (KeyboardInterrupt, asyncio.CancelledError) as exc:
-                    # Ctrl-C at the prompt rejects: the model budget is spent, so
-                    # the run still gets its record and the issue its one comment.
-                    decision = APPROVAL_CANCELLED
-                    cancelled = _outer_cancellation(exc)
-                except Exception as exc:
+            events: list[Event] = []
+            try:
+                # The cap bounds the whole event loop; on expiry the in-flight work
+                # (a hung model call included) is cancelled. asyncio.timeout turns
+                # only its own expiry into TimeoutError, so an outer cancellation
+                # still propagates (and is recorded below).
+                async with asyncio.timeout(timeout_s) as cap:
+                    events = await log.drain(runner, session.id, message, "w")
+            except TimeoutError as exc:
+                if cap.expired():
+                    failure = ("budget", f"run exceeded {timeout_s:g} s wall clock")
+                else:
                     failure, crash = _classify_or_crash(exc, tracker, session.id)
-                waited_s = time.monotonic() - asked
-                if decision is not None:
-                    failure, crash = await _resume(
-                        runner, session.id, call.id, decision, log, tracker
-                    )
+            except Exception as exc:
+                # Checked before classification: a refusal is no failure of the system.
+                refused = _refusal(exc)
+                if refused is None:
+                    failure, crash = _classify_or_crash(exc, tracker, session.id)
+
+            stopped = failure is not None or refused is not None or crash is not None
+            call = None if stopped else _pending_approval(events)
+            if call is not None:
+                paused = True
+                # Nothing after the gate needs the sandbox; release it before waiting.
+                state = await _session_state(runner, session.id)
+                await _release_sandbox(state.get("sandbox_id"))
+                if approver is None:
+                    failure = ("infra", NO_APPROVER)
+                else:
+                    asked = time.monotonic()
+                    try:
+                        decision = await _ask(approver, call, approval_limit_s)
+                    except (KeyboardInterrupt, asyncio.CancelledError) as exc:
+                        # Ctrl-C at the prompt rejects: the model budget is spent,
+                        # so the run still gets its record and the issue its one
+                        # comment (by report_failure, after the resume).
+                        decision = APPROVAL_CANCELLED
+                        cancelled = _outer_cancellation(exc)
+                    except Exception as exc:
+                        failure, crash = _classify_or_crash(exc, tracker, session.id)
+                    waited_s = time.monotonic() - asked
+                    if decision is not None:
+                        failure, crash = await _resume(
+                            runner, session.id, call.id, decision, log, tracker
+                        )
+        except asyncio.CancelledError as exc:
+            # The run was cancelled (Ctrl-C outside the prompt, or a caller): it
+            # still gets its record, and the cancellation is raised again after it.
+            cancelled = _withdraw(exc)
+            run_cancelled = True
+            reason = RUN_CANCELLED
+            if decision is not None and decision.approved:
+                reason += PR_MAY_BE_OPEN
+            failure = ("infra", reason)
     finally:
         RUN_STALLS.reset(stalls_token)
         state = await _session_state(runner, session.id)
-        # Already released at the gate when the run paused; releasing is idempotent.
-        await _release_sandbox(state.get("sandbox_id"))
+        try:
+            # Already released at the gate when the run paused; releasing is
+            # idempotent.
+            await _release_sandbox(state.get("sandbox_id"))
+        except asyncio.CancelledError as exc:
+            # Cancelled while releasing: the record is still written first.
+            cancelled = _withdraw(exc)
 
     outcome = state.get("outcome") or {}
     if paused and outcome.get("outcome") == "patch_written":
         # deliver_patch's outcome: the run never got past the approval gate.
         outcome = {}
+    # The driver, not the graph's report_failure, produced the outcome: a classified
+    # exception, a crash, or no outcome at all.
+    driver_outcome = refused is None and (
+        failure is not None or crash is not None or not outcome
+    )
     if refused is not None:
         outcome = {
             "outcome": "refused",
@@ -628,7 +706,7 @@ async def _run(
         outcome = {
             "outcome": "failed",
             "failure_kind": "infra",
-            "reason": "workflow ended without an outcome",
+            "reason": NO_OUTCOME,
             "patch_path": None,
         }
 
@@ -659,12 +737,22 @@ async def _run(
     )
     # Written before the comment, so a stalled or cancelled post loses nothing.
     _write_record(run_dir, record)
-    if _driver_comments(issue, record, crashed=crash is not None):
-        if await _comment_on_failure(issue, state, record):
+    # Decision 10A: a live run whose issue was fetched and whose outcome the driver
+    # produced gets the failure comment the graph's report_failure never posted.
+    # Not for a cancelled run, and not when a pull request may have been opened
+    # (it is the reply; the record says it may exist).
+    if (
+        issue.get("mode") == "live"
+        and driver_outcome
+        and not run_cancelled
+        and not record.reason.endswith(PR_MAY_BE_OPEN)
+    ):
+        if await _comment_on_failure(issue, state, record, crash is not None):
             record = record.model_copy(update={"comment_posted": True})
             _write_record(run_dir, record)
-    if cancelled is not None:
-        raise cancelled
     if crash is not None:
-        raise RunCrashed(record) from crash
-    return record
+        # A crash surfaces as the crash, also when the run was cancelled meanwhile.
+        crashed = RunCrashed(record)
+        crashed.__cause__ = crash
+        return record, crashed
+    return record, cancelled

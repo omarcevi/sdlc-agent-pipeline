@@ -20,7 +20,14 @@ CLIENT_BUILDERS = {
     ("app/nodes/finish.py", "open_pr"),
     ("app/nodes/finish.py", "post_failure_comment"),
 }
-TOKEN_NAMES = ("load_token", "GITHUB_TOKEN_FILE")
+# Anything that names the token file or the code that reads it.
+TOKEN_NAMES = (
+    "load_token",
+    "GITHUB_TOKEN_FILE",
+    "TOKEN_FILE_ENV",
+    "DEFAULT_TOKEN_FILE",
+    "issue-to-pr/github-token",  # the default path
+)
 # Variables the gh CLI and other GitHub tools read a token from.
 TOKEN_VARIABLES = {
     "GITHUB_TOKEN",
@@ -80,8 +87,8 @@ class _ClientUses(ast.NodeVisitor):
 
 
 def test_token_is_read_only_in_the_three_nodes():
-    sources = _sources("app")
-    # load_token and the token file variable are named in one module only.
+    sources = _sources("app", "bench")
+    # The token file and its reader are named in one module only.
     for path, text in sources:
         if path != TOKEN_MODULE:
             for name in TOKEN_NAMES:

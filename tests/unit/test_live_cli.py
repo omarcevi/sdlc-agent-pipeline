@@ -18,8 +18,10 @@ from pathlib import Path
 import pytest
 
 from app import live as live_cli
+from app import pr_text
 from app.approval import PROMPT
 from app.models import RoleModels
+from app.schemas import RunRecord
 from tests.fakes import FakeEnvironment, FakeLlm
 from tests.unit.delivery_fakes import REPO
 from tests.unit.live_rest import (
@@ -97,12 +99,18 @@ class Cli:
         return json.loads((self.runs / run_id / "record.json").read_text())
 
 
+@pytest.fixture(autouse=True)
+def _no_dotenv_no_tracing(monkeypatch):
+    """No test here loads the developer's .env (real repositories, logins, cloud
+    project) or turns on Cloud Trace."""
+    monkeypatch.setattr(live_cli, "load_dotenv", lambda: None)
+    monkeypatch.setattr(live_cli, "enable_cloud_trace", lambda: False)
+
+
 @pytest.fixture
 def cli(bench, tmp_path, monkeypatch):
     monkeypatch.setenv("LIVE_REPOS", REPO)
     monkeypatch.setenv("LIVE_ALLOWED_USERS", "owner")
-    monkeypatch.setattr(live_cli, "load_dotenv", lambda: None)
-    monkeypatch.setattr(live_cli, "enable_cloud_trace", lambda: False)
     monkeypatch.setattr(RoleModels, "from_env", classmethod(lambda cls: scripted()))
     server = LiveGitHubRest(source_archive(tmp_path))
     serve(monkeypatch, server)
@@ -154,6 +162,7 @@ def test_refuses_a_repo_not_allowed(cli, monkeypatch, capsys):
     ("extra", "env", "needle"),
     [
         (["--run-id", "../escape"], {}, "--run-id"),
+        (["--run-id", "a" * 65], {}, "--run-id"),
         ([], {"APPROVAL_TIMEOUT_S": "0"}, "APPROVAL_TIMEOUT_S"),
         ([], {"RUN_TIMEOUT_S": "-1"}, "RUN_TIMEOUT_S"),
     ],
@@ -170,6 +179,45 @@ def test_refuses_bad_settings_before_taking_the_lock(
     assert code == 2
     assert needle in one_error_line(capsys)
     assert not (cli.runs / LOCK).exists()
+
+
+def test_refuses_a_run_id_that_was_used_before(cli, monkeypatch, capsys):
+    forbid_runs(monkeypatch)
+    earlier = cli.runs / "taken"
+    earlier.mkdir(parents=True)
+    (earlier / "record.json").write_text("the earlier run's record")
+    code = live_cli.main(
+        [*ARGS, "--run-id", "taken"], stdin=Terminal("approve\n"), stdout=Screen()
+    )
+    assert code == 2
+    assert "already exists" in one_error_line(capsys)
+    assert (earlier / "record.json").read_text() == "the earlier run's record"
+    assert sorted(p.name for p in earlier.iterdir()) == ["record.json"]
+    assert not (cli.runs / LOCK).exists() and cli.server.seen == []
+
+
+def test_the_default_run_id_keeps_its_stamp_in_the_branch_and_its_length():
+    run_id = live_cli.default_run_id("owner/issue-to-pr-demo-widgets", 7)
+    assert re.fullmatch(r"live-\d{8}T\d{6}Z-issue-to-pr-demo-widgets-7", run_id)
+    stamp = run_id.split("-")[1].lower()
+    # The branch keeps 40 characters of the run id: two runs a second apart differ.
+    assert stamp in pr_text.branch_name(7, run_id)
+    long = live_cli.default_run_id("owner/" + "n" * 100, 9_999_999)
+    assert len(long) <= live_cli.MAX_RUN_ID and live_cli._RUN_ID.fullmatch(long)
+
+
+def test_the_summary_escapes_what_it_prints(tmp_path):
+    record = RunRecord(
+        task_id="t",
+        run_id="r",
+        outcome="pr_opened",
+        failure_kind="none",
+        reason="a\x1b[2Jb",
+        pr_url="https://github.com/o/r/pull/5\x1b]8;;evil\x07",
+    )
+    shown = "\n".join(live_cli._summary(record, tmp_path))
+    assert "\x1b" not in shown and "\x07" not in shown
+    assert "pull request: https://github.com/o/r/pull/5\\u{001b}" in shown
 
 
 # --- the lock -----------------------------------------------------------------------
@@ -266,7 +314,7 @@ def test_quiet_prints_no_progress_and_the_default_run_id_names_the_issue(cli):
     shown = out.getvalue()
     assert "pipeline ·" not in shown and "outcome: rejected" in shown
     [run_dir] = [p for p in cli.runs.iterdir() if p.name != ".locks"]
-    assert re.fullmatch(r"live-widgets-7-\d{8}T\d{6}Z", run_dir.name)
+    assert re.fullmatch(r"live-\d{8}T\d{6}Z-widgets-7", run_dir.name)
     assert cli.server.posted_comments() == 1
 
 
@@ -311,7 +359,7 @@ def test_ctrl_c_at_the_prompt_rejects_the_run(cli):
     assert not (cli.runs / LOCK).exists()
 
 
-def test_ctrl_c_before_the_prompt_stops_the_run(cli, capsys):
+def test_ctrl_c_before_the_prompt_stops_the_run_with_a_record(cli, capsys):
     out = Screen("pipeline · issue:", lambda: signal.raise_signal(signal.SIGINT))
     code = live_cli.main(
         [*ARGS, "--run-id", "stopped"], stdin=Terminal("approve\n"), stdout=out
@@ -319,8 +367,72 @@ def test_ctrl_c_before_the_prompt_stops_the_run(cli, capsys):
     assert code == 130
     assert "interrupted" in one_error_line(capsys)
     assert PROMPT not in out.getvalue() and cli.server.pulls == []
+    assert cli.record("stopped")["reason"] == "run cancelled"
+    assert "reason: run cancelled" in out.getvalue()
+    assert cli.server.posted_comments() == 0
     assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
     assert not (cli.runs / LOCK).exists()
+
+
+def _ctrl_c_on(cli: Cli, *requests: tuple[str, str]) -> list[str]:
+    """Press Ctrl-C once on each of `requests` ((method, path suffix), in order)
+    the run sends to GitHub; that request then waits a moment, so the press is
+    handled before the run goes on. Returns the paths it pressed on."""
+    pressed: list[str] = []
+    waiting = list(requests)
+
+    def hook(method: str, path: str) -> float | None:
+        if waiting and method == waiting[0][0] and path.endswith(waiting[0][1]):
+            waiting.pop(0)
+            pressed.append(path)
+            signal.raise_signal(signal.SIGINT)
+            return 0.2
+        return None
+
+    cli.server.on_request = hook
+    return pressed
+
+
+def test_the_first_ctrl_c_while_delivering_only_warns(cli):
+    pressed = _ctrl_c_on(cli, ("POST", "/git/blobs"))
+    out = Screen()
+    code = live_cli.main(
+        [*ARGS, "--run-id", "warned"], stdin=Terminal("approve\n"), stdout=out
+    )
+    assert pressed and code == 0
+    assert live_cli.DELIVERING in out.getvalue()
+    assert cli.record("warned")["outcome"] == "pr_opened"
+    assert len(cli.server.pulls) == 1
+
+
+def test_a_second_ctrl_c_while_delivering_stops_the_run_with_a_record(cli, capsys):
+    pressed = _ctrl_c_on(cli, ("POST", "/git/blobs"), ("POST", "/git/trees"))
+    out = Screen()
+    code = live_cli.main(
+        [*ARGS, "--run-id", "aborted"], stdin=Terminal("approve\n"), stdout=out
+    )
+    assert len(pressed) == 2 and code == 130
+    assert live_cli.DELIVERING in out.getvalue()
+    assert "interrupted" in one_error_line(capsys)
+    reason = "run cancelled; the pull request may have been opened"
+    assert cli.record("aborted")["reason"] == reason
+    assert f"reason: {reason}" in out.getvalue()
+    assert cli.server.posted_comments() == 0
+    assert not (cli.runs / LOCK).exists()
+
+
+def test_ctrl_c_at_the_prompt_then_while_delivering_still_delivers(cli):
+    terminal = OpenTerminal()
+    out = Screen(PROMPT, lambda: signal.raise_signal(signal.SIGINT))
+    pressed = _ctrl_c_on(cli, ("GET", "/issues/7/comments"))  # report_failure's
+    try:
+        code = live_cli.main([*ARGS, "--run-id", "twice"], stdin=terminal, stdout=out)
+    finally:
+        terminal.close()
+    assert pressed and code == 0
+    assert live_cli.DELIVERING in out.getvalue()
+    assert cli.record("twice")["reason"] == "approval cancelled"
+    assert cli.server.posted_comments() == 1
 
 
 def test_a_crash_exits_1_with_the_record(cli, monkeypatch, capsys):

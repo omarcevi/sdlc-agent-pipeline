@@ -1,6 +1,9 @@
-"""The token canary: a whole live run with a sentinel token in the token file. The
-token must reach GitHub in the Authorization header and appear nowhere else."""
+"""The token canary: whole live runs with a sentinel token in the token file, one
+for each code path that reads it (open_pr, report_failure's comment, the driver's
+failure comment). The token must reach GitHub in the Authorization header and
+appear nowhere else."""
 
+import importlib
 import json
 import logging
 import os
@@ -9,12 +12,13 @@ import uuid
 from typing import Any, ClassVar
 
 import httpx
+import pytest
 from google.adk.models.llm_request import LlmRequest
 from google.adk.runners import InMemoryRunner
-from google.adk.telemetry import tracing as adk_tracing
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import Tracer
 from pydantic import PrivateAttr
 
 from app import driver
@@ -22,7 +26,7 @@ from app.approval import ApprovalDecision, ApprovalRequest
 from app.driver import USER_ID, run_pipeline
 from app.github_client import GitHubClient
 from app.models import RoleModels
-from tests.fakes import FakeLlm, json_out
+from tests.fakes import FakeLlm, call, json_out
 from tests.unit.delivery_fakes import REPO
 from tests.unit.live_rest import (
     APPROVE,
@@ -65,8 +69,12 @@ class RecordingRunner(InMemoryRunner):
 
 
 def _request_text(request: LlmRequest) -> str:
+    """System instruction, contents and tool declarations of one model request."""
     parts = [str(request.config.system_instruction or "")]
     parts += [content.model_dump_json() for content in request.contents]
+    for tool in request.config.tools or []:
+        dump = getattr(tool, "model_dump_json", None)
+        parts.append(dump() if dump else repr(tool))
     return "\n".join(parts)
 
 
@@ -84,23 +92,59 @@ def _span_text(span) -> str:
 
 
 def _capture_adk_spans(monkeypatch) -> tuple[InMemorySpanExporter, TracerProvider]:
-    """Point ADK's own tracer (module attribute `tracer`, imported by name into
-    several modules) at an in-memory exporter for this test only."""
+    """Point every ADK module's `tracer` at an in-memory exporter, for this test
+    only. Modules that a run imports lazily are imported first, so they are
+    patched, and restored, with the rest."""
+    for name in ADK_LAZY_TRACING:
+        importlib.import_module(name)
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     ours = provider.get_tracer("gcp.vertex.agent")
-    original = adk_tracing.tracer
+    patched = []
     for name, module in list(sys.modules.items()):
-        if (
-            name.startswith("google.adk")
-            and getattr(module, "tracer", None) is original
+        if name.startswith("google.adk") and isinstance(
+            getattr(module, "tracer", None), Tracer
         ):
             monkeypatch.setattr(module, "tracer", ours)
+            patched.append(name)
+    assert "google.adk.telemetry.node_tracing" in patched
     return exporter, provider
 
 
-async def test_token_canary_end_to_end(bench, tmp_path, monkeypatch, caplog):
+# A run imports these during its first node or agent call.
+ADK_LAZY_TRACING = ("google.adk.telemetry.node_tracing", "google.adk.apps.compaction")
+
+
+def _scripted(case: str) -> RoleModels:
+    if case == "budget":
+        planner = RecordingLlm([call("list_dir", path="."), json_out(PLAN)])
+        return RoleModels(
+            planner=planner, coder=RecordingLlm([]), reviewer=RecordingLlm([])
+        )
+    return RoleModels(
+        planner=RecordingLlm([json_out(PLAN)]),
+        coder=RecordingLlm([json_out(PATCH)]),
+        reviewer=RecordingLlm([json_out(APPROVE)]),
+    )
+
+
+# pr_opened: open_pr's client. rejected: report_failure's comment. budget: the
+# driver's own failure comment (decision 10A). Each reads the token.
+CASES = {
+    "pr_opened": ("pr_opened", True),
+    "rejected": ("rejected", False),
+    "budget": ("failed", True),
+}
+
+
+@pytest.mark.parametrize("case", sorted(CASES))
+async def test_token_canary_end_to_end(
+    bench, tmp_path, monkeypatch, caplog, capfd, case
+):
+    outcome, approves = CASES[case]
+    if case == "budget":
+        monkeypatch.setenv("RUN_BUDGET_USD", "0.001")
     canary = f"ghp_CANARY_{uuid.uuid4().hex}"
     token_file = tmp_path / "secrets" / "github-token"
     token_file.parent.mkdir()
@@ -124,17 +168,13 @@ async def test_token_canary_end_to_end(bench, tmp_path, monkeypatch, caplog):
     RecordingRunner.instances = []
     monkeypatch.setattr(driver, "InMemoryRunner", RecordingRunner)
     exporter, provider = _capture_adk_spans(monkeypatch)
-    models = RoleModels(
-        planner=RecordingLlm([json_out(PLAN)]),
-        coder=RecordingLlm([json_out(PATCH)]),
-        reviewer=RecordingLlm([json_out(APPROVE)]),
-    )
+    models = _scripted(case)
     requests: list[ApprovalRequest] = []
 
     async def approver(request: ApprovalRequest) -> ApprovalDecision:
         requests.append(request)
         return ApprovalDecision(
-            approved=True, approver="octocat", patch_sha256=request.patch_sha256
+            approved=approves, approver="octocat", patch_sha256=request.patch_sha256
         )
 
     caplog.set_level(logging.DEBUG)
@@ -144,7 +184,12 @@ async def test_token_canary_end_to_end(bench, tmp_path, monkeypatch, caplog):
         approver=approver,
         tracer=provider.get_tracer("test"),
     )
-    assert (record.outcome, record.pr_url) == ("pr_opened", PULL_URL)
+    assert record.outcome == outcome
+    if case == "pr_opened":
+        assert record.pr_url == PULL_URL
+    else:
+        # The token-reading comment path ran: one comment is on the issue.
+        assert server.posted_comments() == 1 and record.comment_posted
 
     # Positive control: the token reached GitHub, in the Authorization header.
     assert server.seen
@@ -171,22 +216,28 @@ async def test_token_canary_end_to_end(bench, tmp_path, monkeypatch, caplog):
 
     # Everything the run wrote: events.jsonl, record.json, pr_body.md and the rest.
     run_dir = bench / "runs" / "r-live"
-    for name in ("events.jsonl", "record.json", "pr_body.md"):
+    written = ["events.jsonl", "record.json"]
+    if case != "budget":
+        written.append("pr_body.md")
+    for name in written:
         assert (run_dir / name).is_file()
     for path in run_dir.rglob("*"):
         if path.is_file():
             assert canary.encode() not in path.read_bytes(), path.name
 
-    # Every model request: system instruction and contents.
+    # Every model request: system instruction, contents and tool declarations.
     sent = [
         r for m in (models.planner, models.coder, models.reviewer) for r in m.requests
     ]
-    assert len(sent) == 3
+    assert len(sent) == (1 if case == "budget" else 3)
+    assert any(request.config.tools for request in sent)
     for request in sent:
         assert canary not in _request_text(request)
 
     # The approval request.
-    assert len(requests) == 1 and canary not in requests[0].model_dump_json()
+    assert len(requests) == (0 if case == "budget" else 1)
+    for request in requests:
+        assert canary not in request.model_dump_json()
 
     # The sandbox: every command, written file and uploaded file.
     assert env.commands and env.files
@@ -195,8 +246,11 @@ async def test_token_canary_end_to_end(bench, tmp_path, monkeypatch, caplog):
 
     # Every span and span event, ADK's included.
     spans = exporter.get_finished_spans()
-    assert any(span.name == "issue_to_pr.run" for span in spans)
-    assert len({span.name for span in spans}) > 1  # ADK's spans were captured too
+    names = {span.name for span in spans}
+    assert "issue_to_pr.run" in names
+    # ADK's own spans were captured, the lazily imported node tracing's included.
+    assert any(name.startswith("invoke_node") for name in names), names
+    assert any(name.startswith("invoke_agent") for name in names), names
     for span in spans:
         assert canary not in _span_text(span), span.name
 
@@ -206,6 +260,10 @@ async def test_token_canary_end_to_end(bench, tmp_path, monkeypatch, caplog):
     for log in caplog.records:
         assert canary not in formatter.format(log), log.name
     assert canary not in caplog.text
+
+    # Anything written to the process's stdout or stderr.
+    out, err = capfd.readouterr()
+    assert canary not in out and canary not in err
 
     # The process environment.
     assert not any(canary in value for value in os.environ.values())

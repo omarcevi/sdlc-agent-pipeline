@@ -3,10 +3,13 @@ that answers intake, delivery and comments, plus the sandbox and models such a r
 uses. Shared by the driver, CLI and token canary tests. Not a test module."""
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 from google.adk.workflow import Workflow
+from pydantic import PrivateAttr
 
 from app.environment.base import ExecResult
 from app.github_client import GitHubClient
@@ -47,7 +50,10 @@ class LiveGitHubRest(FakeGitHubRest):
     """FakeGitHubRest plus the reads live intake makes. Records every request with
     its headers and body. `pulls_error` makes opening the pull request answer with
     that (status, message, headers); `stall_after_pull` creates the pull request,
-    then never answers; `stall_comments` never answers a comment request."""
+    then never answers; `stall_comments` never answers a comment request.
+    `on_request(method, path)` is called for every request before it is answered;
+    when it returns a number of seconds, the answer waits that long (so the event
+    loop runs, and handles a signal the hook raised, before the run goes on)."""
 
     def __init__(self, archive: bytes) -> None:
         super().__init__()
@@ -56,6 +62,7 @@ class LiveGitHubRest(FakeGitHubRest):
         self.pulls_error: tuple[int, str, dict[str, str]] | None = None
         self.stall_after_pull = False
         self.stall_comments = False
+        self.on_request: Callable[[str, str], float | None] | None = None
 
     def __call__(self, request: httpx.Request):
         self.seen.append(
@@ -66,6 +73,20 @@ class LiveGitHubRest(FakeGitHubRest):
                 request.content,
             )
         )
+        pause = None
+        if self.on_request is not None:
+            pause = self.on_request(request.method, request.url.path)
+        answer = self._answer(request)
+        if not pause:
+            return answer
+
+        async def paused() -> httpx.Response:
+            await asyncio.sleep(pause)
+            return answer if isinstance(answer, httpx.Response) else await answer
+
+        return paused()
+
+    def _answer(self, request: httpx.Request):
         path, base = request.url.path, f"/repos/{REPO}"
         if request.method == "GET":
             if path == base:
@@ -169,6 +190,25 @@ def use_sandbox(monkeypatch) -> FakeEnvironment:
 
     monkeypatch.setattr(intake, "start_environment", start)
     return env
+
+
+class HangingLlm(FakeLlm):
+    """A model whose call never returns. `called` is set once a call started."""
+
+    _called: asyncio.Event = PrivateAttr(default_factory=asyncio.Event)
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__([], **kwargs)
+
+    @property
+    def called(self) -> asyncio.Event:
+        return self._called
+
+    async def generate_content_async(self, llm_request, stream=False):
+        self._called.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+        yield  # an async generator, like every model
 
 
 def scripted() -> RoleModels:
