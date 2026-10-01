@@ -19,6 +19,12 @@ resource "google_bigquery_dataset" "telemetry_dataset" {
   friendly_name = "${var.project_name} Telemetry"
   location      = var.region
   description   = "Dataset for GenAI telemetry data stored in GCS"
+
+  # Partitions older than 30 days are dropped. The analytics plugin creates
+  # agent_events outside Terraform, so destroy must delete contents.
+  default_partition_expiration_ms = 2592000000
+  delete_contents_on_destroy      = true
+
   depends_on    = [google_project_service.services]
 }
 
@@ -147,8 +153,9 @@ resource "google_bigquery_table" "genai_logs_table" {
   description         = "GenAI inference logs exported directly from Cloud Logging"
 
   time_partitioning {
-    type  = "DAY"
-    field = "timestamp"
+    type          = "DAY"
+    field         = "timestamp"
+    expiration_ms = 2592000000
   }
 
   # Cloud Logging BQ export schema (shared between cicd and single-project).

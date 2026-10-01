@@ -28,13 +28,13 @@ resource "google_vertex_ai_reasoning_engine" "app" {
     identity_type   = "SERVICE_ACCOUNT"
 
     deployment_spec {
-      min_instances         = 1
-      max_instances         = 10
-      container_concurrency = 9
+      min_instances         = 0
+      max_instances         = 1
+      container_concurrency = 4
 
       resource_limits = {
-        cpu    = "4"
-        memory = "8Gi"
+        cpu    = "1"
+        memory = "4Gi"
       }
 
       env {

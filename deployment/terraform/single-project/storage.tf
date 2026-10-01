@@ -24,5 +24,18 @@ resource "google_storage_bucket" "logs_data_bucket" {
   project                     = var.project_id
   uniform_bucket_level_access = true
 
+  # Teardown must remove the bucket with objects in it; data older than 30
+  # days is deleted.
+  force_destroy = true
+
+  lifecycle_rule {
+    condition {
+      age = 30
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
   depends_on = [resource.google_project_service.services]
 }

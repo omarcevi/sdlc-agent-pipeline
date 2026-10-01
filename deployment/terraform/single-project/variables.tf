@@ -55,3 +55,9 @@ variable "agent_framework" {
   type        = string
   default     = "google-adk"
 }
+
+variable "operator_member" {
+  description = "IAM member (for example user:name@example.com) allowed to sign sandbox tokens. Empty: use the email of the credentials running Terraform."
+  type        = string
+  default     = ""
+}

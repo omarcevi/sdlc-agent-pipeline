@@ -21,3 +21,13 @@ output "logs_bucket_name" {
   description = "Logs storage bucket name"
   value       = google_storage_bucket.logs_data_bucket.name
 }
+
+output "sandbox_caller_email" {
+  description = "Service account that signs the tokens used to call sandboxes"
+  value       = google_service_account.sandbox_caller.email
+}
+
+output "sandbox_image_repository" {
+  description = "Artifact Registry repository for the sandbox image"
+  value       = "${var.region}-docker.pkg.dev/${var.project_id}/issue-to-pr"
+}
