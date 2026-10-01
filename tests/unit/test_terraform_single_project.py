@@ -9,6 +9,8 @@ holds the project id).
 import re
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2] / "deployment/terraform/single-project"
 
 
@@ -148,7 +150,7 @@ def test_sandbox_resources_exist():
     assert _has(operator, r"var\.operator_member"), (
         "operator grant must fall back to the variable"
     )
-    assert _has(operator, r"google_client_openid_userinfo\.me\.email"), (
+    assert _has(operator, r"google_client_openid_userinfo\.me\[\*\]\.email"), (
         "operator grant must use the userinfo email"
     )
 
@@ -169,24 +171,34 @@ def test_sandbox_resources_exist():
     ), "sandbox_image_repository value is wrong"
 
 
+def test_userinfo_is_read_only_without_an_operator_member():
+    text = _tf("sandbox.tf")
+    data = _block(text, 'data "google_client_openid_userinfo" "me"')
+    assert _has(data, r'count\s*=\s*var\.operator_member\s*==\s*""\s*\?\s*1\s*:\s*0'), (
+        "userinfo data source must be conditional on operator_member"
+    )
+
+
 # Task 11 deletes the import blocks, and with them this test.
 def test_sandbox_imports_exist():
     text = _tf("sandbox.tf")
-    repo = _block(text, "import")
-    assert _has(repo, r"to\s*=\s*google_artifact_registry_repository\.sandbox\b")
-    assert _has(
-        text,
-        r'id\s*=\s*"projects/\$\{var\.project_id\}/locations/\$\{var\.region\}'
-        r'/repositories/issue-to-pr"',
-    ), "repository import id is wrong"
-    assert _has(text, r"to\s*=\s*google_service_account\.sandbox_caller\b"), (
-        "service account import missing"
-    )
-    assert _has(
-        text,
-        r'id\s*=\s*"projects/\$\{var\.project_id\}/serviceAccounts/'
-        r'sandbox-caller@\$\{var\.project_id\}\.iam\.gserviceaccount\.com"',
-    ), "service account import id is wrong"
+    expected = {
+        "google_artifact_registry_repository.sandbox": (
+            "projects/${var.project_id}/locations/${var.region}/repositories/issue-to-pr"
+        ),
+        "google_service_account.sandbox_caller": (
+            "projects/${var.project_id}/serviceAccounts/"
+            "sandbox-caller@${var.project_id}.iam.gserviceaccount.com"
+        ),
+    }
+    found = {}
+    for m in re.finditer(r"^import\s*\{", text, re.M):
+        body = _block(text[m.start() :], "import")
+        to = re.search(r"to\s*=\s*([\w.]+)", body)
+        ident = re.search(r'id\s*=\s*"([^"]*)"', body)
+        assert to and ident, "import block needs to and id"
+        found[to.group(1)] = ident.group(1)
+    assert found == expected, "import blocks do not match the expected to/id pairs"
 
 
 def test_new_apis_are_enabled():
@@ -201,5 +213,6 @@ def test_no_tf_file_names_the_project():
     m = re.search(r'^\s*project_id\s*=\s*"([^"]+)"', _strip_comments(tfvars), re.M)
     assert m, "project_id not found in vars/env.tfvars"
     project = m.group(1)
-    for path in ROOT.rglob("*.tf"):
-        assert project not in path.read_text(), "a .tf file names the project id"
+    offenders = [p.name for p in ROOT.rglob("*.tf") if project in p.read_text()]
+    if offenders:
+        pytest.fail("a .tf file names the project id", pytrace=False)

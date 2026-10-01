@@ -15,23 +15,23 @@
 # Cloud sandboxes: the image repository and the identity that calls them.
 
 # Email of the credentials running Terraform. Needs the email scope; set
-# var.operator_member when it comes back empty.
-data "google_client_openid_userinfo" "me" {}
+# var.operator_member to skip the read.
+data "google_client_openid_userinfo" "me" {
+  count = var.operator_member == "" ? 1 : 0
+}
 
 resource "google_artifact_registry_repository" "sandbox" {
   project       = var.project_id
   location      = var.region
   repository_id = "issue-to-pr"
   format        = "DOCKER"
-  description   = "Sandbox images"
 
   depends_on = [google_project_service.services]
 }
 
 resource "google_service_account" "sandbox_caller" {
-  project      = var.project_id
-  account_id   = "sandbox-caller"
-  display_name = "Sandbox caller"
+  project     = var.project_id
+  account_id  = "sandbox-caller"
 
   depends_on = [google_project_service.services]
 }
@@ -52,7 +52,7 @@ resource "google_service_account_iam_member" "app_sa_signs_sandbox_tokens" {
 resource "google_service_account_iam_member" "operator_signs_sandbox_tokens" {
   service_account_id = google_service_account.sandbox_caller.name
   role               = "roles/iam.serviceAccountTokenCreator"
-  member             = var.operator_member != "" ? var.operator_member : "user:${data.google_client_openid_userinfo.me.email}"
+  member             = var.operator_member != "" ? var.operator_member : "user:${one(data.google_client_openid_userinfo.me[*].email)}"
 }
 
 # The Week 1 spike created these by hand. The blocks adopt them on the first
