@@ -10,6 +10,7 @@ from google.adk.plugins import ReflectAndRetryModelPlugin
 from app import agent as entrypoint
 from app.budget import BudgetPlugin
 from app.guardrails import GuardrailPlugin
+from app.sandbox_release import SandboxReleasePlugin
 
 BIGQUERY = "google.cloud.bigquery"
 ANALYTICS_PLUGIN = "google.adk.plugins.bigquery_agent_analytics_plugin"
@@ -29,12 +30,13 @@ def test_entry_point_names():
     assert entrypoint.app.root_agent is entrypoint.root_agent
 
 
-def test_app_plugins_are_budget_then_retry_then_guardrails():
+def test_app_plugins_are_budget_retry_guardrails_then_sandbox_release():
     plugins = entrypoint.app.plugins
     assert [type(p) for p in plugins] == [
         BudgetPlugin,
         ReflectAndRetryModelPlugin,
         GuardrailPlugin,
+        SandboxReleasePlugin,
     ]
     assert plugins[1].max_retries == 2
 

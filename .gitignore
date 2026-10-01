@@ -214,3 +214,6 @@ credentials*.json
 
 # pipeline run artifacts
 runs/
+
+# agents-cli eval outputs
+artifacts/

@@ -1,13 +1,15 @@
 metrics_to_run:
-  - custom_response_quality
-
+  - plan_files_recall
+  - plan_quality
+  - pr_description_quality
+  - tool_call_count
+  - multi_turn_trajectory_quality   # managed built-in; exploratory (spike S2)
 custom_metrics:
-  # Default: local LLM-as-judge (see response_quality.py). Runs in-process via
-  # google-genai on Agent Platform (ADC) or Google AI Studio (GEMINI_API_KEY).
-  - name: custom_response_quality
-    custom_function_file: response_quality.py
-  - name: agent_turn_count
-    custom_function: |
-      def evaluate(instance):
-          turns = (instance.get("agent_data") or {}).get("turns", [])
-          return {'score': len(turns)}
+  - name: plan_files_recall
+    custom_function_file: metrics/plan_files_recall.py
+  - name: plan_quality
+    custom_function_file: metrics/plan_quality.py
+  - name: pr_description_quality
+    custom_function_file: metrics/pr_description_quality.py
+  - name: tool_call_count
+    custom_function_file: metrics/tool_call_count.py

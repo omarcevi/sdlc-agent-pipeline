@@ -1,0 +1,109 @@
+{
+  "eval_cases": [
+    {
+      "eval_case_id": "md-001",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "{\"task_id\": \"md-001\", \"run_id\": \"eval-md-001\"}"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "{\"task_id\": \"md-001\", \"category\": \"bug\", \"issue_title\": \"Angle brackets stay in the output for some autolinks\", \"issue_body\": \"Autolinks like `<https://example.com>` work, but with some URLs the angle brackets\\nend up in the HTML. From our install docs:\\n\\n    >>> mdlite.to_html(\\\"Or install from source: <git+https://github.com/acme/tool.git>\\\")\\n    '<p>Or install from source: &lt;git+https://github.com/acme/tool.git&gt;</p>\\\\n'\\n\\nThe same happens with `<x-man-page://ls>` and `<com.example.app:settings>`.\\n\\nCompare `<ftp://files.example.com/a.txt>`: it comes out as\\n`<p>ftp://files.example.com/a.txt</p>`, the address without the brackets. It is not a\\nclickable link, which is fine, because the README says only http, https and mailto\\nget linked.\\n\\nExpected: URLs like the ones above get the same treatment as the ftp one.\\n\", \"solution_files\": [\"mdlite/escape.py\"]}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "md-002",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "{\"task_id\": \"md-002\", \"run_id\": \"eval-md-002\"}"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "{\"task_id\": \"md-002\", \"category\": \"bug\", \"issue_title\": \"Image alt text is escaped twice\", \"issue_body\": \"An `&` in an image's description comes out double-escaped in the `alt` attribute:\\n\\n    >>> mdlite.to_html(\\\"![Tom & Jerry](/img/tj.png)\\\")\\n    '<p><img src=\\\"/img/tj.png\\\" alt=\\\"Tom &amp;amp; Jerry\\\"></p>\\\\n'\\n\\nBrowsers and screen readers then show \\\"Tom &amp; Jerry\\\". `<` and `>` have the same\\nproblem: `![a < b](/img/cmp.png)` gives `alt=\\\"a &amp;lt; b\\\"`.\\n\\nLink text and link titles with the same characters look right, and so does the text\\nthat is shown instead of an image whose URL mdlite refuses to link.\\n\\nExpected: `alt=\\\"Tom &amp; Jerry\\\"`, i.e. the characters escaped once, like everywhere\\nelse.\\n\", \"solution_files\": [\"mdlite/render.py\"]}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "sr-002",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "{\"task_id\": \"sr-002\", \"run_id\": \"eval-sr-002\"}"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "{\"task_id\": \"sr-002\", \"category\": \"bug\", \"issue_title\": \"Supplier file with a broken discount ladder was imported without complaint\", \"issue_body\": \"Our supplier's price list had a typo in the tiers of one product:\\n\\n    sku,name,unit,price,taxable,tiers\\n    GLUE-1,Glue stick,each,2.00,true,5:10;20:5\\n\\n(it should have been `5:5;20:10`). The products import listed no error for that\\nrow, and the product went into the catalog. We only noticed from the invoices:\\nevery quote for 5 or more glue sticks gets 10 % off, 25 of them included, and the\\n20-unit step is never used.\\n\\nI'd expect the import to refuse a row like that and report it, the same way it\\nreports other bad rows, and to import the rest of the file as usual.\\n\", \"solution_files\": [\"stockroom/catalog.py\"]}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "sr-003",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "{\"task_id\": \"sr-003\", \"run_id\": \"eval-sr-003\"}"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "{\"task_id\": \"sr-003\", \"category\": \"feature\", \"issue_title\": \"Load a stocktake count from a CSV file\", \"issue_body\": \"Once a month we count every shelf. The count ends up in a CSV file like this:\\n\\n    sku,counted\\n    PEN-1,97\\n    BOOK-1,24\\n\\nToday I record an adjustment by hand for every line and work out each difference\\nmyself. Please add `store.import_stocktake(path)` that does it for the whole file:\\n\\n- Afterwards, every product listed in the file has exactly the counted number of\\n  units on hand. Products that are not in the file are left alone.\\n- Each change shows up in the ledger as one adjustment with the reason\\n  `stocktake`. If a count already matches, nothing is recorded for that product.\\n- The file follows the products file's conventions: UTF-8, a header row with\\n  exactly the columns `sku` and `counted` in any order, SKUs in any case. A file\\n  that is empty, not UTF-8 or has other columns is refused as a whole with\\n  `CsvFormatError`, and nothing changes.\\n- A bad row is skipped and reported with its line number in the file (the header\\n  is line 1), and the other rows still apply. A row is bad if its SKU is not in\\n  the catalog, if its SKU was already counted on an earlier line, if the count is\\n  not a whole number of 0 or more, or if the count is lower than the units already\\n  reserved for orders.\\n- It returns the rejected rows as `RowError` records (the type the products import\\n  reports), in file order. An empty result means every row was applied.\\n\", \"solution_files\": [\"stockroom/csvio.py\", \"stockroom/store.py\"]}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "sr-005",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "{\"task_id\": \"sr-005\", \"run_id\": \"eval-sr-005\"}"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "{\"task_id\": \"sr-005\", \"category\": \"refactor\", \"issue_title\": \"Refactor: one public way to turn order items into catalog products\", \"issue_body\": \"Quoting and creating an order both start the same way: take the list of\\n`(sku, quantity)` pairs, merge repeated SKUs, check the quantities and look every\\nSKU up in the catalog. Each has its own copy of those steps, and two copies that\\nmust stay in step are easy to break.\\n\\nPlease give this one public home: a method `resolve_items(items)` on the catalog\\n(the object at `store.catalog`). It takes an iterable of `(sku, quantity)` pairs\\nand returns a list of `(product, quantity)` pairs: one per distinct SKU, in order\\nof first appearance, with repeated SKUs (in any case) merged and their quantities\\nadded up, each product being the catalog's current entry for that SKU. Bad input\\nraises the same errors quoting raises today: an invalid quantity, a malformed SKU,\\nor a SKU that is not in the catalog.\\n\\nQuoting and order creation must both go through this method. This is a pure\\nrefactor: nothing a user of the library can observe may change.\\n\", \"solution_files\": [\"stockroom/catalog.py\", \"stockroom/orders.py\", \"stockroom/store.py\"]}"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

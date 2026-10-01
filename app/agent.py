@@ -27,6 +27,7 @@ from app.budget import BudgetPlugin
 from app.guardrails import GuardrailPlugin
 from app.models import RoleModels
 from app.pipeline import build_workflow
+from app.sandbox_release import SandboxReleasePlugin
 
 # Keep in sync with agents-cli-manifest.yaml (root_agent_name: issue_to_pr).
 root_agent = build_workflow(RoleModels.from_env())
@@ -69,7 +70,9 @@ def _analytics_plugins() -> list:
 
 # Plugin order matters: a plugin that returns a value stops the ones after it.
 # Budget first so every model response is costed, then the retry for malformed
-# function calls, then guardrails, then analytics. app/driver.py uses the same order.
+# function calls, then guardrails, then the sandbox release (a run under agents-cli
+# has no driver `finally`), then analytics. app/driver.py uses the same order minus
+# the release plugin, because the driver releases its own sandbox.
 app = App(
     root_agent=root_agent,
     name="app",
@@ -77,6 +80,7 @@ app = App(
         BudgetPlugin(),
         ReflectAndRetryModelPlugin(max_retries=2),
         GuardrailPlugin(),
+        SandboxReleasePlugin(),
         *_analytics_plugins(),
     ],
 )
