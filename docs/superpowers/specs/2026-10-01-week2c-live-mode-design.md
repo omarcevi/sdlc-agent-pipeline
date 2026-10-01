@@ -1,12 +1,12 @@
 # Week 2C design: GitHub live mode and quality evals
 
-Date: 2026-10-01. Status: Draft for owner review — not approved.
+Date: 2026-10-01. Status: Decisions answered by the owner on 2026-10-01 (all recommended options); full design and plan awaiting owner review.
 Parent spec: `2026-09-29-sdlc-agent-pipeline-design.md` (§5.1 graph, §6.4 failures, §7 security, §9.2 quality evals, §11 web UI). Where this document is more specific, it wins for Week 2C once approved; the parent spec's §19 then records the amendments listed in §10.
 Plan: `docs/superpowers/plans/2026-10-01-week2c-live-mode.md`.
 
 ## Decisions for the owner
 
-Each decision lists options and a recommendation. The plan names the tasks each decision blocks. Nothing that spends credits, creates a GitHub organisation or repository, creates a token, or pushes starts before the relevant decisions are answered.
+The owner answered all ten decisions on 2026-10-01 with the recommended options: 1A, 2A, 3A, 4A, 5A, 6A, 7A, 8B, 9A, 10A. Each decision below records the choice; the other options stay as the record of what was considered and why it was rejected. The rest of this document and the plan are written for the chosen options. Steps that spend credits, create a GitHub organisation, repository or token, or push still need the owner's approval at the time (plan, **[OWNER APPROVAL]**).
 
 1. **Where do the public demo repositories live?**
    - A. A new free GitHub organisation used only for this (for example `issue-to-pr-demo`), with repositories `taskcli`, `mdlite` and `stockroom`.
@@ -15,12 +15,16 @@ Each decision lists options and a recommendation. The plan names the tasks each 
 
    Recommendation: A. The token's resource owner then holds nothing but the three demo repositories, the personal profile stays clean, and the names read as a demo. B works too and is one step shorter. C does not fit the pipeline, which treats the repository root as the project root and runs one test suite.
 
+   **Decision: A (owner, 2026-10-01).**
+
 2. **Which GitHub credential does the pipeline use?**
    - A. A fine-grained personal access token. Resource owner: the demo organisation (or account). Repository access: only the three demo repositories. Repository permissions: Contents read and write, Issues read and write, Pull requests read and write, Metadata read; every other permission "No access" (Workflows and Administration included). Expiry: 30 days. Stored in a file outside the repository with mode 600.
    - B. A private GitHub App installed on the three repositories: pull requests show a bot identity and installation tokens last one hour, but it adds a private key to guard and JWT signing code.
    - C. A classic personal access token. Not recommended: its `repo` scope covers every repository the owner can reach.
 
    Recommendation: A, as the parent spec says (§7.6), with one change: the token lives in a file named by `GITHUB_TOKEN_FILE`, not in `.env`. A file read only when a GitHub client is built keeps the token out of the process environment, which every child process inherits (the docker CLI, the agents-cli server, git). The pipeline never uses the `gh` CLI's token, `GITHUB_TOKEN` or `GH_TOKEN`.
+
+   **Decision: A (owner, 2026-10-01).** The token's resource owner is the demo organisation of decision 1A.
 
 3. **How does a person approve the pull request?**
    - A. In the graph: a `human_gate` node yields ADK's `RequestInput`, the run pauses, and the driver resumes it with the person's decision. In Week 2C the owner answers at the terminal; in Week 3 the web UI answers the same request.
@@ -29,6 +33,8 @@ Each decision lists options and a recommendation. The plan names the tasks each 
 
    Recommendation: A. It is what the parent spec drew (§5.1, §11), the installed ADK 2.8.0 supports it (§4.1), the approval is part of the run's events and trace, and Week 3 needs nothing new. B leaves the approval out of the graph and the trace. C publishes the patch before anyone has approved it.
 
+   **Decision: A (owner, 2026-10-01).**
+
 4. **Who can start a live run, and on which issues?**
    - A. Owner only. Runs are started by the owner from the CLI on the owner's machine. The issue must be written by a login listed in `LIVE_ALLOWED_USERS` and carry the `agent-ok` label, added by such a login.
    - B. The owner starts runs, but on issues written by anyone once the owner has labelled them. This needs an extra check that the issue body was not edited after the label was added (GitHub's REST issue object does not say when the body was last edited; the GraphQL `lastEditedAt` field does).
@@ -36,11 +42,15 @@ Each decision lists options and a recommendation. The plan names the tasks each 
 
    Recommendation: A for Week 2C. Issue text from strangers is the main prompt-injection path, and A removes it while the other defences are new. B can follow after a red-team pass. C stays a stretch goal.
 
+   **Decision: A (owner, 2026-10-01).**
+
 5. **How does the pipeline identify itself in the pull requests and comments it writes?**
    - A. Openly. Pull request titles start with `[issue-to-pr]`. Pull request bodies and issue comments end with "Opened by the issue-to-pr pipeline (run `<run-id>`, model `<model>`), approved by @<login>". Commits carry the author `issue-to-pr pipeline <issue-to-pr@example.invalid>`.
    - B. As the owner: the owner's name on commits and no pipeline marker.
 
    Recommendation: A. AGENTS.md hard rule 1 forbids crediting AI tools for work in this repository. The demo pull requests are the product's own output, and saying which system opened them is the honest description. The owner should confirm this reading of rule 1 before Task 3 is built.
+
+   **Decision: A (owner, 2026-10-01).** Plan Task 3 adds one clarifying sentence to hard rule 1 (the pipeline's own demo pull requests, comments and commits name the pipeline openly; that is the product's identity, not AI attribution of work in this repository). The owner reviews its exact wording before it is committed.
 
 6. **Which bench tasks get public `demo/<task-id>` branches?**
    - A. All 15 dev tasks. An issue is created only when a task is about to be shown.
@@ -49,11 +59,15 @@ Each decision lists options and a recommendation. The plan names the tasks each 
    Under both options, held-out tasks are never published, and neither are `solution/`, `shortcut/` or `hidden_tests/` of any task.
    Recommendation: A. The branches cost nothing, any dev task can be shown, and the issue list stays short.
 
+   **Decision: A (owner, 2026-10-01).**
+
 7. **When do the issue-text delimiters (parent spec §7.7, layer 2) go in?**
    - A. Now, in Task 2, for bench and live mode alike. Every agent sees the issue only between `<issue>` and `</issue>`, with those tags escaped inside the text, and the planner's user message no longer carries the raw issue as JSON. Benchmark numbers after this change belong to a new prompt version and are not pooled with the Week 2A and 2B numbers.
    - B. Later, together with any prompt tuning, before the final benchmark runs. Until then live mode relies on owner-only issues (decision 4A).
 
    Recommendation: A. The change is small, the parent spec promised it, both systems get it equally, and no benchmark run is planned between now and the final runs that would need the old prompts.
+
+   **Decision: A (owner, 2026-10-01).**
 
 8. **How many reviewer probes?**
    - A. The two tempting shortcuts only (`md-002`, `sr-002`), as the parent spec wrote: a catch rate over two patches.
@@ -62,6 +76,8 @@ Each decision lists options and a recommendation. The plan names the tasks each 
 
    Recommendation: B. Two patches cannot support a rate; without good patches as controls, a reviewer that rejects everything would score 100%; and real agent mistakes are the most realistic bad patches. C would measure the reviewer against a model's idea of a bad patch.
 
+   **Decision: B (owner, 2026-10-01).**
+
 9. **Which eval metrics, and what budget?**
    - A. `agents-cli eval` on 5 dev tasks with `plan_files_recall`, `plan_quality`, `pr_description_quality` and `tool_call_count`, plus the built-in `multi_turn_trajectory_quality` marked exploratory; reviewer probes with 3 repeats; the review audit of the 2B runs; one round each (a second only if a harness bug voids the first); no prompt tuning in Week 2C. Cap for all of Week 2C, live runs included: $30.
    - B. Leaner: no built-in managed metric and no PR description judge; probes run once; cap $15.
@@ -69,11 +85,15 @@ Each decision lists options and a recommendation. The plan names the tasks each 
 
    Recommendation: A. Week 2C builds the instruments; prompt tuning is a separate step whose effect the benchmark measures.
 
+   **Decision: A (owner, 2026-10-01).** The Week 2C cap is $30.
+
 10. **May the driver post a failure comment when a live run ends on a budget cap, an infra error or a crash?** In those cases the graph's `report_failure` node never runs, because the run is aborted by an exception.
     - A. Yes, through the same function `report_failure` uses (`post_failure_comment`), so the token is still read only in the code of the three nodes. AGENTS.md hard rule 2 gains one clause saying so.
     - B. No. Only the graph's `report_failure` comments; an issue whose run hit a cap or crashed gets no reply.
 
     Recommendation: A. A public issue left silent after a run looks broken. The comment says what happened and nothing more.
+
+    **Decision: A (owner, 2026-10-01).**
 
 ## 1. Why
 
@@ -89,8 +109,8 @@ Each decision lists options and a recommendation. The plan names the tasks each 
 4. Every `demo/<task-id>` branch's tree is byte-identical to `bench/repos/<repo>` plus the task's `plant/` (checked by git tree hash), and a live run's patch can be scored with the same hidden tests as a bench run.
 5. `agents-cli eval run` produces plan and pull request description metrics for 5 dev tasks; the reviewer probes give a catch rate and a false-alarm rate with their sample sizes; the review audit gives a confusion matrix for the reviewer's verdicts in the Week 2B comparison runs.
 6. No held-out task is published, put in an eval dataset or a probe, audited, or opened.
-7. Bench mode is unchanged: same graph edges, same outcomes, existing tests pass. The only prompt change is decision 7's, if chosen.
-8. Week 2C spends at most the cap of decision 9.
+7. Bench mode is unchanged: same graph edges, same outcomes, existing tests pass. The only prompt change is the issue-text delimiters (decision 7A).
+8. Week 2C spends at most $30 (decision 9A).
 
 ## 3. Live mode
 
@@ -133,7 +153,7 @@ Existing bench requests (`{"task_id": ..., "run_id": ...}`) stay valid. `IssueTa
 
 ### 3.3 GitHub client and the token
 
-**Where the token is read.** `app/github_client.py` holds the only code that reads the token: `load_token()` reads the file named by `GITHUB_TOKEN_FILE` (default `~/.config/issue-to-pr/github-token`) and refuses a file that is missing, empty, or readable by group or others. `GitHubClient.from_token_file()` is called only inside `fetch_live_issue` (the live graph's `fetch_issue` node), `open_pr` and `post_failure_comment` (used by `report_failure`, and by the driver under decision 10A). A static test pins these call sites.
+**Where the token is read.** `app/github_client.py` holds the only code that reads the token: `load_token()` reads the file named by `GITHUB_TOKEN_FILE` (default `~/.config/issue-to-pr/github-token`) and refuses a file that is missing, empty, or readable by group or others. `GitHubClient.from_token_file()` is called only inside `fetch_live_issue` (the live graph's `fetch_issue` node), `open_pr` and `post_failure_comment` (used by `report_failure`, and by the driver for live runs that end on a cap, an infra error or a crash: decision 10A). A static test pins these call sites.
 
 **How it stays out of everything else.**
 
@@ -190,7 +210,7 @@ There is no clone and no `git push`. The parent spec's §7.4 step 3 ("an orchest
 
 ### 3.7 `report_failure` in live mode
 
-Bench behaviour is unchanged. In live mode it also posts one comment on the issue (marker `kind=failure`) for: a decline by the planner, an agent failure (tests or review rounds exhausted), and a rejected or timed-out approval (outcome `rejected`, new, failure kind `none`). Under decision 10A the driver posts the same kind of comment through `post_failure_comment` for budget, infra and crashed live runs, once the issue has been fetched. A comment that cannot be posted, after the client's retries, is logged and recorded as `comment_posted: false`; it never changes the run's outcome, because the outcome is what happened to the issue, not to the comment. A refused run (§3.4) never comments: a stranger's unlabelled issue should not learn that the pipeline exists.
+Bench behaviour is unchanged. In live mode it also posts one comment on the issue (marker `kind=failure`) for: a decline by the planner, an agent failure (tests or review rounds exhausted), and a rejected or timed-out approval (outcome `rejected`, new, failure kind `none`). The driver (decision 10A) posts the same kind of comment through `post_failure_comment` for budget, infra and crashed live runs, once the issue has been fetched. A comment that cannot be posted, after the client's retries, is logged and recorded as `comment_posted: false`; it never changes the run's outcome, because the outcome is what happened to the issue, not to the comment. A refused run (§3.4) never comments: a stranger's unlabelled issue should not learn that the pipeline exists.
 
 ### 3.8 What gets published
 
@@ -234,7 +254,7 @@ The design:
 
 The in-memory session means the process must stay alive while it waits; that is fine for a terminal run in Week 2C. Waiting across process restarts, for the Week 3 web UI on Agent Runtime, needs a persistent session service and is Week 3's concern.
 
-The first test of the gate task pins ADK's behaviour on a minimal workflow: after the resume, no node that completed before the gate runs again (model call count and sandbox starts unchanged). If that test cannot be made to pass, the task stops and reports, and option 3B is the fallback.
+The first test of the gate task pins ADK's behaviour on a minimal workflow: after the resume, no node that completed before the gate runs again (model call count and sandbox starts unchanged). If that test cannot be made to pass, the task stops and reports, and the rejected option 3B is the fallback, which would need the owner's approval.
 
 ### 4.3 What the approver sees, and what the approval binds to
 
@@ -248,18 +268,18 @@ The decision carries the hash of the patch the approver was shown, and `open_pr`
 |---|---|
 | Tool confirmation (`FunctionTool(require_confirmation=...)`, `tool_context.request_confirmation`) | Confirms an LLM's tool call. `open_pr` is a deterministic function node, and making it a model tool would break hard rule 4. |
 | `LongRunningFunctionTool` | Same: a model tool. |
-| Out-of-band `approve <run-id>` command (decision 3B) | Works, but the approval is outside the graph and the trace, and the Week 3 UI would need a second mechanism. |
-| Approval on GitHub (decision 3C) | The patch would be public before approval, and the run would have to poll GitHub. |
+| Out-of-band `approve <run-id>` command (rejected option 3B) | Works, but the approval is outside the graph and the trace, and the Week 3 UI would need a second mechanism. |
+| Approval on GitHub (rejected option 3C) | The patch would be public before approval, and the run would have to poll GitHub. |
 | Opening a draft pull request and treating "ready for review" as approval | A draft pull request is already published. |
 
 ## 5. Public demo repositories
 
 ### 5.1 Layout
 
-Per repository (`taskcli`, `mdlite`, `stockroom`; hosting per decision 1):
+Per repository (`taskcli`, `mdlite`, `stockroom`, in a new GitHub organisation used only for the demo: decision 1A):
 
 - `main`: `bench/repos/<repo>` exactly. The repository description explains the demo: planted bugs live on `demo/*` branches, and pull requests are opened by the pipeline after a person approves them.
-- `demo/<task-id>`, one per dev task of that repository (decision 6): a single commit with no parent, whose tree is exactly `bench/repos/<repo>` plus the task's `plant/`, as `materialize(task)` builds it. With no parent, the public history does not show the bug being introduced.
+- `demo/<task-id>`, one per dev task of that repository (all 15 dev tasks across the three repositories: decision 6A): a single commit with no parent, whose tree is exactly `bench/repos/<repo>` plus the task's `plant/`, as `materialize(task)` builds it. With no parent, the public history does not show the bug being introduced.
 - Nothing else in the tree: no extra README, no CI workflow. The agents must see the same files in a live run as in a bench run, or the two are not comparable and the live patch cannot be scored. (CI on the demo repositories would need `.github/` in every demo branch; out of scope.)
 - Issues are created one at a time, for the runs actually shown, with the task's `title` and `body` verbatim, and the `agent-ok` label added by the owner.
 - Recommended hardening, in the repository settings: a ruleset that blocks deletion, force pushes and updates on `main` and `demo/**`, and Actions disabled. The pipeline creates only `issue-to-pr/*` branches anyway (§3.3).
@@ -304,7 +324,7 @@ Held-out tasks in any form; `hidden_tests/`, `solution/` and `shortcut/` of any 
 
 ### 6.2 `agents-cli eval`: real runs of the pipeline
 
-- **Dataset** `tests/eval/datasets/pipeline-dev.json`, built by `uv run python -m bench.evalsets --write` and checked by `--check` in a unit test. Five dev tasks (decision 9): `md-001` (bug, distant symptom), `md-002` and `sr-002` (bugs, tempting), `sr-003` (feature, multi-file), `sr-005` (refactor, regression risk). No trap: a plan metric on a trap means nothing, and declining is scored by the benchmark.
+- **Dataset** `tests/eval/datasets/pipeline-dev.json`, built by `uv run python -m bench.evalsets --write` and checked by `--check` in a unit test. Five dev tasks (decision 9A): `md-001` (bug, distant symptom), `md-002` and `sr-002` (bugs, tempting), `sr-003` (feature, multi-file), `sr-005` (refactor, regression risk). No trap: a plan metric on a trap means nothing, and declining is scored by the benchmark.
 - **Case shape.** `prompt` is the `RunRequest` JSON `{"task_id": "<id>", "run_id": "eval-<id>"}`. `reference` (which `eval generate` carries onto the trace) holds JSON with `task_id`, `category`, `issue_title`, `issue_body` and `solution_files`: the `.py` modules under the task's `solution/` that are not test files, as names only. The agents never see `reference`. No hidden test file, test name or solution content goes into a dataset.
 - **Metrics**, one self-contained file each under `tests/eval/metrics/`. agents-cli inlines a `custom_function_file` and runs it with `exec` (`eval/eval_utils.py`), so a metric may import only the standard library and `google.genai`, and cannot import a sibling or use `__file__`.
   - `plan_files_recall`: the planner's answer is the first `set_model_response` call in the trace whose arguments have `actionable`. Score: the share of `solution_files` named in `files_to_inspect` after path normalisation. No plan in the trace scores 0, with that as the explanation.
@@ -375,7 +395,7 @@ pytest never asserts on real model output (AGENTS.md). A `tests/conftest.py` fix
 | A stranger triggers runs and spends the budget | No webhook or server endpoint starts live runs in 2C: only the owner's CLI. The repository allowlist, owner-authored issues, the label actor check, the per-run caps and one run per issue at a time. |
 | An API caller asks the agents-cli server for a live run | The served bench graph refuses `mode="live"` before reading the token (§3.1). |
 | The pipeline damages the demo branches | It can only create `issue-to-pr/*` refs, never force; rulesets protect `main` and `demo/**`; `bench.score_run` checks the tree before scoring. |
-| The issue body is edited after the owner labelled it | Not possible under 4A (the author is the owner). Option 4B must add the `lastEditedAt` check. |
+| The issue body is edited after the owner labelled it | Not possible with owner-only issues (4A: the author is the owner). The rejected option 4B, if adopted later, must add the `lastEditedAt` check. |
 
 ## 8. Cost
 
@@ -388,14 +408,14 @@ pytest never asserts on real model output (AGENTS.md). A `tests/conftest.py` fix
 | GitHub organisation, public repositories, token | $0 |
 | **Total, one round each** | **about $4–12** |
 
-The cap in decision 9 covers a possible second round. The controller stops and reports when the running total passes it. Every paid step is marked **[OWNER APPROVAL]** in the plan. The per-run caps ($1.00, 75 tool calls, 1,500 s), the sandbox TTL and the loop bounds are unchanged. Probes and evals use the `flash` preset only; the Pro reviewer hang is still undiagnosed.
+The $30 cap (decision 9A) covers a possible second round. The controller stops and reports when the running total passes it. Every paid step is marked **[OWNER APPROVAL]** in the plan. The per-run caps ($1.00, 75 tool calls, 1,500 s), the sandbox TTL and the loop bounds are unchanged. Probes and evals use the `flash` preset only; the Pro reviewer hang is still undiagnosed.
 
 ## 9. Changes to existing behaviour
 
 - The bench graph's edges are unchanged. `deliver_patch` now also writes `pr_body.md`, stores `patch_sha256` in state, and adds the pull request body after the first line of its message. `bench.progress` already prints only a message's first line.
 - `app/agent.py` gains `SandboxReleasePlugin`, after `GuardrailPlugin`. The driver's plugin list is unchanged; it releases sandboxes itself.
 - `RunRequest`, `IssueTask` and `RunRecord` gain optional fields whose defaults keep existing JSON valid. `Outcome` gains `pr_opened`, `rejected` and `refused`; bench rows never carry them.
-- Prompts change only under decision 7A: all four agents (planner, coder, reviewer, solo) see the issue between delimiters, and the planner's and solo agent's first user message becomes a fixed sentence instead of the issue as JSON (which also removes the run id from it, a Week 2A ledger item).
+- The only prompt change is decision 7A's: all four agents (planner, coder, reviewer, solo) see the issue between delimiters, and the planner's and solo agent's first user message becomes a fixed sentence instead of the issue as JSON (which also removes the run id from it, a Week 2A ledger item).
 - Week 2A and 2B results and reports are untouched.
 
 ## 10. Spec amendments this design asks for
@@ -405,21 +425,21 @@ Recorded in the parent spec's §19 when the work lands:
 1. §5.1: the live graph adds `deliver_patch → human_gate → route_approval → {open_pr, report_failure}`; the bench graph is unchanged; the live graph is built only by `app.live`.
 2. §6.1 and §6.4: outcomes `pr_opened`, `rejected` (a person said no, or the approval timed out) and `refused` (live preconditions not met; no model call, no GitHub write).
 3. §7.4 step 3: `open_pr` builds the commit through the Git Data API from the pinned base; there is no clone and no push.
-4. §7.6: the token is read from a mode-600 file named by `GITHUB_TOKEN_FILE`, never from the environment; the permissions are listed in decision 2.
-5. §7.7: layer 1 is owner-authored issues plus the label actor check (decision 4); layer 2 is implemented per decision 7.
+4. §7.6: the token is read from a mode-600 file named by `GITHUB_TOKEN_FILE`, never from the environment; the permissions are listed in decision 2A.
+5. §7.7: layer 1 is owner-authored issues plus the label actor check (decision 4A); layer 2, the delimiters, is implemented now (decision 7A).
 6. §9.1: public demo branches are single commits whose tree equals base plus plant, checked by tree hash; live runs on them are scored by `bench.score_run`.
 7. §9.2: the eval cases, the metric set, the reviewer probes in the bench harness with good controls and a false-alarm rate, and the review audit (§6).
-8. AGENTS.md hard rule 2 gains the `post_failure_comment` clause under decision 10A; hard rule 5 gains: held-out tasks are never published, put in an eval dataset or probe, or audited.
+8. AGENTS.md hard rule 1 gains one clarifying sentence (decision 5A): the pipeline's own demo pull requests, comments and commits name the pipeline openly; that is the product's identity, not AI attribution of work in this repository. The owner reviews its exact wording. Hard rule 2 gains the `post_failure_comment` clause (decision 10A). Hard rule 5 gains: held-out tasks are never published, put in an eval dataset or probe, or audited.
 
 ## 11. Out of scope
 
-Week 3: the Agent Runtime sandbox backend, deployment to Agent Runtime, Secret Manager for the token, persistent sessions for approvals across restarts, the web UI (replay and live approval), CI for this repository, publishing this repository. Not planned: the label trigger and Pub/Sub (stretch), a GitHub App, automatic merging, CI on the demo repositories, live mode for the single-agent baseline, issues from non-allowlisted authors (decision 4B), prompt tuning (decision 9), the held-out run, the Pro reviewer hang.
+Week 3: the Agent Runtime sandbox backend, deployment to Agent Runtime, Secret Manager for the token, persistent sessions for approvals across restarts, the web UI (replay and live approval), CI for this repository, publishing this repository. Not planned: the label trigger and Pub/Sub (stretch), a GitHub App, automatic merging, CI on the demo repositories, live mode for the single-agent baseline, issues from non-allowlisted authors (the rejected option 4B), prompt tuning (decision 9A), the held-out run, the Pro reviewer hang.
 
 ## 12. Risks
 
 | Risk | Mitigation |
 |---|---|
-| ADK's resume does not behave as the source reads (completed nodes run again, or the decision is not delivered) | The gate task's first test pins the behaviour on a minimal workflow before anything is built on it; the fallback is decision 3B. |
+| ADK's resume does not behave as the source reads (completed nodes run again, or the decision is not delivered) | The gate task's first test pins the behaviour on a minimal workflow before anything is built on it; the fallback is the rejected option 3B, with the owner's approval. |
 | A GitHub API detail differs from what the client expects (fine-grained token permissions for the Git Data API, redirect handling, secondary limits) | The client is tested against recorded response shapes; the first live run is a cheap one; an error is infra or config, never a silent success. |
 | A demo branch drifts from the bench task | Rulesets, `bench.demo verify` after every push, and the tree check in `bench.score_run`. |
 | Public demo repositories attract issues from strangers | Ignored by design (4A); the repository description says runs are started by the owner. |
