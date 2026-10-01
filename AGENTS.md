@@ -75,6 +75,7 @@ Read the spec before making architectural changes. If the code and the spec disa
 | `LIVE_REPOS` | unset | Comma-separated `owner/name` the live intake may work on (case-insensitive). Unset or empty: live mode is off, and a live request is refused before any request to the remote service |
 | `LIVE_ALLOWED_USERS` | unset | Comma-separated logins (case-insensitive) that may author a live issue and add its `agent-ok` label. Unset or empty: every live issue is refused |
 | `BQ_ANALYTICS_ENABLED` | unset | `1` enables the BigQuery analytics plugin and creates its dataset (also needs `GOOGLE_CLOUD_PROJECT`). Owner approval required |
+| `REPLAY_REDACT` | unset | Comma-separated exact values (such as the project id and project number) that `bench/replay_check.py` refuses in replay files, in addition to `GOOGLE_CLOUD_PROJECT`. Set as an Actions secret at go-live |
 
 ## Workflow
 
