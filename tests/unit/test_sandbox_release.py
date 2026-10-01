@@ -183,3 +183,21 @@ async def test_releases_the_sandbox_of_a_real_runner_run(bench, monkeypatch):
         FakeLlm([]),
     )
     assert bad_env.closed
+
+
+async def test_runs_whose_end_is_never_seen_do_not_leak_entries(monkeypatch):
+    from app import sandbox_release
+
+    monkeypatch.setattr(sandbox_release, "MAX_TRACKED_RUNS", 5)
+    plugin = SandboxReleasePlugin()
+    for n in range(20):  # a run that never ends: no after_run, no error callback
+        context = ctx()
+        context.session.id = f"s{n}"
+        await plugin.before_run_callback(invocation_context=context)
+    assert len(plugin._inherited) == 5
+    assert list(plugin._inherited) == [f"s{n}" for n in range(15, 20)]
+    # The same session starting again replaces its entry instead of adding one.
+    again = ctx()
+    again.session.id = "s19"
+    await plugin.before_run_callback(invocation_context=again)
+    assert len(plugin._inherited) == 5

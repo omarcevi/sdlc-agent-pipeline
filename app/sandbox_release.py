@@ -19,6 +19,7 @@ from google.adk.plugins.base_plugin import BasePlugin
 from app.environment import registry
 
 logger = logging.getLogger(__name__)
+MAX_TRACKED_RUNS = 1024
 
 
 class SandboxReleasePlugin(BasePlugin):
@@ -29,7 +30,13 @@ class SandboxReleasePlugin(BasePlugin):
 
     async def before_run_callback(self, *, invocation_context: Any) -> None:
         session = invocation_context.session
+        # A session that starts again replaces its own entry. Entries of runs whose
+        # end was never seen are bounded too: the oldest go first, and a run that
+        # lost its entry releases nothing (the sandbox's TTL cleans it up).
+        self._inherited.pop(session.id, None)
         self._inherited[session.id] = session.state.get("sandbox_id")
+        while len(self._inherited) > MAX_TRACKED_RUNS:
+            del self._inherited[next(iter(self._inherited))]
         return None
 
     async def after_run_callback(self, *, invocation_context: Any) -> None:
