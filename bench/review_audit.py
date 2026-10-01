@@ -18,7 +18,7 @@ import os
 import re
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -65,11 +65,13 @@ def _sha(text: str) -> str:
 
 
 def _diff_text(delta: dict) -> str | None:
-    if isinstance(delta.get("diff_text"), str):
-        return delta["diff_text"]
+    """The full diff. `diff_text` is cut to 20,000 characters for the prompt, so it
+    is only a fallback."""
     diff = delta.get("diff")
     if isinstance(diff, dict) and isinstance(diff.get("unified_diff"), str):
         return diff["unified_diff"]
+    if isinstance(delta.get("diff_text"), str):
+        return delta["diff_text"]
     return None
 
 
@@ -119,15 +121,21 @@ def pair_reviews(events_path: Path) -> list[tuple[str, ReviewedDiff]]:
     return pairs
 
 
-def _real_score(task: TaskSpec, patch: str) -> bool:
-    return bool(asyncio.run(check_patch(task, patch)).hidden_passes)
+def _real_score(task: TaskSpec, patch: str) -> bool | None:
+    """True or False from the hidden tests. None when the diff does not apply or fails
+    the visible tests here: the run only sent it to the reviewer after they passed, so
+    the audit disagrees with the run and the diff cannot be judged."""
+    checks = asyncio.run(check_patch(task, patch))
+    if not checks.applies or not checks.visible_passes:
+        return None
+    return bool(checks.hidden_passes)
 
 
 def audit(
     rows: list[dict],
     runs_dir: Path,
     *,
-    score: Callable[[TaskSpec, str], bool] = _real_score,
+    score: Callable[[TaskSpec, str], bool | None] = _real_score,
 ) -> AuditSummary:
     summary = AuditSummary()
     scores: dict[tuple[str, str], bool | None] = {}
@@ -149,11 +157,15 @@ def audit(
             summary.skipped_no_events += 1
             continue
         counts = summary.by_task.setdefault(task_id, Counts())
-        for patch, reviewed in pair_reviews(events):
+        for patch, found in pair_reviews(events):
+            reviewed = replace(
+                found, run_id=str(row.get("run_id", "")), task_id=task_id
+            )
             key = (task_id, reviewed.diff_sha256)
             if key not in scores:
                 try:
-                    scores[key] = bool(score(task, patch))
+                    result = score(task, patch)
+                    scores[key] = None if result is None else bool(result)
                 except Exception:  # a message could quote patch or test text
                     scores[key] = None
             good = scores[key]
@@ -225,13 +237,15 @@ def render_report(summary: AuditSummary, title: str = "Review audit") -> str:
     if good:
         lines.append(f"- Good diffs sent back: {t.good_sent_back} of {good}.")
     if t.unscored:
-        lines.append(f"- Rounds whose diff could not be scored: {t.unscored}.")
-    skipped = summary.skipped_not_multi + summary.skipped_not_dev
+        lines.append(
+            f"- Rounds left unscored: {t.unscored}. The diff did not apply or failed "
+            "the visible tests in the audit sandbox, or scoring failed, so it "
+            "cannot be called good or bad."
+        )
     lines.append(
         f"- Rows skipped: {summary.skipped_not_multi} not multi-agent, "
         f"{summary.skipped_not_dev} not in the dev split (not opened), "
-        f"{summary.skipped_no_events} without an event log. ({skipped} excluded "
-        "by system or split.)"
+        f"{summary.skipped_no_events} without an event log."
     )
     lines += [
         "",
@@ -239,8 +253,9 @@ def render_report(summary: AuditSummary, title: str = "Review audit") -> str:
         "",
         "- A catch counts the verdict, not its reasons: the reviewer may have sent a "
         "bad diff back for the wrong reason.",
-        "- Only diffs that passed the visible tests reach the reviewer, so the bad "
-        "diffs here are the ones the visible tests did not catch.",
+        '- Only diffs that passed the visible tests reach the reviewer. "Bad" '
+        'means passed the visible tests and failed the hidden ones; "good" means '
+        "passed both.",
         "",
     ]
     return "\n".join(lines)

@@ -1,11 +1,11 @@
 import hashlib
-import json
 from pathlib import Path
 
 from google.adk.events import Event, EventActions
 from google.genai import types
 
 from bench import review_audit
+from bench.probes import PatchChecks
 from bench.review_audit import ReviewedDiff, audit, pair_reviews, render_report
 
 SECRET = "SECRET_PATCH_LINE_do_not_print"
@@ -175,14 +175,108 @@ def test_report_never_contains_patch_text(tmp_path, monkeypatch):
     fake_dev_task(monkeypatch)
     write_events(
         tmp_path / "r1" / "events.jsonl",
-        [
-            diff_event(f"+{SECRET}"),
-            review_event("approve"),
-        ],
+        [diff_event(f"+{SECRET}"), review_event("approve")],
     )
     summary = audit([row()], tmp_path, score=lambda t, p: False)
     report = render_report(summary)
     assert SECRET not in report
     assert "bad approved" in report
     assert "verdict, not its reasons" in report
-    assert json.dumps(summary.total.rounds) in report
+    assert "excluded by system or split" not in report
+
+
+def test_the_full_diff_is_scored_not_the_truncated_text(tmp_path):
+    full = "full diff " * 5
+    path = tmp_path / "events.jsonl"
+    write_events(
+        path,
+        [
+            Event(
+                author="issue_to_pr",
+                actions=EventActions(
+                    state_delta={
+                        "diff": {"unified_diff": full},
+                        "diff_text": "truncated...",
+                    }
+                ),
+            ),
+            review_event("approve"),
+        ],
+    )
+    ((text, reviewed),) = pair_reviews(path)
+    assert text == full
+    assert reviewed.diff_sha256 == sha(full)
+
+
+def test_a_diff_the_audit_cannot_reproduce_is_unscored(tmp_path, monkeypatch):
+    fake_dev_task(monkeypatch)
+    write_events(
+        tmp_path / "r1" / "events.jsonl",
+        [diff_event("d"), review_event("approve")],
+    )
+
+    async def fake_check(task, patch, **kw):
+        return PatchChecks(True, False, None)
+
+    monkeypatch.setattr(review_audit, "check_patch", fake_check)
+    summary = audit([row()], tmp_path)
+    t = summary.total
+    assert t.unscored == 1 and t.rounds == 1
+    assert t.bad_approved == t.bad_caught == 0
+    assert "unscored" in render_report(summary)
+
+
+def test_hidden_tests_alone_decide_good_and_bad(tmp_path, monkeypatch):
+    fake_dev_task(monkeypatch)
+    write_events(
+        tmp_path / "r1" / "events.jsonl",
+        [diff_event("d"), review_event("approve")],
+    )
+
+    async def fake_check(task, patch, **kw):
+        return PatchChecks(True, True, True)
+
+    monkeypatch.setattr(review_audit, "check_patch", fake_check)
+    assert audit([row()], tmp_path).total.good_approved == 1
+
+
+def test_audit_fills_run_and_task_ids(tmp_path, monkeypatch):
+    fake_dev_task(monkeypatch)
+    write_events(
+        tmp_path / "r7" / "events.jsonl", [diff_event("d"), review_event("approve")]
+    )
+    seen = []
+    real = review_audit.pair_reviews
+
+    def spy(path):
+        out = real(path)
+        seen.extend(out)
+        return out
+
+    monkeypatch.setattr(review_audit, "pair_reviews", spy)
+    audit([row(run_id="r7")], tmp_path, score=lambda t, p: True)
+    assert seen[0][1].run_id == "" and seen[0][1].task_id == ""
+    # The ids are set on the record the audit works with.
+    captured = []
+    monkeypatch.setattr(
+        review_audit, "replace", lambda f, **kw: captured.append(kw) or f
+    )
+    audit([row(run_id="r7")], tmp_path, score=lambda t, p: True)
+    assert captured == [{"run_id": "r7", "task_id": "md-001"}]
+
+
+def test_a_dev_split_row_with_a_heldout_id_is_skipped_without_opening(
+    tmp_path, monkeypatch
+):
+    fake_dev_task(monkeypatch)
+    write_events(tmp_path / "h1" / "events.jsonl", [])
+    opened = []
+    monkeypatch.setattr(review_audit, "pair_reviews", lambda p: opened.append(p) or [])
+    summary = audit([row(task_id="md-001-h02", run_id="h1")], tmp_path)
+    assert opened == [] and summary.skipped_not_dev == 1
+
+
+def test_a_row_without_an_event_log_is_counted(tmp_path, monkeypatch):
+    fake_dev_task(monkeypatch)
+    summary = audit([row(run_id="missing")], tmp_path, score=lambda t, p: True)
+    assert summary.skipped_no_events == 1 and summary.total.rounds == 0
