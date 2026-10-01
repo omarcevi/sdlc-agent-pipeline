@@ -392,7 +392,8 @@ def cmd_deploy(ctx: Context, args: argparse.Namespace) -> int:
     if metadata.is_file():
         shutil.copy2(metadata, ctx.repo_root / "deployment_metadata.json")
         ctx.out(
-            "deployment_metadata.json now names the engine: do not commit this change"
+            "deployment_metadata.json now names the engine (git-ignored: never "
+            "commit or paste it)"
         )
     return 0
 

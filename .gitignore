@@ -150,6 +150,10 @@ dmypy.json
 *.tfstate
 *.tfstate.*
 
+# agents-cli's deploy record: names the engine and the project number once a
+# deploy has run (scripts/stage_deploy.py copies it back here).
+/deployment_metadata.json
+
 
 tmp*
 .agents-cli-scripts/

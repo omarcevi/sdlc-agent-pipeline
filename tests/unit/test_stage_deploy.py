@@ -262,9 +262,47 @@ def test_a_refused_task_leaves_no_half_built_tree(tmp_path):
 
 def test_deployment_metadata_is_copied_only_when_present(tree, tmp_path):
     (tree / "deployment_metadata.json").unlink()
-    staged = sd.stage(tree, tmp_path / "out")
+    out = tmp_path / "out"
+    staged = sd.stage(tree, out)
     assert "deployment_metadata.json" not in staged
+    assert not (out / "deployment_metadata.json").exists()
+    assert not (tree / "deployment_metadata.json").exists()  # nor made at the root
     assert "Dockerfile" in staged
+    write(tree / "deployment_metadata.json", '{"remote_agent_runtime_id": null}')
+    staged = sd.stage(tree, out)
+    assert "deployment_metadata.json" in staged
+    assert (out / "deployment_metadata.json").read_text() == (
+        '{"remote_agent_runtime_id": null}'
+    )
+
+
+def test_deploy_without_metadata_stages_none_and_copies_back_what_agents_cli_wrote(
+    deploy_repo,
+):
+    (deploy_repo / "deployment_metadata.json").unlink()
+    run = FakeRun()
+    assert run_deploy(deploy_repo, run, FakePlatform([active_template()])) == 0
+    assert (
+        deploy_repo / "deployment_metadata.json"
+    ).read_text() == '{"deployed": true}'
+
+
+def test_deployment_metadata_is_git_ignored_and_untracked():
+    """It names the engine and the project number once a deploy has run."""
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", "--no-index", "deployment_metadata.json"],
+        cwd=ROOT,
+        check=False,
+    )
+    assert ignored.returncode == 0, "deployment_metadata.json is not git-ignored"
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", "deployment_metadata.json"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert tracked.stdout == "", "deployment_metadata.json is tracked"
 
 
 def test_a_missing_required_root_file_stops_staging(tree, tmp_path):
