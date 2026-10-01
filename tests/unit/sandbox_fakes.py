@@ -25,6 +25,7 @@ import inspect
 import io
 import json
 import shlex
+import threading
 import zipfile
 from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
@@ -308,9 +309,12 @@ async def start_on_fakes(
 # --- the SDK client, for SdkSandboxControl's own tests -------------------------
 
 
-def api_error(code: int, status: str) -> genai_errors.APIError:
+def api_error(
+    code: int, status: str, message: str | None = None
+) -> genai_errors.APIError:
     """The error the SDK raises for an API failure (404 NOT_FOUND, 503 ...)."""
-    body = {"error": {"code": code, "message": status.lower(), "status": status}}
+    text = status.lower() if message is None else message
+    body = {"error": {"code": code, "message": text, "status": status}}
     if code >= 500:
         return genai_errors.ServerError(code, body)
     return genai_errors.ClientError(code, body)
@@ -355,12 +359,15 @@ class FakeSdkTemplates:
 
 class FakeSdkSandboxes:
     """`client.agent_engines.sandboxes`: `calls` holds `(method, kwargs)` in order;
-    `errors[method]` is raised by every call of `method`."""
+    `errors[method]` is raised by every call of `method`. When `delete_gate` is set
+    to a `threading.Event`, `delete` blocks its worker thread until the event is
+    set (at most 10 s), as a stalled connection would."""
 
     def __init__(self, token: str = SANDBOX_TOKEN) -> None:
         self.token = token
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.errors: dict[str, Exception] = {}
+        self.delete_gate: threading.Event | None = None
         self.templates = FakeSdkTemplates(self.calls)
         self.sandbox = SimpleNamespace(
             name=f"{ENGINE}/sandboxEnvironments/31",
@@ -377,14 +384,27 @@ class FakeSdkSandboxes:
         if method in self.errors:
             raise self.errors[method]
 
-    def create(self, *, name: str, config: dict[str, Any]) -> Any:
-        self._record("create", name=name, config=config)
+    def create(
+        self,
+        *,
+        name: str,
+        poll_interval_seconds: float = 0.1,
+        config: dict[str, Any],
+    ) -> Any:
+        self._record(
+            "create",
+            name=name,
+            poll_interval_seconds=poll_interval_seconds,
+            config=config,
+        )
         return SimpleNamespace(
             name=f"{ENGINE}/operations/1", done=True, error=None, response=self.sandbox
         )
 
     def delete(self, *, name: str) -> Any:
         self._record("delete", name=name)
+        if self.delete_gate is not None:
+            self.delete_gate.wait(10)
         return SimpleNamespace(name=f"{ENGINE}/operations/2", done=False)
 
     def generate_access_token(

@@ -13,12 +13,14 @@ import os
 import re
 import shlex
 import sys
+import threading
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 import pytest
+import requests
 
 from app.environment import agent_runtime
 from app.environment.agent_runtime import (
@@ -198,6 +200,7 @@ async def test_start_creates_from_the_template_with_ttl_owner_and_display_name(r
     assert creates == [
         {
             "name": ENGINE,
+            "poll_interval_seconds": 1.0,
             "config": {
                 "sandbox_environment_template": TEMPLATE,
                 "ttl": "1800s",
@@ -365,11 +368,46 @@ async def test_cancellation_waits_for_create_at_most_the_grace_period(
     with caplog.at_level(logging.WARNING, logger=agent_runtime.__name__):
         with pytest.raises(asyncio.CancelledError):
             await task
-    assert rig.control.deletes == []  # left to the TTL and the sweeper
+    assert rig.control.deletes == []  # the create has not finished yet
     assert "TTL" in caplog.text
-    rig.control.release_create()
-    await _until(lambda: rig.control.created)
+    rig.control.release_create()  # it finishes later: its sandbox is deleted then
+    await _until(lambda: rig.control.deletes)
+    assert rig.control.deletes == [rig.control.created[0].name]
+
+
+async def test_a_second_cancellation_during_the_grace_wait_is_a_cancellation(rig):
+    rig.control = FakeSandboxControl(block_create=True)
+    task = asyncio.create_task(rig.start())
+    await rig.control.create_started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()  # waiting for the create
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
     assert rig.control.deletes == []
+    rig.control.release_create()
+    await _until(lambda: rig.control.deletes)
+    assert rig.control.deletes == [rig.control.created[0].name]
+
+
+async def test_a_create_that_never_finishes_is_bounded(rig, monkeypatch):
+    monkeypatch.setattr(agent_runtime, "CREATE_TIMEOUT_S", 0.05)
+    rig.control = FakeSandboxControl(block_create=True)
+    with pytest.raises(InfraError, match=r"^sandbox create did not finish in 0.05 s$"):
+        await rig.start()
+    assert rig.control.deletes == []
+    rig.control.release_create()  # a late create's sandbox is still deleted
+    await _until(lambda: rig.control.deletes)
+    assert rig.control.deletes == [rig.control.created[0].name]
+
+
+async def test_an_unusable_address_deletes_the_sandbox(rig):
+    rig.control = FakeSandboxControl(hostname="lb.example.test:not-a-port")
+    with pytest.raises(InfraError, match="cannot connect"):
+        await rig.start()
+    assert rig.control.deletes == [rig.control.created[0].name]
+    assert rig.shim.requests == []
 
 
 async def test_a_failing_create_deletes_nothing(rig):
@@ -874,6 +912,7 @@ async def test_sdk_control_creates_from_the_template_and_maps_the_handle(sdk, co
             "create",
             {
                 "name": ENGINE,
+                "poll_interval_seconds": 1.0,
                 "config": {
                     "sandbox_environment_template": TEMPLATE,
                     "ttl": "1800s",
@@ -1057,3 +1096,188 @@ async def test_a_whole_sandbox_life_never_imports_agentplatform(
     await env.close()
     other = await rig.start()
     await other.close()
+
+
+# --- fix round 1: bounded deletes, redacted errors, edges -------------------------
+
+
+@pytest.fixture
+def hanging_delete(sdk, monkeypatch) -> threading.Event:
+    """The SDK's delete blocks its thread (a stalled connection) until the returned
+    event is set. Each test sets it before it ends: the event loop's teardown joins
+    the worker thread."""
+    monkeypatch.setattr(agent_runtime, "DELETE_TIMEOUT_S", 0.05)
+    gate = sdk.sandboxes.delete_gate = threading.Event()
+    yield gate
+    gate.set()
+
+
+async def test_sdk_control_delete_is_bounded(hanging_delete, control):
+    try:
+        with pytest.raises(InfraError, match=r"^sandbox delete timed out$"):
+            await control.delete(f"{ENGINE}/sandboxEnvironments/1")
+    finally:
+        hanging_delete.set()
+
+
+async def test_close_is_bounded_when_the_delete_hangs(rig, hanging_delete, control):
+    try:
+        env = await rig.start(control=control)
+        with pytest.raises(InfraError, match=r"^sandbox delete timed out$"):
+            await env.close()
+        assert env._http.is_closed
+        await env.close()  # once only
+    finally:
+        hanging_delete.set()
+
+
+async def test_a_hanging_delete_after_a_failed_start_is_bounded(
+    rig, hanging_delete, control, caplog
+):
+    rig.shim.queue("/exec", BAD_GATEWAY, repeat_last=True)
+    try:
+        with caplog.at_level(logging.WARNING, logger=agent_runtime.__name__):
+            with pytest.raises(InfraError, match="did not become ready"):
+                await rig.start(
+                    settings=fake_settings(ready_timeout_s=2.0), control=control
+                )
+        assert "sandbox delete timed out" in caplog.text
+    finally:
+        hanging_delete.set()
+
+
+REALISTIC_ERRORS = [
+    api_error(
+        403,
+        "PERMISSION_DENIED",
+        "Permission 'aiplatform.sandboxEnvironments.delete' denied on resource "
+        "'//aiplatform.googleapis.com/projects/123456789012/locations/us-central1/"
+        "reasoningEngines/4242/sandboxEnvironments/9001' (or it may not exist).",
+    ),
+    api_error(
+        429,
+        "RESOURCE_EXHAUSTED",
+        "Quota exceeded for quota metric 'Sandbox create requests' and limit "
+        "'per minute' of service 'aiplatform.googleapis.com' for consumer "
+        "'project_number:123456789012'.",
+    ),
+    api_error(
+        400,
+        "FAILED_PRECONDITION",
+        f"Template {TEMPLATE} is not ready; caller {CALLER_SA} may not use it.",
+    ),
+]
+
+
+def _http_error(status: int) -> requests.HTTPError:
+    """What `generate_access_token` raises: requests' `raise_for_status()`."""
+    response = requests.Response()
+    response.status_code = status
+    response.reason = "Forbidden"
+    response.url = (
+        "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/"
+        f"{CALLER_SA}:signJwt"
+    )
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        return exc
+    raise AssertionError("no error raised")
+
+
+@pytest.mark.parametrize("error", [*REALISTIC_ERRORS, _http_error(403)])
+async def test_control_errors_carry_no_resource_names(sdk, control, error):
+    sdk.sandboxes.errors["create"] = error
+    sdk.sandboxes.errors["generate_access_token"] = error
+    with pytest.raises(InfraError) as created:
+        await control.create(
+            engine=ENGINE, template=TEMPLATE, ttl_s=60, display_name="itp-x"
+        )
+    with pytest.raises(InfraError) as signed:
+        await control.sign_token(CALLER_SA, 60)
+    for caught, action in ((created, "create"), (signed, "token signing")):
+        text = str(caught.value)
+        assert text.startswith(f"sandbox {action} failed: {type(error).__name__} ")
+        assert str(getattr(error, "code", 403)) in text
+        for secret in ("123456789012", "4242", "9001", "demo-project", "for url"):
+            assert secret not in text
+        assert "projects/" not in text.replace("projects/…", "")
+        if getattr(error, "status", None):
+            assert error.status in text
+
+
+@pytest.mark.parametrize("status", [401, 403, 502])
+async def test_readiness_expiry_logs_the_last_answer(rig, caplog, status):
+    rig.shim.queue("/exec", httpx.Response(status, text="denied"), repeat_last=True)
+    with caplog.at_level(logging.WARNING, logger=agent_runtime.__name__):
+        with pytest.raises(InfraError) as caught:
+            await rig.start(settings=fake_settings(ready_timeout_s=4.0))
+    assert str(caught.value) == "sandbox did not become ready in 4 s"
+    assert f"HTTP {status}" in caplog.text
+    assert SANDBOX_TOKEN not in caplog.text
+
+
+async def test_readiness_attempts_are_bounded_by_the_time_left(rig, monkeypatch):
+    bounds: list[float] = []
+    real_wait_for = asyncio.wait_for
+
+    async def recording_wait_for(awaitable, timeout):
+        bounds.append(timeout)
+        return await real_wait_for(awaitable, timeout)
+
+    monkeypatch.setattr(agent_runtime.asyncio, "wait_for", recording_wait_for)
+    rig.shim.queue("/exec", BAD_GATEWAY, repeat_last=True)
+    with pytest.raises(InfraError):
+        await rig.start(settings=fake_settings(ready_timeout_s=20.0))
+    attempts = [b for b in bounds if b <= agent_runtime.READY_ATTEMPT_TIMEOUT_S]
+    assert len(attempts) == len(rig.shim.requests) == 11  # at 0, 2, ..., 20 s
+    assert attempts[0] == 15.0  # READY_ATTEMPT_TIMEOUT_S while time is left
+    assert attempts[-2:] == [2.0, 1.0]  # then what is left, at least 1 s
+    assert rig.clock.now == 20.0
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx.Response(404, text="<html>Not Found</html>"),
+        httpx.Response(404, json={"error": {"code": 404, "status": "NOT_FOUND"}}),
+        httpx.Response(403, text="Forbidden"),
+        httpx.Response(400, json={"detail": ["not", "a", "string"]}),
+    ],
+)
+async def test_a_proxy_answer_is_not_a_file_error(rig, answer):
+    env = await rig.start()
+    sent = len(rig.shim.requests)
+    rig.shim.queue("/files", answer, answer)
+    with pytest.raises(InfraError):
+        await env.read_file(PATH)
+    with pytest.raises(InfraError):
+        await env.write_file(PATH, "x")
+    assert len(rig.shim.requests) == sent + 2  # neither is retried
+
+
+async def test_upload_dir_refuses_an_unreadable_directory(rig, tmp_path):
+    env = await rig.start()
+    root = _tree(tmp_path / "repo")
+    locked = root / "pkg"
+    locked.chmod(0)
+    try:
+        sent = len(rig.shim.requests)
+        with pytest.raises(InfraError, match="upload failed"):
+            await env.upload_dir(root)
+        assert len(rig.shim.requests) == sent
+    finally:
+        locked.chmod(0o755)
+
+
+async def test_upload_dir_turns_a_name_it_cannot_encode_into_an_infra_error(
+    rig, tmp_path, monkeypatch
+):
+    env = await rig.start()
+
+    def write(self, filename, arcname=None, *args, **kwargs):
+        raise UnicodeEncodeError("utf-8", "\udcff", 0, 1, "surrogates not allowed")
+
+    monkeypatch.setattr(zipfile.ZipFile, "write", write)
+    with pytest.raises(InfraError, match="upload failed"):
+        await env.upload_dir(_tree(tmp_path / "repo"))

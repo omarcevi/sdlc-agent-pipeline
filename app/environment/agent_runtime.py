@@ -52,11 +52,19 @@ DEFAULT_READY_TIMEOUT_S = 240.0
 READY_POLL_S = 2.0
 READY_ATTEMPT_TIMEOUT_S = 15.0
 CREATE_GRACE_S = 60.0
+# The SDK's create waits for its operation with no deadline, and its HTTP client
+# has no timeout: these bound what start() and every release path wait for.
+CREATE_TIMEOUT_S = 300.0
+CREATE_POLL_S = 1.0  # how often the SDK polls the create operation
+DELETE_TIMEOUT_S = 60.0  # as Docker's `docker rm -f`
 TEMPLATE_NOT_USABLE = "sandbox template is not usable"
 LINKS_REFUSED = "upload refused: links are not supported"
 __all__ = [
     "CREATE_GRACE_S",
+    "CREATE_POLL_S",
+    "CREATE_TIMEOUT_S",
     "DEFAULT_READY_TIMEOUT_S",
+    "DELETE_TIMEOUT_S",
     "READY_ATTEMPT_TIMEOUT_S",
     "READY_POLL_S",
     "SANDBOX_OWNER",
@@ -201,14 +209,32 @@ def _is_not_found(exc: BaseException) -> bool:
     )
 
 
+# Control-plane messages name resources, and so the project number; this text
+# becomes a run's reason, which reaches record.json and the tracked results.
+_REDACTIONS = (
+    (re.compile(r" for url: .*", re.DOTALL), ""),  # requests' HTTPError tail
+    (re.compile(r"projects/[^\s'\"]+"), "projects/…"),
+    (re.compile(r"project_number:\d+"), "project_number:…"),
+    (re.compile(r"[\w.+-]+@[\w.-]+\.iam\.gserviceaccount\.com"), "<service account>"),
+    (re.compile(r"\b\d{10,}\b"), "…"),  # a project number in any other form
+)
+
+
+def _redacted(text: str) -> str:
+    for pattern, replacement in _REDACTIONS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 def _control_error(action: str, exc: BaseException) -> InfraError:
-    """The SDK's error as an InfraError: the action, the error type, its status and
-    at most 200 characters of its message."""
+    """The SDK's error as an InfraError: the action, the error type, its code and
+    status, and at most 200 characters of its message with every resource name,
+    project number and service account removed."""
     code = getattr(exc, "code", None)
     if code is None:
         code = getattr(getattr(exc, "response", None), "status_code", None)
     status = getattr(exc, "status", None)
-    message = str(getattr(exc, "message", None) or exc)[:_BODY_CHARS]
+    message = _redacted(str(getattr(exc, "message", None) or exc))[:_BODY_CHARS]
     detail = " ".join(str(part) for part in (code, status) if part)
     kind = f"{type(exc).__name__} {detail}".strip()
     return InfraError(f"sandbox {action} failed: {kind}: {message}")
@@ -279,7 +305,10 @@ class SdkSandboxControl:
             "display_name": display_name,
         }
         operation = await self._call(
-            "create", lambda: self._sandboxes().create(name=engine, config=config)
+            "create",
+            lambda: self._sandboxes().create(
+                name=engine, poll_interval_seconds=CREATE_POLL_S, config=config
+            ),
         )
         sandbox = getattr(operation, "response", None)
         name = getattr(sandbox, "name", None)
@@ -297,8 +326,16 @@ class SdkSandboxControl:
         return SandboxHandle(str(name), str(hostname), str(routing_token))
 
     async def delete(self, name: str) -> None:
+        """Bounded by DELETE_TIMEOUT_S: the SDK's HTTP client has no timeout, and
+        every release path waits here. A delete that times out is left to the TTL
+        and the sweeper (its thread ends on its own)."""
         try:
-            await asyncio.to_thread(lambda: self._sandboxes().delete(name=name))
+            await asyncio.wait_for(
+                asyncio.to_thread(lambda: self._sandboxes().delete(name=name)),
+                DELETE_TIMEOUT_S,
+            )
+        except TimeoutError:
+            raise InfraError("sandbox delete timed out") from None
         except Exception as exc:
             if _is_not_found(exc):
                 return
@@ -316,19 +353,45 @@ def sdk_control(settings: SandboxSettings) -> SdkSandboxControl:
     return control
 
 
-def _consume(task: "asyncio.Future[Any]") -> None:
-    """Retrieve an abandoned task's outcome, so asyncio does not report it."""
-    if not task.cancelled():
-        task.exception()
+async def _delete_logged(control: SandboxControl, name: str, env_id: str) -> None:
+    """Delete a sandbox no environment owns any more; a failure is logged."""
+    try:
+        await control.delete(name)
+    except Exception as exc:
+        logger.warning("could not delete sandbox %s: %s", env_id, exc)
+
+
+_LATE_DELETES: set["asyncio.Task[None]"] = set()  # keeps the tasks referenced
+
+
+def _delete_when_created(
+    creating: "asyncio.Future[SandboxHandle]", control: SandboxControl, env_id: str
+) -> None:
+    """For a create that start() stopped waiting for: if it ever succeeds while the
+    event loop runs, delete its sandbox then. Otherwise the TTL and the sweeper
+    remove it. A failed create has nothing to delete (its error is retrieved here,
+    so asyncio does not report it)."""
+
+    def created(task: "asyncio.Future[SandboxHandle]") -> None:
+        if task.cancelled() or task.exception() is not None:
+            return
+        cleanup = task.get_loop().create_task(
+            _delete_logged(control, task.result().name, env_id)
+        )
+        _LATE_DELETES.add(cleanup)
+        cleanup.add_done_callback(_LATE_DELETES.discard)
+
+    creating.add_done_callback(created)
 
 
 async def _create(
     control: SandboxControl, settings: SandboxSettings, env_id: str
 ) -> SandboxHandle:
-    """Create the sandbox. A cancellation cannot stop the worker thread that runs
-    the create, so it waits for it (shielded, at most CREATE_GRACE_S), deletes the
-    sandbox it made, and only then re-raises the cancellation. A create that is
-    still running after that is left to the TTL and the sweeper."""
+    """Create the sandbox, waiting at most CREATE_TIMEOUT_S. A cancellation cannot
+    stop the worker thread that runs the create, so it waits for it (shielded, at
+    most CREATE_GRACE_S), deletes the sandbox it made, and only then re-raises the
+    cancellation. A create still running after either wait has its sandbox deleted
+    when it finishes (`_delete_when_created`)."""
     creating = asyncio.ensure_future(
         control.create(
             engine=settings.engine,
@@ -338,7 +401,12 @@ async def _create(
         )
     )
     try:
-        return await asyncio.shield(creating)
+        return await asyncio.wait_for(asyncio.shield(creating), CREATE_TIMEOUT_S)
+    except TimeoutError:
+        _delete_when_created(creating, control, env_id)
+        raise InfraError(
+            f"sandbox create did not finish in {CREATE_TIMEOUT_S:g} s"
+        ) from None
     except asyncio.CancelledError:
         await _delete_once_created(control, creating, env_id)
         raise
@@ -347,24 +415,26 @@ async def _create(
 async def _delete_once_created(
     control: SandboxControl, creating: "asyncio.Future[SandboxHandle]", env_id: str
 ) -> None:
-    """After a cancellation: wait for the create, then delete what it made. Returns
-    in every case, so the caller re-raises the cancellation itself."""
+    """After a cancellation: wait for the create, then delete what it made. The
+    caller re-raises its cancellation; a second cancellation raised here
+    propagates as itself."""
     try:
         handle = await asyncio.wait_for(asyncio.shield(creating), CREATE_GRACE_S)
-    except (TimeoutError, asyncio.CancelledError):
-        creating.add_done_callback(_consume)
+    except asyncio.CancelledError:
+        _delete_when_created(creating, control, env_id)
+        raise
+    except TimeoutError:
+        _delete_when_created(creating, control, env_id)
         logger.warning(
-            "sandbox %s: create still running after cancellation; it is left to "
-            "the sandbox TTL and the sweeper",
+            "sandbox %s: create still running %g s after cancellation; deleted if "
+            "it finishes while this process runs, else left to the TTL",
             env_id,
+            CREATE_GRACE_S,
         )
         return
     except Exception:
         return  # the create failed: there is nothing to delete
-    try:
-        await control.delete(handle.name)
-    except Exception as exc:
-        logger.warning("could not delete sandbox %s: %s", env_id, exc)
+    await _delete_logged(control, handle.name, env_id)
 
 
 class AgentRuntimeEnvironment:
@@ -428,7 +498,13 @@ class AgentRuntimeEnvironment:
         token = await control.sign_token(settings.caller_sa, settings.ttl_s)
         env_id = f"itp-{uuid.uuid4().hex[:12]}"
         handle = await _create(control, settings, env_id)
-        env = cls(env_id, handle, token, control, transport=transport, sleep=sleep)
+        try:
+            env = cls(env_id, handle, token, control, transport=transport, sleep=sleep)
+        except Exception as exc:  # the platform gave an address httpx refuses
+            await _delete_logged(control, handle.name, env_id)
+            raise InfraError(
+                f"sandbox {env_id}: cannot connect to it: {type(exc).__name__}"
+            ) from None
         try:
             await env._wait_until_ready(settings.ready_timeout_s, clock)
             # As Docker's start() does. The cwd must exist: the shim runs /exec in it.
@@ -442,26 +518,51 @@ class AgentRuntimeEnvironment:
         self, limit_s: float, clock: Callable[[], float]
     ) -> None:
         """A no-op command that reaches the shim, every READY_POLL_S. Never
-        /healthz: the platform answers that itself before the shim listens."""
+        /healthz: the platform answers that itself before the shim listens. Each
+        attempt is bounded by READY_ATTEMPT_TIMEOUT_S or the time left (at least
+        1 s), so the wait ends within about `limit_s`. On expiry the last answer
+        (a status or an error type, never a header) is logged."""
         deadline = clock() + limit_s
-        while not await self._answers():
+        while True:
+            left = deadline - clock()
+            answer = await self._probe(max(min(READY_ATTEMPT_TIMEOUT_S, left), 1.0))
+            if answer is None:
+                return
             if clock() >= deadline:
+                logger.warning(
+                    "sandbox %s did not become ready in %g s; last answer: %s",
+                    self.env_id,
+                    limit_s,
+                    answer,
+                )
                 raise InfraError(f"sandbox did not become ready in {limit_s:g} s")
-            await self._sleep(READY_POLL_S)
+            await self._sleep(min(READY_POLL_S, deadline - clock()))
 
-    async def _answers(self) -> bool:
+    async def _probe(self, bound_s: float) -> str | None:
+        """None when the shim ran the no-op; otherwise what came back instead."""
         try:
-            response = await self._send(
-                "POST",
-                "/exec",
-                label="/exec",
-                json={"command": "true", "timeout": 10},
-                timeout=READY_ATTEMPT_TIMEOUT_S,
+            response = await asyncio.wait_for(
+                self._send(
+                    "POST",
+                    "/exec",
+                    label="/exec",
+                    json={"command": "true", "timeout": 10},
+                    timeout=bound_s,
+                ),
+                bound_s,
             )
-            body = response.json() if response.status_code == 200 else None
-        except (InfraError, ValueError):
-            return False
-        return isinstance(body, dict) and body.get("exit_code") == 0
+        except TimeoutError:
+            return f"no answer in {bound_s:g} s"
+        except InfraError as exc:
+            return str(exc)
+        if response.status_code != 200:
+            return f"HTTP {response.status_code}"
+        try:
+            body = response.json()
+        except ValueError:
+            return "HTTP 200 with an unreadable body"
+        exit_code = body.get("exit_code") if isinstance(body, dict) else None
+        return None if exit_code == 0 else f"HTTP 200, exit code {exit_code}"
 
     async def _discard(self) -> None:
         """Delete the sandbox of a failed start; a failing delete is logged, so the
@@ -509,13 +610,16 @@ class AgentRuntimeEnvironment:
         )
 
     @staticmethod
-    def _detail(response: httpx.Response) -> str:
-        """The shim's error text: FastAPI's `detail`, else the body."""
+    def _shim_detail(response: httpx.Response) -> str | None:
+        """The shim's own error text (FastAPI's JSON `detail` string), or None when
+        the answer did not come from the shim: a 404 or 403 from the platform's
+        proxy (a sandbox that is gone, a refused token) is no file error."""
         try:
-            detail = response.json().get("detail")
-        except (ValueError, AttributeError):
-            detail = None
-        return (detail if isinstance(detail, str) else response.text)[:_BODY_CHARS]
+            body = response.json()
+        except ValueError:
+            return None
+        detail = body.get("detail") if isinstance(body, dict) else None
+        return detail[:_BODY_CHARS] if isinstance(detail, str) else None
 
     async def exec(
         self, command: str, *, timeout: float = DEFAULT_TIMEOUT_S, cwd: str = WORKDIR
@@ -571,10 +675,11 @@ class AgentRuntimeEnvironment:
                 except (ValueError, KeyError, TypeError):
                     raise self._body_error("GET", label, response) from None
                 return data.decode("utf-8", errors="replace")
-            if status == 404:
+            detail = self._shim_detail(response) if status in (400, 403, 404) else None
+            if detail is not None and status == 404:
                 raise FileNotFoundError(path)
-            if status in (400, 403):
-                raise OSError(self._detail(response))
+            if detail is not None:
+                raise OSError(detail)
             error = self._status_error("GET", label, response)
             if status < 500:
                 raise error
@@ -595,7 +700,9 @@ class AgentRuntimeEnvironment:
         if response.status_code == 200:
             return
         if response.status_code in (400, 403, 404):
-            raise OSError(self._detail(response))
+            detail = self._shim_detail(response)
+            if detail is not None:
+                raise OSError(detail)
         raise self._status_error("POST", label, response)
 
     async def upload_dir(self, local_dir: Path, dest: str = WORKDIR) -> None:
@@ -644,20 +751,24 @@ def _zip_tree(root: Path) -> bytes:
         raise InfraError(LINKS_REFUSED)
     if not root.is_dir():
         raise InfraError(f"upload failed: {root.name} is not a directory")
-    members: list[Path] = []
-    for directory, dirnames, filenames in os.walk(root):  # never follows links
-        for name in sorted(dirnames) + sorted(filenames):
-            path = Path(directory, name)
-            if path.is_symlink():
-                raise InfraError(LINKS_REFUSED)
-            members.append(path)
+
+    def unreadable(error: OSError) -> None:
+        raise error  # os.walk would skip the directory and upload the rest
+
     buffer = io.BytesIO()
     try:
+        members: list[Path] = []
+        for directory, dirnames, filenames in os.walk(root, onerror=unreadable):
+            for name in sorted(dirnames) + sorted(filenames):
+                path = Path(directory, name)
+                if path.is_symlink():
+                    raise InfraError(LINKS_REFUSED)
+                members.append(path)
         with zipfile.ZipFile(
             buffer, "w", compression=zipfile.ZIP_DEFLATED, strict_timestamps=False
         ) as archive:
             for path in members:
                 archive.write(path, path.relative_to(root).as_posix())
-    except OSError as exc:
+    except (OSError, ValueError) as exc:  # ValueError: a name zip cannot encode
         raise InfraError(f"upload failed: {type(exc).__name__}: {exc}") from None
     return buffer.getvalue()
