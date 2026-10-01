@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from app.archive import UNSAFE_PATH, ArchiveError
 from app.nodes import finish
-from app.nodes.finish import extract_tarball, open_pr
+from app.nodes.finish import open_pr
 from tests.unit import test_delivery as td
 from tests.unit.test_delivery import (
     _collect,
@@ -95,7 +96,7 @@ async def test_a_git_directory_in_the_archive_is_refused_and_runs_nothing(
     _plain, unified, files = make_source(tmp_path, _standard_change)
     marker = tmp_path / "MARKER"
     archive = archive_with(tmp_path, hostile_git_dir(marker))
-    with pytest.raises(RuntimeError, match=r"\.git"):
+    with pytest.raises(ArchiveError, match=UNSAFE_PATH):
         await _open(archive, unified, files)
     assert not marker.exists() and github.requests == []
 
@@ -103,7 +104,7 @@ async def test_a_git_directory_in_the_archive_is_refused_and_runs_nothing(
 async def test_a_git_file_in_the_archive_is_refused(tmp_path, runs, github):
     _plain, unified, files = make_source(tmp_path, _standard_change)
     archive = archive_with(tmp_path, {".git": b"gitdir: /somewhere/else\n"})
-    with pytest.raises(RuntimeError, match=r"\.git"):
+    with pytest.raises(ArchiveError, match=UNSAFE_PATH):
         await _open(archive, unified, files)
     assert github.requests == []
 
@@ -129,21 +130,6 @@ async def test_build_changes_refuses_a_git_file_even_if_the_extractor_does_not(
     with pytest.raises(RuntimeError, match=r"\.git"):
         await _open(archive, unified, files)
     assert github.requests == []
-
-
-def test_the_extractor_refuses_case_folded_duplicates(tmp_path):
-    make_source(tmp_path, _standard_change)
-    archive = archive_with(tmp_path, {"Readme.md": b"a", "README.md": b"b"})
-    with pytest.raises(RuntimeError, match="duplicate"):
-        extract_tarball(archive, tmp_path / "out")
-
-
-@pytest.mark.parametrize("name", [".git/config", ".GIT/config", "sub/.Git/HEAD"])
-def test_the_extractor_refuses_any_git_path_component(tmp_path, name):
-    make_source(tmp_path, _standard_change)
-    archive = archive_with(tmp_path, {name: b"x"})
-    with pytest.raises(RuntimeError, match=r"\.git"):
-        extract_tarball(archive, tmp_path / "out")
 
 
 async def test_the_numstat_check_catches_a_github_path_the_diff_files_omit(
@@ -188,3 +174,9 @@ async def test_a_patch_that_touches_a_git_path_is_refused(tmp_path, runs, github
     with pytest.raises(RuntimeError, match=r"\.git|does not apply"):
         await _open(archive, evil, [".git/hooks/pre-commit"])
     assert github.requests == []
+
+
+def test_delivery_uses_the_one_archive_extractor():
+    from app import archive
+
+    assert finish.extract_tarball is archive.extract_tarball

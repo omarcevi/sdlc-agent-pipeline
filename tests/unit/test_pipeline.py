@@ -39,8 +39,8 @@ from tests.fakes import (
     raises,
     text,
 )
+from tests.unit._constants import DIFF
 
-DIFF = "diff --git a/mini.py b/mini.py\n--- a/mini.py\n+++ b/mini.py\n@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return a + b\n"
 PLAN = Plan(actionable=True, summary="fix add", files_to_inspect=["mini.py"])
 PATCH = PatchResult(summary="fixed add")
 APPROVE = Review(verdict="approve")

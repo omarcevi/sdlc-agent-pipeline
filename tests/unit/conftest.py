@@ -1,8 +1,7 @@
 import pytest
 
 from tests.fakes import make_bench_task
-
-PROBE_NOTE = "zebra-marker"
+from tests.unit._constants import DIFF, PROBE_NOTE
 
 
 @pytest.fixture
@@ -18,8 +17,6 @@ def bench(tmp_path, monkeypatch):
 @pytest.fixture
 def probe_store(bench, monkeypatch):
     """The bench fixture plus one probe, rp-01, on task t-1."""
-    from tests.unit.test_pipeline import DIFF
-
     monkeypatch.setenv("REVIEW_PROBES_DIR", str(bench / "probes"))
     directory = bench / "probes" / "rp-01"
     directory.mkdir(parents=True)

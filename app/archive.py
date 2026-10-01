@@ -14,6 +14,7 @@ them).
 import gzip
 import os
 import tarfile
+import unicodedata
 import zlib
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -146,7 +147,7 @@ def extract_tarball(
                 if member.isreg():
                     if len(parts) == 1:
                         raise ArchiveError(NO_SINGLE_TOP_DIR)
-                    key = fold("/".join(parts)).casefold()
+                    key = fold(unicodedata.normalize("NFC", "/".join(parts))).casefold()
                     if key in seen:
                         raise ArchiveError(UNSAFE_PATH)
                     seen.add(key)

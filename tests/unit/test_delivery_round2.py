@@ -1,17 +1,16 @@
 """Fix round 2: repository discovery in the extracted tree, precise title defusing,
 bad responses, invisible characters, NFC/NFD duplicates."""
 
-import unicodedata
-from pathlib import Path
+import tempfile
 
 import httpx
 import pytest
 
 from app import pr_text
 from app.environment.base import InfraError
-from app.github_client import GitHubClient, GitHubError
+from app.github_client import GitHubClient, GitHubError, GitHubUnavailable
 from app.nodes import finish
-from app.nodes.finish import extract_tarball, open_pr, post_failure_comment
+from app.nodes.finish import open_pr, post_failure_comment
 from tests.unit import test_delivery as td
 from tests.unit.test_delivery import (
     _collect,
@@ -114,20 +113,13 @@ def test_invisible_arabic_mark_and_tag_characters_are_stripped():
     assert "؜" not in pr_text.fence("a؜b")
 
 
-def test_the_extractor_refuses_nfc_nfd_duplicates(tmp_path):
-    make_source(tmp_path, _standard_change)
-    nfc = unicodedata.normalize("NFC", "é.py")
-    nfd = unicodedata.normalize("NFD", "é.py")
-    assert nfc != nfd
-    archive = archive_with(tmp_path, {nfc: b"a", nfd: b"b"})
-    with pytest.raises(RuntimeError, match="duplicate"):
-        extract_tarball(archive, tmp_path / "out")
-
-
 async def test_outside_the_tree_with_the_files_list_omitting_it(
     tmp_path, runs, github, monkeypatch
 ):
     archive, _unified, _files = make_source(tmp_path, _standard_change)
+    apply_root = tmp_path / "apply-root"
+    apply_root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(apply_root))  # ../ stays in tmp_path
     evil = (
         "diff --git a/../escaped.txt b/../escaped.txt\n"
         "new file mode 100644\n"
@@ -167,7 +159,6 @@ def _client(handler):
 @pytest.mark.parametrize(
     "answer",
     [
-        httpx.Response(200, content=b"<html>not json</html>"),
         httpx.Response(200, json={"unexpected": True}),
         httpx.Response(200, json=[1, 2]),
     ],
@@ -202,7 +193,4 @@ async def test_a_malformed_response_does_not_change_the_failure_outcome(monkeypa
 
 
 def test_infra_error_is_still_what_unavailable_is():
-    assert issubclass(InfraError, Exception)
-
-
-_ = Path
+    assert issubclass(GitHubUnavailable, InfraError)

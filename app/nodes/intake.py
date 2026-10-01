@@ -1,6 +1,5 @@
 """Issue intake and sandbox provisioning (bench and live mode)."""
 
-import json
 import re
 import tempfile
 from pathlib import Path
@@ -48,7 +47,8 @@ TRUNCATED = "\n[issue text truncated]"
 # JSON-escaped as `\/`), the word `issue`. What follows (attributes, the closing
 # `>`) does not matter: without its opening fragment a tag is inert.
 _ISSUE_TAG = re.compile(
-    r"(?:<|&(?:amp;)*(?:lt|#0*60|#x0*3c);?)\s*(\\?\s*/)?\s*issue\b", re.IGNORECASE
+    r"(?:<|&(?:amp;)*+(?:lt|#0*+60|#x0*+3c);?)\s*+(\\?\s*+/)?\s*+issue\b",
+    re.IGNORECASE,
 )
 PLANNER_PROMPT = "Plan the change for the issue in your instructions."
 
@@ -172,9 +172,6 @@ async def fetch_live_issue(node_input: RunRequest):
             base_ref = node_input.base_ref or default_branch
             try:
                 base_sha, base_tree_sha = await client.branch_head(repo, base_ref)
-            except json.JSONDecodeError:
-                # A bad response, not a bad branch name. No body text in the error.
-                raise InfraError("GitHub sent a response that is not JSON") from None
             except ValueError:
                 raise RunRefused("base branch name is not valid") from None
             await client.download_tarball(repo, base_sha, archive)

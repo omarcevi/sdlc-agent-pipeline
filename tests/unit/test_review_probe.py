@@ -20,11 +20,10 @@ from bench import review_probe
 from bench.probes import list_probes
 from bench.review_probe import plan_probe_runs, run_probe_spec
 from tests.fakes import FakeEnvironment, FakeLlm, json_out
-from tests.unit.conftest import PROBE_NOTE
+from tests.unit._constants import DIFF, PROBE_NOTE
 from tests.unit.test_pipeline import (
     APPROVE,
     CHANGES,
-    DIFF,
     FAIL,
     PASS,
     PLAN,

@@ -21,7 +21,7 @@ from app.github_client import (
     PullRequest,
 )
 from app.models import RoleModels
-from app.nodes import intake
+from app.nodes import finish, intake
 from app.nodes.finish import deliver_patch, report_failure
 from app.nodes.intake import (
     BASELINE_SHA_CMD,
@@ -96,6 +96,7 @@ class FakeGitHub:
         self.prs: list[PullRequest] = []
         self.default = "main"
         self.errors: dict[str, Exception] = {}
+        self.comments: list[tuple] = []
         self.__dict__.update(overrides)
 
     # The node builds its client with GitHubClient.from_token_file() and uses it
@@ -137,6 +138,11 @@ class FakeGitHub:
         await self._do("branch_head", repo, branch)
         return BASE_SHA, TREE_SHA
 
+    async def comment_once(self, repo, number, *, body, marker):
+        # The failure comment that `report_failure` leaves in live mode (Task 3).
+        await self._do("comment_once", repo, number)
+        self.comments.append((repo, number, marker))
+
     async def download_tarball(self, repo, sha, dest, *, max_bytes=50_000_000):
         await self._do("download_tarball", repo, sha)
         dest = Path(dest)
@@ -168,6 +174,7 @@ def live(bench, monkeypatch):
     )
     fake = FakeGitHub(archive)
     monkeypatch.setattr(intake, "GitHubClient", FakeClientClass(fake))
+    monkeypatch.setattr(finish, "GitHubClient", FakeClientClass(fake))
 
     def no_token():
         raise AssertionError("the token must not be read")
@@ -376,10 +383,12 @@ async def test_a_listing_over_the_page_limit_is_worded_as_such(live):
 
 
 async def test_a_bad_json_response_is_not_a_bad_branch_name(live):
-    live.errors["branch_head"] = json.JSONDecodeError("bad", "", 0)
+    # The client maps a non-JSON 2xx to GitHubUnavailable (infra).
+    live.errors["branch_head"] = GitHubUnavailable(
+        "GET /x: 200 response was not valid JSON"
+    )
     record = await run_live()  # infra, not a refusal and not a crash
     assert (record.outcome, record.failure_kind) == ("failed", "infra")
-    assert record.reason == "GitHub sent a response that is not JSON"
 
 
 async def test_a_revoked_token_is_a_github_refusal(live):

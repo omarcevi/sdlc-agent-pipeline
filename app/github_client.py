@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import functools
-import json
 import logging
 import math
 import os
@@ -112,28 +110,19 @@ class GitHubError(Exception):
         super().__init__(f"{where}{code}{message}")
 
 
-def _guard_shape(method):
-    """Turn an undecodable or oddly shaped 2xx answer into a GitHubError, so callers
-    that handle GitHubError also handle a broken answer. The text never carries any
-    of the response."""
-
-    @functools.wraps(method)
-    async def wrapper(*args, **kwargs):
-        try:
-            return await method(*args, **kwargs)
-        except (
-            json.JSONDecodeError,
-            UnicodeDecodeError,
-            KeyError,
-            TypeError,
-            IndexError,
-            AttributeError,
-        ) as exc:
-            raise GitHubError(
-                None, "", "", f"unexpected response from GitHub ({type(exc).__name__})"
-            ) from None
-
-    return wrapper
+def _shaped(parse):
+    """Run `parse` (code that reads fields out of a response) and turn a missing or
+    wrongly typed field into a GitHubError, so callers that handle GitHubError also
+    handle an oddly shaped answer. Only response parsing goes through here: a
+    TypeError from the caller's own arguments surfaces unchanged. The error is built
+    after the except block, so it keeps no __context__, and its text never carries
+    any of the response."""
+    failure: str | None = None
+    try:
+        return parse()
+    except (KeyError, TypeError, IndexError, AttributeError, ValueError) as exc:
+        failure = type(exc).__name__
+    raise GitHubError(None, "", "", f"unexpected response from GitHub ({failure})")
 
 
 class GitHubConfigError(GitHubError):
@@ -325,6 +314,14 @@ def _comment(data: dict[str, Any]) -> Comment:
     )
 
 
+def _own_comment(comments: list[Any], me: str, marker: str) -> Comment | None:
+    for item in comments:
+        author = (item.get("user") or {}).get("login", "")
+        if author == me and marker in (item.get("body") or ""):
+            return _comment(item)
+    return None
+
+
 def _parse_float(value: str | None) -> float | None:
     """A finite float, or None: `inf` and `nan` are not usable header values."""
     try:
@@ -471,8 +468,13 @@ class GitHubClient:
         params: dict[str, Any] | None = None,
         stream: bool = False,
         allow_404: bool = False,
+        parse: bool = True,
     ) -> httpx.Response:
-        """One attempt. Returns the response (unread when `stream`) or raises."""
+        """One attempt. Returns the response (unread when `stream`) or raises.
+
+        A 2xx body that is not valid JSON is a transient failure, so it is retried
+        and ends as GitHubUnavailable (`parse=False` skips this for calls that never
+        read the body)."""
         request = self._http.build_request(method, url, json=json, params=params)
         path = request.url.path
         failure: str | None = None
@@ -492,6 +494,23 @@ class GitHubClient:
             )
         status = response.status_code
         logger.info("%s %s %s", method, path, status)
+        if 200 <= status < 300 and parse and not stream:
+            undecodable = False
+            try:
+                response.json()
+            except ValueError:  # JSONDecodeError and UnicodeDecodeError
+                undecodable = True
+            # Built outside the except block: a decode error's `.doc` holds the
+            # response body, so no __context__ may survive.
+            if undecodable:
+                raise _Transient(
+                    GitHubUnavailable(
+                        f"{method} {path}: {status} response was not valid JSON",
+                        status=status,
+                        method=method,
+                        path=path,
+                    )
+                )
         if status < 400 or (status == 404 and allow_404):
             return response
         read_failure: str | None = None
@@ -581,7 +600,12 @@ class GitHubClient:
                 response = await self._request("GET", url, params=query)
             else:
                 response = await self._send("GET", url, params=query)
-            items.extend(response.json())
+            page = response.json()
+            if not isinstance(page, list):
+                raise GitHubError(
+                    None, "GET", path, "unexpected response from GitHub (not a list)"
+                )
+            items.extend(page)
             next_link = response.links.get("next")
             if not next_link:
                 return items
@@ -596,52 +620,54 @@ class GitHubClient:
 
     # -- reads --------------------------------------------------------------------
 
-    @_guard_shape
     async def get_issue(self, repo: str, number: int) -> Issue:
         data = (
             await self._request("GET", f"/repos/{_check_repo(repo)}/issues/{number}")
         ).json()
-        return Issue(
-            number=data["number"],
-            title=data.get("title") or "",
-            body=data.get("body") or "",
-            state=data["state"],
-            author=(data.get("user") or {}).get("login", ""),
-            labels=tuple(label["name"] for label in data.get("labels") or []),
-            html_url=data["html_url"],
+        return _shaped(
+            lambda: Issue(
+                number=data["number"],
+                title=data.get("title") or "",
+                body=data.get("body") or "",
+                state=data["state"],
+                author=(data.get("user") or {}).get("login", ""),
+                labels=tuple(label["name"] for label in data.get("labels") or []),
+                html_url=data["html_url"],
+            )
         )
 
-    @_guard_shape
     async def last_label_actor(self, repo: str, number: int, label: str) -> str | None:
         events = await self._paginate(
             f"/repos/{_check_repo(repo)}/issues/{number}/events", {"per_page": 100}
         )
-        best: tuple[str, int, str] | None = None
-        for index, event in enumerate(events):
-            if (
-                event.get("event") != "labeled"
-                or (event.get("label") or {}).get("name") != label
-            ):
-                continue
-            key = (
-                event.get("created_at") or "",
-                index,
-                (event.get("actor") or {}).get("login", ""),
-            )
-            if best is None or key[:2] > best[:2]:
-                best = key
-        return (best[2] or None) if best else None
 
-    @_guard_shape
+        def pick() -> str | None:
+            best: tuple[str, int, str] | None = None
+            for index, event in enumerate(events):
+                if (
+                    event.get("event") != "labeled"
+                    or (event.get("label") or {}).get("name") != label
+                ):
+                    continue
+                key = (
+                    event.get("created_at") or "",
+                    index,
+                    (event.get("actor") or {}).get("login", ""),
+                )
+                if best is None or key[:2] > best[:2]:
+                    best = key
+            return (best[2] or None) if best else None
+
+        return _shaped(pick)
+
     async def default_branch(self, repo: str) -> str:
         data = (await self._request("GET", f"/repos/{_check_repo(repo)}")).json()
-        return data["default_branch"]
+        return _shaped(lambda: data["default_branch"])
 
-    @_guard_shape
     async def branch_head(self, repo: str, branch: str) -> tuple[str, str]:
         path = f"/repos/{_check_repo(repo)}/commits/{_branch_path(_check_ref(branch))}"
         data = (await self._request("GET", path)).json()
-        return data["sha"], data["commit"]["tree"]["sha"]
+        return _shaped(lambda: (data["sha"], data["commit"]["tree"]["sha"]))
 
     async def download_tarball(
         self, repo: str, sha: str, dest: Path, *, max_bytes: int = 50_000_000
@@ -694,7 +720,6 @@ class GitHubClient:
 
         return await self._attempts(attempt)
 
-    @_guard_shape
     async def open_pipeline_prs(
         self, repo: str, issue_number: int
     ) -> list[PullRequest]:
@@ -702,20 +727,23 @@ class GitHubClient:
         items = await self._paginate(
             f"/repos/{_check_repo(repo)}/pulls", {"state": "open", "per_page": 100}
         )
+
         # Only branches of this repository: a fork PR cannot block runs.
-        same_repo = [
-            item
-            for item in items
-            if ((item["head"].get("repo") or {}).get("full_name") or "").lower()
-            == repo.lower()
-        ]
-        return [
-            pr for pr in map(_pull_request, same_repo) if pr.head.startswith(prefix)
-        ]
+        def mine() -> list[PullRequest]:
+            same_repo = [
+                item
+                for item in items
+                if ((item["head"].get("repo") or {}).get("full_name") or "").lower()
+                == repo.lower()
+            ]
+            return [
+                pr for pr in map(_pull_request, same_repo) if pr.head.startswith(prefix)
+            ]
+
+        return _shaped(mine)
 
     # -- idempotent writes -------------------------------------------------------------
 
-    @_guard_shape
     async def create_commit(
         self,
         repo: str,
@@ -747,7 +775,7 @@ class GitHubClient:
                         "encoding": "base64",
                     },
                 )
-                sha = blob.json()["sha"]
+                sha = _shaped(lambda blob=blob: blob.json()["sha"])
             entries.append(
                 {"path": change.path, "mode": mode, "type": "blob", "sha": sha}
             )
@@ -759,7 +787,7 @@ class GitHubClient:
         author: dict[str, str] = {"name": author_name, "email": author_email}
         commit_body: dict[str, Any] = {
             "message": message,
-            "tree": tree.json()["sha"],
+            "tree": _shaped(lambda: tree.json()["sha"]),
             "parents": [parent_sha],
             "author": author,
         }
@@ -769,9 +797,8 @@ class GitHubClient:
         commit = await self._request(
             "POST", f"/repos/{repo}/git/commits", json=commit_body
         )
-        return commit.json()["sha"]
+        return _shaped(lambda: commit.json()["sha"])
 
-    @_guard_shape
     async def ensure_branch(self, repo: str, branch: str, sha: str) -> None:
         if not branch.startswith(BRANCH_PREFIX):
             raise ValueError(
@@ -786,7 +813,7 @@ class GitHubClient:
             response = await self._send("GET", ref_path, allow_404=True)
             if response.status_code == 404:
                 return False
-            existing = response.json()["object"]["sha"]
+            existing = _shaped(lambda: response.json()["object"]["sha"])
             if existing != sha:
                 raise GitHubError(
                     None,
@@ -804,6 +831,7 @@ class GitHubClient:
                     "POST",
                     f"/repos/{repo}/git/refs",
                     json={"ref": f"refs/heads/{branch}", "sha": sha},
+                    parse=False,
                 )
             except GitHubError as exc:
                 if exc.status != 422 or not await check():
@@ -811,7 +839,6 @@ class GitHubClient:
 
         await self._attempts(unit)
 
-    @_guard_shape
     async def open_pull_request(
         self, repo: str, *, head: str, base: str, title: str, body: str
     ) -> PullRequest:
@@ -823,7 +850,7 @@ class GitHubClient:
                 "GET", path, params={"state": "open", "head": f"{owner}:{head}"}
             )
             items = response.json()
-            return _pull_request(items[0]) if items else None
+            return _shaped(lambda: _pull_request(items[0]) if items else None)
 
         async def unit() -> PullRequest:
             if found := await existing():
@@ -842,17 +869,16 @@ class GitHubClient:
                     if found := await existing():
                         return found
                 raise
-            return _pull_request(response.json())
+            return _shaped(lambda: _pull_request(response.json()))
 
         return await self._attempts(unit)
 
     async def _whoami(self) -> str:
         if self._me is None:
             response = await self._send("GET", "/user")
-            self._me = response.json()["login"]
+            self._me = _shaped(lambda: response.json()["login"])
         return self._me
 
-    @_guard_shape
     async def comment_once(
         self, repo: str, number: int, *, body: str, marker: str
     ) -> Comment:
@@ -866,11 +892,10 @@ class GitHubClient:
         async def unit() -> Comment:
             me = await self._whoami()
             comments = await self._paginate(path, {"per_page": 100}, retry=False)
-            for item in comments:
-                author = (item.get("user") or {}).get("login", "")
-                if author == me and marker in (item.get("body") or ""):
-                    return _comment(item)
+            found = _shaped(lambda: _own_comment(comments, me, marker))
+            if found is not None:
+                return found
             created = await self._send("POST", path, json={"body": body})
-            return _comment(created.json())
+            return _shaped(lambda: _comment(created.json()))
 
         return await self._attempts(unit)

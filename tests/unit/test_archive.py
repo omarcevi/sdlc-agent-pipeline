@@ -1,6 +1,7 @@
 import gc
 import io
 import tarfile
+import unicodedata
 import warnings
 
 import pytest
@@ -165,6 +166,15 @@ def test_case_folded_duplicates_are_refused(tmp_path):
     exact = build(tmp_path / "e.tar.gz", [("top/a.txt", b"1"), ("top/a.txt", b"2")])
     with pytest.raises(ArchiveError, match=archive.UNSAFE_PATH):
         extract_tarball(exact, tmp_path / "repo2")
+
+
+def test_nfc_and_nfd_spellings_of_one_name_are_duplicates(tmp_path):
+    nfc = unicodedata.normalize("NFC", "é.py")
+    nfd = unicodedata.normalize("NFD", "é.py")
+    assert nfc != nfd
+    src = build(tmp_path / "u.tar.gz", [(f"top/{nfc}", b"a"), (f"top/{nfd}", b"b")])
+    with pytest.raises(ArchiveError, match=archive.UNSAFE_PATH):
+        extract_tarball(src, tmp_path / "repo")
 
 
 def test_a_huge_extended_header_is_bounded_while_reading(tmp_path):

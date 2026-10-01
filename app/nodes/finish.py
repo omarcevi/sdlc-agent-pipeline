@@ -13,9 +13,7 @@ import logging
 import os
 import re
 import subprocess
-import tarfile
 import tempfile
-import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +22,7 @@ import httpx
 from google.adk.events.event import Event
 
 from app import pr_text
+from app.archive import extract_tarball
 from app.environment.base import InfraError
 from app.github_client import FileChange, GitHubClient, GitHubError
 
@@ -89,51 +88,6 @@ def deliver_patch(
 
 
 # --- open_pr ---------------------------------------------------------------------------
-
-
-def extract_tarball(
-    archive: Path,
-    dest: Path,
-    *,
-    max_files: int = 5000,
-    max_bytes: int = 50_000_000,
-) -> Path:
-    """Extract a GitHub source archive into `dest`, stripping its single top-level
-    directory. Refuses links, devices, too many files and too many bytes.
-
-    A local stand-in with the signature of Task 2's `app.archive.extract_tarball`;
-    replace this definition with that import when the two are merged.
-    """
-    dest.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(archive) as tar:
-        members = tar.getmembers()
-        if len(members) > max_files:
-            raise RuntimeError("the source archive has too many files")
-        if sum(m.size for m in members if m.isfile()) > max_bytes:
-            raise RuntimeError("the source archive is too large")
-        tops = {m.name.split("/", 1)[0] for m in members}
-        if len(tops) != 1:
-            raise RuntimeError("the source archive must have one top-level directory")
-        seen: set[str] = set()
-        for member in members:
-            if not (member.isfile() or member.isdir()):
-                raise RuntimeError("the source archive contains a link or special file")
-            if "/" not in member.name:
-                continue  # the top-level directory itself
-            parts = member.name.split("/")[1:]
-            if any(part.lower() == ".git" for part in parts):
-                raise RuntimeError("the source archive contains a .git path")
-            folded = "/".join(
-                unicodedata.normalize("NFC", p).casefold()
-                for p in parts
-                if p not in ("", ".")
-            )
-            if folded in seen:
-                raise RuntimeError("the source archive has duplicate member names")
-            seen.add(folded)
-            stripped = member.replace(name=member.name.split("/", 1)[1], deep=False)
-            tar.extract(stripped, dest, filter="data")
-    return dest
 
 
 MIN_GIT = (2, 38)  # safe.bareRepository
