@@ -3,6 +3,11 @@
 Standard library only, with no import from ``app`` or ``bench``, so CI can run
 it with a bare ``python3``. A hit is reported as ``<file>: <JSON path>: <rule>``
 and nothing printed, raised or returned contains the matched text.
+
+Documented limits (not detected): lower-case 32-hex secrets, upper-case 64-hex
+or 12-hex container ids, URL-encoded paths and addresses, look-alike
+(homoglyph) letters, and a secret diluted below 4.0 bits per character by a
+long low-entropy run next to it. A file with a repeated JSON key is refused.
 """
 
 from __future__ import annotations
@@ -12,9 +17,11 @@ import math
 import os
 import re
 import sys
+import unicodedata
 from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 
 RULES = (
@@ -39,15 +46,24 @@ EXACT_RULES_OFF = (
 )
 DEFAULT_DIR = Path("web/public/replays")
 
-_HOST_PATH = re.compile(r"/Users/|/home/|/root/|/var/folders/|C:\\+Users\\")
+_HOST_PATH = re.compile(
+    r"[/\\]{1,2}(?:users|home|root)[/\\]{1,2}"
+    r"|[/\\]{1,2}var[/\\]{1,2}folders[/\\]{1,2}"
+    r"|[A-Za-z]:[/\\]{1,2}users[/\\]{1,2}",
+    re.IGNORECASE,
+)
 _GITHUB = re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}|github_pat_")
 _GOOGLE = re.compile(r"AIza[0-9A-Za-z_-]{35}|ya29\.")
-_JWT = re.compile(r"eyJ[A-Za-z0-9_-]+\.eyJ")
-_PRIVATE_KEY = re.compile(r"-----BEGIN[A-Z ]*PRIVATE KEY-----")
-_OTHER = re.compile(r"AKIA[0-9A-Z]{16}|xox[abprs]-|(?<![A-Za-z0-9])sk-[A-Za-z0-9]{20,}")
+_DOTTED = re.compile(r"[A-Za-z0-9_.-]+")
+_PRIVATE_KEY = re.compile(r"-----BEGIN[A-Z ]*PRIVATE KEY(?: BLOCK)?-----")
+_OTHER = re.compile(
+    r"(?:AKIA|ASIA)[0-9A-Z]{16}|xox[abprs]-"
+    r"|sk-[A-Za-z0-9]{20,}|sk-(?:proj|ant)-[A-Za-z0-9_-]{20,}"
+)
+_INVISIBLE_MARKER = re.compile(r"<U\+[0-9A-Fa-f]{4,6}>")
 _RUN = re.compile(r"[A-Za-z0-9+/=_-]{32,}")
 _EMAIL = re.compile(
-    r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9][A-Za-z0-9._%+-]*@"
+    r"(?<![A-Za-z0-9._%+-])[._%+-]*[A-Za-z0-9][A-Za-z0-9._%+-]*@"
     r"([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})"
 )
 _SANDBOX = re.compile(
@@ -90,10 +106,12 @@ def exact_values(environ: Mapping[str, str] = os.environ) -> tuple[str, ...]:
 def exact_pattern(value: str) -> re.Pattern[str]:
     """Whole-word, case-insensitive: the value is not flanked by [A-Za-z0-9].
 
-    `_` counts as a boundary, so `<id>_cloudbuild` is still a match.
+    `_` counts as a boundary, so `<id>_cloudbuild` is still a match, and so does
+    a literal escape (`\\n`, `\\t`, ...) before the value, as in `repr()` output.
     """
     return re.compile(
-        r"(?<![A-Za-z0-9])" + re.escape(value) + r"(?![A-Za-z0-9])", re.IGNORECASE
+        r"(?:(?<![A-Za-z0-9])|(?<=\\[nrtbf]))" + re.escape(value) + r"(?![A-Za-z0-9])",
+        re.IGNORECASE,
     )
 
 
@@ -121,40 +139,80 @@ def _email(text: str) -> bool:
     )
 
 
+def _jwt(text: str) -> bool:
+    """`eyJ<base64url>` then a segment starting `eyJ`, found in linear time."""
+    for run in _DOTTED.finditer(text):
+        if "." not in run.group():
+            continue
+        segs = run.group().split(".")
+        for a, b in pairwise(segs):
+            if b.startswith("eyJ") and "eyJ" in a[:-1]:
+                return True
+    return False
+
+
 def _gcp_resource(text: str) -> bool:
     return bool(re.search(r"projects/(?!<project>)", text)) or (
         ".iam.gserviceaccount.com" in text
     )
 
 
-def scan_text(text: str, exact: Sequence[str] = ()) -> list[str]:
-    """The rules hit by ``text``, in RULES order, each once."""
+def _strip_invisible(text: str) -> str:
+    """``text`` without Cf (format, zero-width) characters and ``<U+XXXX>`` markers."""
+    if text.isascii() and "<U+" not in text:
+        return text
+    text = _INVISIBLE_MARKER.sub("", text)
+    return "".join(c for c in text if unicodedata.category(c) != "Cf")
+
+
+def scan_text(
+    text: str, exact: Sequence[str] = (), *, only: Collection[str] | None = None
+) -> list[str]:
+    """The rules hit by ``text``, in RULES order, each once.
+
+    The text is scanned twice: as given, and with invisible characters removed,
+    so a token split by a zero-width character is still caught. ``only`` limits
+    the rules that run.
+    """
+    plain = _rules_hit(text, exact, only)
+    stripped = _strip_invisible(text)
+    if stripped == text:
+        return plain
+    both = set(plain) | set(_rules_hit(stripped, exact, only))
+    return [rule for rule in RULES if rule in both]
+
+
+def _rules_hit(
+    text: str, exact: Sequence[str], only: Collection[str] | None
+) -> list[str]:
     tests = {
         "host-path": lambda: bool(_HOST_PATH.search(text)),
         "project": lambda: any(exact_pattern(v).search(text) for v in exact),
         "gcp-resource": lambda: _gcp_resource(text),
         "github-token": lambda: bool(_GITHUB.search(text)),
         "google-key": lambda: bool(_GOOGLE.search(text)),
-        "jwt": lambda: bool(_JWT.search(text)),
+        "jwt": lambda: _jwt(text),
         "private-key": lambda: bool(_PRIVATE_KEY.search(text)),
         "other-token": lambda: bool(_OTHER.search(text)),
         "high-entropy": lambda: _high_entropy(text),
         "email": lambda: _email(text),
         "sandbox": lambda: bool(_SANDBOX.search(text)),
     }
-    return [rule for rule in RULES if tests[rule]()]
+    return [r for r in RULES if (only is None or r in only) and tests[r]()]
 
 
-def _key_segment(key: str, exact: Sequence[str]) -> tuple[str, bool]:
-    """The path segment for ``key`` and whether the key itself hits a rule.
+def _key_segments(key: str, index: int, exact: Sequence[str]) -> tuple[str, str, bool]:
+    """(path of the key itself, path prefix of its value, whether the key hits).
 
-    A key that hits is never printed: it becomes ``{key}``.
+    A key that hits is never printed: it is numbered by its position in the
+    object (``{key:2}`` for the key, ``{value:2}`` for what it holds).
     """
     if scan_text(key, exact):
-        return "{key}", True
+        return f"{{key:{index}}}", f"{{value:{index}}}", True
     if _PLAIN_KEY.fullmatch(key):
-        return f".{key}", False
-    return f"[{json.dumps(key)}]", False
+        return f".{key}", f".{key}", False
+    segment = f"[{json.dumps(key)}]"
+    return segment, segment, False
 
 
 def scan_value(
@@ -164,7 +222,10 @@ def scan_value(
     exact: Sequence[str] = (),
     allow: Collection[tuple[str, str]] = (),
 ) -> list[Hit]:
-    """Every string and every object key of ``value``, with its JSON path."""
+    """Every string and every object key of ``value``, with its JSON path.
+
+    Iterative, so a deeply nested value cannot overflow the stack.
+    """
     hits: list[Hit] = []
 
     def report(path: str, text: str) -> None:
@@ -173,29 +234,46 @@ def scan_value(
                 continue
             hits.append(Hit(file, path, rule))
 
-    def walk(node: object, path: str) -> None:
+    stack: list[tuple[object, str]] = [(value, "$")]
+    while stack:
+        node, path = stack.pop()
         if isinstance(node, str):
             report(path, node)
         elif isinstance(node, dict):
-            for key, child in node.items():
-                key = str(key)
-                segment, key_hit = _key_segment(key, exact)
+            children = []
+            for i, (key, child) in enumerate(node.items()):
+                key_path, value_path, key_hit = _key_segments(str(key), i, exact)
                 if key_hit:
-                    report(path + "{key}", key)
-                walk(child, path + segment)
+                    report(path + key_path, str(key))
+                children.append((child, path + value_path))
+            stack.extend(reversed(children))
         elif isinstance(node, (list, tuple)):
-            for i, child in enumerate(node):
-                walk(child, f"{path}[{i}]")
-
-    walk(value, "$")
+            stack.extend(
+                (child, f"{path}[{i}]") for i, child in reversed(list(enumerate(node)))
+            )
     return hits
+
+
+class _DuplicateKeyError(ValueError):
+    pass
+
+
+def _no_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    out: dict[str, object] = {}
+    for key, val in pairs:
+        if key in out:
+            raise _DuplicateKeyError
+        out[key] = val
+    return out
 
 
 def _load_json(path: Path) -> tuple[str, object]:
     try:
         text = path.read_text(encoding="utf-8")
-        return text, json.loads(text)
-    except (OSError, ValueError):
+        return text, json.loads(text, object_pairs_hook=_no_duplicates)
+    except _DuplicateKeyError:
+        raise ReplayFileError(f"{path.name}: duplicate key") from None
+    except (OSError, ValueError, RecursionError):
         raise ReplayFileError(f"{path.name}: cannot be read or is not JSON") from None
 
 
@@ -215,12 +293,12 @@ def _read_allow(index_path: Path) -> dict[str, frozenset[tuple[str, str]]]:
 def _expand(paths: Sequence[Path]) -> list[Path]:
     files: list[Path] = []
     for p in paths:
-        files.extend(sorted(p.glob("*.json")) if p.is_dir() else [p])
+        files.extend(sorted(p.rglob("*.json")) if p.is_dir() else [p])
     return files
 
 
 def check_paths(paths: Sequence[Path], *, exact: Sequence[str] = ()) -> list[Hit]:
-    """Scan every file; directories expand to their ``*.json``.
+    """Scan every file; directories expand to every ``*.json`` under them.
 
     ``allow`` comes from the ``index.json`` beside each file, when there is one.
     Each file is decoded and every string scanned, then its raw text is scanned
@@ -237,8 +315,7 @@ def check_paths(paths: Sequence[Path], *, exact: Sequence[str] = ()) -> list[Hit
         hits += scan_value(data, file=path.name, exact=exact, allow=allow)
         hits += [
             Hit(path.name, "$", rule)
-            for rule in scan_text(text, exact)
-            if rule in _RAW_RULES
+            for rule in scan_text(text, exact, only=_RAW_RULES)
         ]
     return hits
 

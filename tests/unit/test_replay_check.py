@@ -39,6 +39,12 @@ SAMPLES = {
     "email": "write to alice" + "@" + "corp.io please",
     "sandbox": "container itp-0123456789ab",
 }
+EXTRA = {
+    "host-path": ["see /home/runner/x", "cd /root/.ssh", "C:\\Users\\bob"],
+    "github-token": ["github_pat_" + "11AB"],
+    "google-key": ["ya29" + ".a0Af"],
+    "other-token": ["xo" + "xb-1234", "sk-" + "A1" * 12],
+}
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +86,10 @@ ORDINARY = [
     "/workspace/src/app.py and /tmp/pytest-of-user/x",
     "<sandbox> <container> <project> <redacted> <repo> <host-path>",
     "mail me at someone@example.com or a@example.org",
-    "task-abcdefghijklmnopqrstuvwxyz is a name",
+    "risk-mitigation-strategy-abcdefghijklmnopqrstuvwxyz is prose",
+    "@@ -1,3 +1,3 @@\n-    return re.sub(r'[a-z]+', '', s)\n+    return re.sub(r'[a-z0-9]+', '', s)",
+    "tests/test_x.py::test_a PASSED [ 50%]\n=== 2 passed in 0.03s ===",
+    "The planner finds the README rule the code breaks and widens one regex.",
 ]
 
 
@@ -112,7 +121,7 @@ def test_scan_text_reports_rules_in_order_once():
 
 def test_object_keys_are_scanned():
     hits = scan_value({"run": {SAMPLES["host-path"]: 1}}, file="f.json")
-    assert hits == [Hit("f.json", "$.run{key}", "host-path")]
+    assert hits == [Hit("f.json", "$.run{key:0}", "host-path")]
     odd = scan_value({"run": {"odd key": SAMPLES["email"]}}, file="f.json")
     assert odd == [Hit("f.json", '$.run["odd key"]', "email")]
 
@@ -123,7 +132,7 @@ def test_paths_name_lists_and_nesting():
     assert str(hit) == "f.json: $.steps[3].result.stdout: sandbox"
 
 
-def test_reports_never_contain_the_matched_text(tmp_path, capsys, monkeypatch):
+def test_reports_never_contain_the_matched_text(tmp_path, capsys):
     secret = "ghp_" + "Zq9" * 9  # a github-token shape
     secret_key = "/Users/" + "mallory"
     doc = {"a": secret, "b": {secret_key: "x"}, "c": {secret_key: {"d": secret}}}
@@ -270,3 +279,123 @@ def test_module_uses_only_the_standard_library():
             assert node.level == 0
             roots.add((node.module or "").split(".")[0])
     assert roots <= set(sys.stdlib_module_names)
+
+
+@pytest.mark.parametrize(
+    ("rule", "sample"),
+    [(r, x) for r, xs in EXTRA.items() for x in xs],
+)
+def test_more_samples_per_rule(rule, sample):
+    assert rule in scan_text(sample)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "a\\n" + "sk-" + "A1" * 12,
+        "0sk-" + "A1" * 12,
+        "x\nsk-" + "abcdefghijklmnopqrst",
+        "sk-" + "proj-" + "Ab1_-" * 6,
+        "sk-" + "ant-api03-" + "Ab1_-" * 6,
+        "AS" + "IA" + "ABCDEFGH12345678",
+    ],
+)
+def test_other_token_catches_prefixed_and_wide_forms(text):
+    assert "other-token" in scan_text(text)
+
+
+@pytest.mark.parametrize("marker", ["+", "-", "_", ".", ""])
+def test_email_at_start_of_diff_line(marker):
+    assert "email" in scan_text(f"{marker}alice@corp.io\n")
+    assert "email" in scan_text(f"ctx\n{marker}alice@corp.io\n")
+
+
+def test_email_clean_cases_in_diffs():
+    assert "email" not in scan_text("+@pytest.mark.parametrize('x', [1])\n-@a.b")
+    assert "email" not in scan_text("+a@example.com\n-b@example.org")
+
+
+def test_duplicate_keys_are_refused(tmp_path, capsys):
+    path = tmp_path / "d.json"
+    secret = "gh" + "p_" + "A1" * 12
+    path.write_text('{"a": "' + secret + '", "a": "x"}')
+    assert main([str(path)]) == 2
+    err = capsys.readouterr().err
+    assert "duplicate key" in err and secret not in err and "d.json" in err
+    path.write_text('{"x": {"a": 1, "b": {"c": 1, "c": 2}}}')
+    with pytest.raises(rc.ReplayFileError, match="duplicate key"):
+        check_paths([path])
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "\\/Users\\/omar\\/x",
+        "\\/home\\/omar",
+        "c:\\users\\bob",
+        "c:\\Users\\bob",
+        "D:\\Users\\bob",
+        "/users/omar/x",
+        "\\/var\\/folders\\/ab",
+    ],
+)
+def test_host_path_escaped_and_case_variants(text):
+    assert "host-path" in scan_text(text)
+
+
+def test_project_after_a_literal_escape():
+    assert "project" in scan_text("a\\n" + PROJECT, (PROJECT,))
+    assert "project" in scan_text("a\\t" + PROJECT + "\\n", (PROJECT,))
+    assert "project" not in scan_text("n" + PROJECT, (PROJECT,))
+
+
+def test_jwt_rule_is_linear_and_still_catches_after_escape():
+    import time
+
+    start = time.perf_counter()
+    scan_text("eyJ" * 200_000)
+    assert time.perf_counter() - start < 2.0
+    assert "jwt" in scan_text("x\\n" + SAMPLES["jwt"])
+    assert "jwt" not in scan_text("eyJabc.def")
+
+
+def test_deep_nesting_does_not_escape_main(tmp_path):
+    path = tmp_path / "deep.json"
+    path.write_text("[" * 50_000 + "]" * 50_000)
+    assert main([str(path)]) in (0, 2)
+    deep: dict = {}
+    node = deep
+    for _ in range(5000):
+        node["k"] = {}
+        node = node["k"]
+    node["k"] = SAMPLES["sandbox"]
+    (hit,) = scan_value(deep, file="f")
+    assert hit.rule == "sandbox"
+
+
+def test_directories_are_scanned_recursively(tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "x.json").write_text(json.dumps({"a": SAMPLES["sandbox"]}))
+    assert [h.file for h in check_paths([tmp_path])] == ["x.json"]
+
+
+def test_key_hits_are_numbered_per_key():
+    value = {
+        "ok": 1,
+        SAMPLES["email"]: "v",
+        SAMPLES["sandbox"]: {"z": SAMPLES["email"]},
+    }
+    hits = scan_value(value, file="f")
+    paths = {(h.path, h.rule) for h in hits}
+    assert ("$.{key:1}", "email") not in paths
+    assert ("${key:1}", "email") in paths
+    assert ("${key:2}", "sandbox") in paths
+    assert ("${value:2}.z", "email") in paths
+    assert all("corp.io" not in h.path and "0123456789ab" not in h.path for h in hits)
+
+
+def test_split_tokens_are_caught_after_stripping_invisibles():
+    token = "gh" + "p_" + "A1" * 12
+    assert "github-token" in scan_text(token[:3] + "\u200b" + token[3:])
+    assert "github-token" in scan_text(token[:3] + "<U+200B>" + token[3:])
+    assert "private-key" in scan_text("-----BEGIN PGP PRIVATE KEY BLOCK-----")
