@@ -91,7 +91,7 @@ def outcomes(events) -> list[dict]:
 
 def test_probe_request_extends_run_request():
     assert issubclass(ProbeRequest, RunRequest)
-    assert set(ProbeRequest.model_fields) == {"task_id", "run_id", "probe_id"}
+    assert set(ProbeRequest.model_fields) == set(RunRequest.model_fields) | {"probe_id"}
 
 
 def test_probe_workflow_edges():

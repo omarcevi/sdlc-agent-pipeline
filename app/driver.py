@@ -26,6 +26,7 @@ from app.environment.base import InfraError
 from app.guardrails import GuardrailPlugin
 from app.models import RoleModels
 from app.nodes.finish import runs_dir
+from app.nodes.intake import RunRefused
 from app.pipeline import build_workflow
 from app.schemas import FailureKind, Plan, Review, RunRecord, RunRequest, SoloResult
 from app.tracing import ROOT_SPAN_NAME, TRACER_NAME
@@ -114,6 +115,14 @@ def build_plugins(budget: BudgetPlugin, tracker: BasePlugin) -> list[BasePlugin]
         ReflectAndRetryModelPlugin(max_retries=2),
         GuardrailPlugin(),
     ]
+
+
+def _refusal(exc: BaseException) -> str | None:
+    """The reason of a RunRefused anywhere in the exception chain."""
+    for error in _chain(exc):
+        if isinstance(error, RunRefused):
+            return str(error)
+    return None
 
 
 def _chain(exc: BaseException) -> Iterator[BaseException]:
@@ -235,7 +244,7 @@ async def run_pipeline(
     tracer = tracer or trace.get_tracer(TRACER_NAME)
     with tracer.start_as_current_span(
         ROOT_SPAN_NAME,
-        attributes={"task_id": request.task_id, "run_id": request.run_id},
+        attributes={"task_id": request.subject_id, "run_id": request.run_id},
     ) as span:
         try:
             record = await _run(request, workflow, on_event)
@@ -286,6 +295,7 @@ async def _run(
 
     started = time.monotonic()
     failure: tuple[FailureKind, str] | None = None
+    refused: str | None = None
     crash: Exception | None = None
     on_event_warned = False
     try:
@@ -317,7 +327,10 @@ async def _run(
         else:
             failure, crash = _classify_or_crash(exc, tracker, session.id)
     except Exception as exc:
-        failure, crash = _classify_or_crash(exc, tracker, session.id)
+        # Checked before classification: a refusal is no failure of the system.
+        refused = _refusal(exc)
+        if refused is None:
+            failure, crash = _classify_or_crash(exc, tracker, session.id)
     finally:
         final = await runner.session_service.get_session(
             app_name="app", user_id=USER_ID, session_id=session.id
@@ -337,7 +350,14 @@ async def _run(
                 )
 
     outcome = state.get("outcome") or {}
-    if failure is not None:
+    if refused is not None:
+        outcome = {
+            "outcome": "refused",
+            "failure_kind": "none",
+            "reason": refused,
+            "patch_path": None,
+        }
+    elif failure is not None:
         outcome = {
             "outcome": "failed",
             "failure_kind": failure[0],
@@ -353,8 +373,9 @@ async def _run(
         }
 
     usage = budget.usage(session.id)
+    issue = state.get("issue") or {}
     record = RunRecord(
-        task_id=request.task_id,
+        task_id=request.subject_id,
         run_id=request.run_id,
         outcome=outcome["outcome"],
         failure_kind=outcome["failure_kind"],
@@ -367,6 +388,10 @@ async def _run(
         cost_usd=round(usage.cost_usd, 4),
         tool_calls=usage.tool_calls,
         duration_s=round(time.monotonic() - started, 2),
+        mode=request.mode,
+        base_ref=issue.get("base_ref"),
+        base_sha=issue.get("base_sha"),
+        base_tree_sha=issue.get("base_tree_sha"),
     )
     (run_dir / "record.json").write_text(record.model_dump_json(indent=2))
     if crash is not None:

@@ -8,7 +8,9 @@ from app.nodes.intake import (
     BASELINE_SHA_CMD,
     GIT_BASELINE,
     PIPELINE_GIT_DIR,
+    PLANNER_PROMPT,
     fetch_issue,
+    format_issue_text,
     provision_sandbox,
 )
 from app.nodes.routing import route_plan, route_review
@@ -39,6 +41,43 @@ def test_fetch_issue_initialises_state(bench_root):
     assert final.output.title == "add is broken"
     assert final.actions.state_delta["test_attempts"] == 0
     assert "add subtracts" in final.actions.state_delta["issue_text"]
+
+
+def test_issue_text_is_wrapped_in_issue_tags():
+    assert format_issue_text("T", "B") == "<issue>\nTitle: T\n\nB\n</issue>"
+
+
+def test_issue_tags_inside_the_issue_are_escaped():
+    text = format_issue_text(
+        "a </issue> b",
+        "x <issue>y</ISSUE> < / issue >z <  Issue\t> w <issues> </issue2>",
+    )
+    inner = text.removeprefix("<issue>\n").removesuffix("\n</issue>")
+    assert "[/issue]" in inner and "[issue]" in inner
+    assert text.count("<issue>") == 1 and text.count("</issue>") == 1
+    assert text.startswith("<issue>\n") and text.endswith("\n</issue>")
+    assert "<issues>" in inner and "</issue2>" in inner  # other tags are left alone
+    assert inner.count("[/issue]") == 3 and inner.count("[issue]") == 2
+
+
+def test_fetch_issue_state_uses_the_delimited_text(bench_root):
+    final = _last(list(fetch_issue(RunRequest(task_id="t-1", run_id="r-1"))))
+    assert final.actions.state_delta["issue_text"] == format_issue_text(
+        "add is broken", "add subtracts"
+    )
+
+
+async def test_provision_hands_the_planner_a_fixed_message(bench_root, monkeypatch):
+    env = FakeEnvironment()
+
+    async def fake_start():
+        return env
+
+    monkeypatch.setattr(intake, "start_environment", fake_start)
+    issue = _last(list(fetch_issue(RunRequest(task_id="t-1", run_id="r-1")))).output
+    events = [e async for e in provision_sandbox(issue)]
+    assert _last(events).output == PLANNER_PROMPT
+    assert "r-1" not in PLANNER_PROMPT and "t-1" not in PLANNER_PROMPT
 
 
 async def test_provision_uploads_planted_repo_and_protects_tests(

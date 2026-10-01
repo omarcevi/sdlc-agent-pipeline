@@ -1,18 +1,47 @@
 """Pydantic models passed between workflow nodes and stored in session state."""
 
+import re
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-Outcome = Literal["patch_written", "declined", "failed"]
+Outcome = Literal[
+    "patch_written", "declined", "failed", "pr_opened", "rejected", "refused"
+]
 FailureKind = Literal["agent", "budget", "infra", "none"]
+_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
 
 class RunRequest(BaseModel):
-    """Workflow input. Week 1 supports bench mode only."""
+    """Workflow input: a bench task, or (live mode) a GitHub issue."""
 
-    task_id: str
     run_id: str
+    mode: Literal["bench", "live"] = "bench"
+    task_id: str | None = None
+    repo: str | None = None
+    issue_number: int | None = None
+    base_ref: str | None = None
+
+    @model_validator(mode="after")
+    def _check_mode_fields(self) -> "RunRequest":
+        if self.mode == "bench":
+            if not self.task_id:
+                raise ValueError("a bench request needs a task_id")
+            if self.repo is not None or self.issue_number is not None:
+                raise ValueError("a bench request takes no repo or issue_number")
+        else:
+            if not self.repo or not _REPO.fullmatch(self.repo):
+                raise ValueError("a live request needs repo as 'owner/name'")
+            if self.issue_number is None or self.issue_number < 1:
+                raise ValueError("a live request needs a positive issue_number")
+        return self
+
+    @property
+    def subject_id(self) -> str:
+        """The task id (bench) or '<owner>/<name>#<number>' (live)."""
+        if self.mode == "live":
+            return f"{self.repo}#{self.issue_number}"
+        return self.task_id or ""
 
 
 class ProbeRequest(RunRequest):
@@ -27,7 +56,12 @@ class IssueTask(BaseModel):
     repo: str
     title: str
     body: str
-    mode: Literal["bench"] = "bench"
+    mode: Literal["bench", "live"] = "bench"
+    issue_number: int | None = None
+    base_ref: str | None = None
+    base_sha: str | None = None
+    base_tree_sha: str | None = None
+    html_url: str | None = None
 
 
 class Plan(BaseModel):
@@ -84,6 +118,10 @@ class TestReport(BaseModel):
     failed_tests: list[str] = Field(default_factory=list)
     output_tail: str = ""
     duration_s: float = 0.0
+    mode: str = "bench"
+    base_ref: str | None = None
+    base_sha: str | None = None
+    base_tree_sha: str | None = None
 
 
 class ReviewComment(BaseModel):
@@ -113,3 +151,11 @@ class RunRecord(BaseModel):
     cost_usd: float = 0.0
     tool_calls: int = 0
     duration_s: float = 0.0
+    mode: str = "bench"
+    base_ref: str | None = None
+    base_sha: str | None = None
+    base_tree_sha: str | None = None
+    mode: str = "bench"
+    base_ref: str | None = None
+    base_sha: str | None = None
+    base_tree_sha: str | None = None
