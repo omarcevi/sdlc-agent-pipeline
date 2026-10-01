@@ -31,7 +31,7 @@ _BLOCK_LIMITS = (BLOCK_LIMIT, 1_000, 500, 250)
 # Bidi overrides and zero-width characters can make a title or a path read as
 # something else (Trojan source); they are never published.
 _INVISIBLE = re.compile(
-    r"[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
+    r"[\u00ad\u200b-\u200f\u202a-\u202e\u061c\u2060-\u2064\u2066-\u2069\ufeff\U000e0000-\U000e007f]"
 )
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 _FENCE_RUN = re.compile(r"`+|~+")  # a closing fence is one character type
@@ -45,7 +45,9 @@ def _one_line(text: str) -> str:
     return " ".join(_CONTROL.sub(" ", _INVISIBLE.sub(" ", text)).split())
 
 
-_ISSUE_URL = re.compile(r"https?://\S*/(?:issues|pull)/\d+\S*", re.IGNORECASE)
+_ISSUE_URL = re.compile(
+    r"https?://(?:www\.)?github\.com/\S*/(?:issues|pull)/\d+\S*", re.IGNORECASE
+)
 
 
 def _defuse(text: str) -> str:
@@ -54,8 +56,10 @@ def _defuse(text: str) -> str:
     keyword followed by a reference would close that issue."""
     text = _ISSUE_URL.sub("link", _one_line(text))
     text = re.sub(r"\bGH-(?=\d)", "GH ", text, flags=re.IGNORECASE)
-    text = re.sub(r"[#@](?=\w)", "", text)
-    return text.replace("#", "")
+    # What GitHub links: "#12" (also "owner/repo#12") and a mention. "C#", an
+    # e-mail address or a bare "#" are left alone.
+    text = re.sub(r"#(?=\d)", "", text)
+    return re.sub(r"(?<!\w)@(?=\w)", "", text)
 
 
 def _identifier(text: str, limit: int = 80) -> str:

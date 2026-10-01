@@ -7,12 +7,15 @@ only by the GitHubClient built inside `open_pr` and `post_failure_comment`.
 """
 
 import asyncio
+import functools
 import hashlib
 import logging
 import os
+import re
 import subprocess
 import tarfile
 import tempfile
+import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -120,7 +123,11 @@ def extract_tarball(
             parts = member.name.split("/")[1:]
             if any(part.lower() == ".git" for part in parts):
                 raise RuntimeError("the source archive contains a .git path")
-            folded = "/".join(p.lower() for p in parts if p not in ("", "."))
+            folded = "/".join(
+                unicodedata.normalize("NFC", p).casefold()
+                for p in parts
+                if p not in ("", ".")
+            )
             if folded in seen:
                 raise RuntimeError("the source archive has duplicate member names")
             seen.add(folded)
@@ -129,12 +136,43 @@ def extract_tarball(
     return dest
 
 
+MIN_GIT = (2, 38)  # safe.bareRepository
+
+
+def _parse_git_version(text: str) -> tuple[int, int]:
+    match = re.match(r"git version (\d+)\.(\d+)", text.strip())
+    if not match:
+        raise RuntimeError(f"cannot read the git version from {text.strip()[:60]!r}")
+    return int(match.group(1)), int(match.group(2))
+
+
+@functools.cache
+def _git_version() -> tuple[int, int]:
+    out = subprocess.run(
+        ["git", "--version"], capture_output=True, text=True, timeout=_GIT_TIMEOUT_S
+    )
+    return _parse_git_version(out.stdout)
+
+
+def _require_git() -> None:
+    if _git_version() < MIN_GIT:
+        raise RuntimeError(
+            "delivery needs git 2.38 or newer (safe.bareRepository); "
+            "this host has an older git"
+        )
+
+
 def _git(args: list[str], cwd: Path, home: Path, stdin: bytes | None = None):
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": str(home),
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": "/dev/null",
+        # An archive can look like a bare repository (HEAD, config, objects/,
+        # refs/) whose config names filter commands; never discover one.
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.bareRepository",
+        "GIT_CONFIG_VALUE_0": "explicit",
         "GIT_CEILING_DIRECTORIES": str(home),
         "LC_ALL": "C",
     }
@@ -182,6 +220,7 @@ def _check_paths(paths: list[str], protected: set[str]) -> None:
 
 def _build_changes(unified_diff: str, archive: Path, protected: set[str]):
     """Apply the patch to the pinned source with host git and read the result."""
+    _require_git()
     with tempfile.TemporaryDirectory(prefix="issue-to-pr-apply-") as tmp:
         home = Path(tmp).resolve()
         repo = home / "repo"

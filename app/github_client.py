@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
+import json
 import logging
 import math
 import os
@@ -108,6 +110,30 @@ class GitHubError(Exception):
         where = f"{method} {path}: " if method else ""
         code = f"{status} " if status is not None else ""
         super().__init__(f"{where}{code}{message}")
+
+
+def _guard_shape(method):
+    """Turn an undecodable or oddly shaped 2xx answer into a GitHubError, so callers
+    that handle GitHubError also handle a broken answer. The text never carries any
+    of the response."""
+
+    @functools.wraps(method)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await method(*args, **kwargs)
+        except (
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            KeyError,
+            TypeError,
+            IndexError,
+            AttributeError,
+        ) as exc:
+            raise GitHubError(
+                None, "", "", f"unexpected response from GitHub ({type(exc).__name__})"
+            ) from None
+
+    return wrapper
 
 
 class GitHubConfigError(GitHubError):
@@ -570,6 +596,7 @@ class GitHubClient:
 
     # -- reads --------------------------------------------------------------------
 
+    @_guard_shape
     async def get_issue(self, repo: str, number: int) -> Issue:
         data = (
             await self._request("GET", f"/repos/{_check_repo(repo)}/issues/{number}")
@@ -584,6 +611,7 @@ class GitHubClient:
             html_url=data["html_url"],
         )
 
+    @_guard_shape
     async def last_label_actor(self, repo: str, number: int, label: str) -> str | None:
         events = await self._paginate(
             f"/repos/{_check_repo(repo)}/issues/{number}/events", {"per_page": 100}
@@ -604,10 +632,12 @@ class GitHubClient:
                 best = key
         return (best[2] or None) if best else None
 
+    @_guard_shape
     async def default_branch(self, repo: str) -> str:
         data = (await self._request("GET", f"/repos/{_check_repo(repo)}")).json()
         return data["default_branch"]
 
+    @_guard_shape
     async def branch_head(self, repo: str, branch: str) -> tuple[str, str]:
         path = f"/repos/{_check_repo(repo)}/commits/{_branch_path(_check_ref(branch))}"
         data = (await self._request("GET", path)).json()
@@ -664,6 +694,7 @@ class GitHubClient:
 
         return await self._attempts(attempt)
 
+    @_guard_shape
     async def open_pipeline_prs(
         self, repo: str, issue_number: int
     ) -> list[PullRequest]:
@@ -684,6 +715,7 @@ class GitHubClient:
 
     # -- idempotent writes -------------------------------------------------------------
 
+    @_guard_shape
     async def create_commit(
         self,
         repo: str,
@@ -739,6 +771,7 @@ class GitHubClient:
         )
         return commit.json()["sha"]
 
+    @_guard_shape
     async def ensure_branch(self, repo: str, branch: str, sha: str) -> None:
         if not branch.startswith(BRANCH_PREFIX):
             raise ValueError(
@@ -778,6 +811,7 @@ class GitHubClient:
 
         await self._attempts(unit)
 
+    @_guard_shape
     async def open_pull_request(
         self, repo: str, *, head: str, base: str, title: str, body: str
     ) -> PullRequest:
@@ -818,6 +852,7 @@ class GitHubClient:
             self._me = response.json()["login"]
         return self._me
 
+    @_guard_shape
     async def comment_once(
         self, repo: str, number: int, *, body: str, marker: str
     ) -> Comment:
