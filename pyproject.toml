@@ -14,7 +14,7 @@ dependencies = [
     "a2a-sdk[http-server]>=1.0,<2",
     "aiohttp>=3.13.4",
     "google-cloud-logging>=3.12.0,<4.0.0",
-    "google-cloud-aiplatform[evaluation,agent-engines]>=1.156.0,<2.0.0",
+    "google-cloud-aiplatform[evaluation,agent-engines]>=1.165.1,<2.0.0",
     "protobuf>=6.31.1,<7.0.0",
     "litellm>=1.85,<2",
     "pyyaml>=6.0",
@@ -107,6 +107,8 @@ asyncio_default_fixture_loop_scope = "session"
 filterwarnings = ["ignore:BaseAgentConfig is deprecated:DeprecationWarning"]
 markers = [
     "docker: needs a running Docker daemon and the sandbox image (make sandbox-image)",
+    "cloud: talks to real Agent Runtime sandboxes; skipped unless ITP_CLOUD_TESTS=1 (make test-cloud)",
+    "cloud_slow: like cloud, takes minutes (templates, TTL)",
 ]
 
 [tool.hatch.build.targets.wheel]

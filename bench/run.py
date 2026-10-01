@@ -16,11 +16,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from app.environment.factory import check_environment_config, environment_backend
 from app.task_store import list_tasks, load_task, task_dir
 from app.tracing import enable_cloud_trace, flush_traces, trace_explorer_url
 from bench.matrix import plan_runs, run_matrix
 from bench.presets import PRESETS, solo_model_name
 from bench.validate import validate_task
+
+HELDOUT_ON_CLOUD = "held-out tasks never run on ENVIRONMENT_BACKEND=agent_runtime"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -38,7 +41,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--confirm-heldout",
         action="store_true",
-        help="allow running held-out tasks (their scores are for reporting only)",
+        help="allow running held-out tasks (their scores are for reporting only; "
+        "refused on ENVIRONMENT_BACKEND=agent_runtime)",
     )
     parser.add_argument(
         "--skip-validate",
@@ -57,6 +61,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     load_dotenv()  # BENCH_*_DIR may live in .env; selection and runs must agree
+    try:
+        check_environment_config()
+    except ValueError as exc:
+        return _fail(str(exc))
+    on_cloud = environment_backend() == "agent_runtime"
     if args.repeats < 1 or args.concurrency < 1:
         return _fail("--repeats and --concurrency must be at least 1")
     if args.system == "single":
@@ -78,6 +87,10 @@ def main(argv: list[str] | None = None) -> int:
         return _fail("no tasks selected")
 
     heldout = [t.task_id for t in tasks if t.split == "heldout"]
+    if on_cloud and (heldout or args.confirm_heldout):
+        # Hidden tests of held-out tasks never reach a cloud sandbox, confirmed or
+        # not. The message names no task.
+        return _fail(HELDOUT_ON_CLOUD)
     if heldout and not args.confirm_heldout:
         return _fail(
             f"held-out tasks selected ({', '.join(heldout)}); "

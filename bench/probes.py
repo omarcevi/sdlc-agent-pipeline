@@ -30,6 +30,7 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
+from app.environment.factory import check_environment_config
 from app.task_store import TaskSpec, load_task, materialize, task_dir, test_files
 
 NOT_DEV = "task is not in the dev split"
@@ -311,6 +312,10 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     load_dotenv()
+    try:
+        check_environment_config()
+    except ValueError as exc:
+        return _fail(str(exc))
     handler = {
         "validate": _validate,
         "from-overlay": _from_overlay,

@@ -1550,7 +1550,7 @@ requires-dist = [
     { name = "google-adk", extras = ["eval"], marker = "extra == 'eval'", specifier = ">=2.8.0,<2.9.0" },
     { name = "google-adk", extras = ["gcp", "otel-gcp", "bigquery-analytics"], specifier = ">=2.8.0,<2.9.0" },
     { name = "google-cloud-aiplatform", extras = ["evaluation"], marker = "extra == 'eval'", specifier = ">=1.156.0,<2.0.0" },
-    { name = "google-cloud-aiplatform", extras = ["evaluation", "agent-engines"], specifier = ">=1.156.0,<2.0.0" },
+    { name = "google-cloud-aiplatform", extras = ["evaluation", "agent-engines"], specifier = ">=1.165.1,<2.0.0" },
     { name = "google-cloud-logging", specifier = ">=3.12.0,<4.0.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "litellm", specifier = ">=1.85,<2" },

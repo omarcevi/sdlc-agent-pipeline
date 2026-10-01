@@ -1,4 +1,5 @@
 import json
+import shutil
 
 import pytest
 from google.adk.events import Event
@@ -8,6 +9,7 @@ from bench import matrix
 from bench import run as bench_run
 from bench.run import main
 from tests.fakes import make_bench_task
+from tests.unit.sandbox_fakes import CLOUD_ENV
 
 
 def ok_row(spec: matrix.RunSpec) -> dict:
@@ -207,3 +209,78 @@ def test_dotenv_is_loaded_before_tasks_are_selected(tmp_path, monkeypatch):
 def test_zero_repeats_or_concurrency_exits_2(tmp_path, capsys, flag):
     assert main(["--tasks", "tc-001", flag, "0", "--out", str(tmp_path / "o")]) == 2
     assert "at least 1" in capsys.readouterr().err
+
+
+# --- the cloud backend ----------------------------------------------------------
+
+HELDOUT_ON_CLOUD = (
+    "error: held-out tasks never run on ENVIRONMENT_BACKEND=agent_runtime\n"
+)
+
+
+def _use_cloud_backend(monkeypatch, **changes: str) -> None:
+    for name, value in {"ENVIRONMENT_BACKEND": "agent_runtime", **CLOUD_ENV}.items():
+        monkeypatch.setenv(name, changes.get(name, value))
+
+
+def _synthetic_tasks(root, monkeypatch) -> None:
+    """A dev task, syn-001, and a synthetic held-out task, syn-h01, under `root`."""
+    make_bench_task(root, task_id="syn-001")
+    shutil.copytree(root / "tasks" / "syn-001", root / "tasks" / "syn-h01")
+    task_yaml = root / "tasks" / "syn-h01" / "task.yaml"
+    task_yaml.write_text(task_yaml.read_text().replace("split: dev", "split: heldout"))
+    monkeypatch.setenv("BENCH_TASKS_DIR", str(root / "tasks"))
+    monkeypatch.setenv("BENCH_REPOS_DIR", str(root / "repos"))
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--tasks", "syn-h01"],
+        ["--tasks", "syn-h01", "--confirm-heldout"],
+        ["--tasks", "syn-001,syn-h01", "--confirm-heldout"],
+        ["--split", "heldout"],
+        ["--split", "heldout", "--confirm-heldout"],
+        ["--tasks", "syn-001", "--confirm-heldout"],
+    ],
+)
+def test_bench_run_refuses_heldout_on_the_cloud_backend(
+    tmp_path, monkeypatch, capsys, argv
+):
+    _synthetic_tasks(tmp_path, monkeypatch)
+    _use_cloud_backend(monkeypatch)
+    calls: list = []
+    _use_run_one(monkeypatch, _fake_one, calls)
+    out = tmp_path / "out"
+    assert main([*argv, "--out", str(out)]) == 2
+    printed = capsys.readouterr()
+    assert printed.err == HELDOUT_ON_CLOUD
+    assert "syn-" not in printed.out + printed.err  # it names no task
+    assert calls == [] and not out.exists()
+
+
+def test_bench_run_runs_dev_tasks_on_the_cloud_backend(tmp_path, monkeypatch):
+    _synthetic_tasks(tmp_path, monkeypatch)
+    _use_cloud_backend(monkeypatch)
+    calls: list = []
+    _use_run_one(monkeypatch, _fake_one, calls)
+    assert main(["--tasks", "syn-001", "--out", str(tmp_path / "out")]) == 0
+    ((specs, _, _),) = calls
+    assert [s.task.task_id for s in specs] == ["syn-001"]
+
+
+def test_bad_cloud_config_exits_2_before_any_run(tmp_path, monkeypatch, capsys):
+    _use_cloud_backend(monkeypatch, SANDBOX_CALLER_SA="sandbox-caller@example.com")
+    validated: list = []
+    monkeypatch.setattr(
+        bench_run, "validate_task", lambda task: validated.append(task) or []
+    )
+    calls: list = []
+    _use_run_one(monkeypatch, _fake_one, calls)
+    out = tmp_path / "out"
+    assert main(["--tasks", "tc-001", "--out", str(out)]) == 2
+    assert capsys.readouterr().err == (
+        "error: SANDBOX_CALLER_SA must be a service account email ending in "
+        ".iam.gserviceaccount.com\n"
+    )
+    assert validated == [] and calls == [] and not out.exists()

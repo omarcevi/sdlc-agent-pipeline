@@ -7,10 +7,11 @@ A run spends model credits and, once approved, opens a real pull request. The CL
 never reads the GitHub token; only the pipeline's own nodes do.
 
 Exit status: 0 when a run finished, whatever its outcome; 2 when the CLI refuses to
-start (stdin is not a terminal, an approver or repository that is not allowed, a bad
-run id or timeout setting, a run directory that already exists, or another run
-holding the issue's lock); 1 when the run crashed; 130 when Ctrl-C stopped the run.
-The run's record is written in every one of the last three cases.
+start (a bad sandbox backend setting, stdin is not a terminal, an approver or
+repository that is not allowed, a bad run id or timeout setting, a run directory
+that already exists, or another run holding the issue's lock); 1 when the run
+crashed; 130 when Ctrl-C stopped the run. The run's record is written in every one
+of the last three cases.
 
 Ctrl-C at the prompt rejects the patch. While the decision is being delivered,
 the first Ctrl-C only warns and a second one stops the run.
@@ -35,6 +36,7 @@ from pydantic import ValidationError
 
 from app.approval import ApprovalDecision, ApprovalRequest, Approver, TerminalApprover
 from app.driver import RunCrashed, approval_timeout_s, run_pipeline, run_timeout_s
+from app.environment.factory import check_environment_config
 from app.live_config import allowed_users, live_repos
 from app.live_lock import LockHeld, acquire
 from app.models import RoleModels
@@ -269,6 +271,10 @@ def main(
 ) -> int:
     args = _parser().parse_args(argv)
     load_dotenv()  # LIVE_REPOS, LIVE_ALLOWED_USERS and the models may live in .env
+    try:
+        check_environment_config()
+    except ValueError as exc:
+        return _fail(str(exc))
     stdin = sys.stdin if stdin is None else stdin
     stdout = sys.stdout if stdout is None else stdout
     if not _is_terminal(stdin):

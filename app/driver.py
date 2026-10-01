@@ -13,7 +13,7 @@ import asyncio
 import logging
 import os
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +34,7 @@ from app.approval import ApprovalDecision, ApprovalRequest, Approver
 from app.budget import BudgetExceeded, BudgetPlugin
 from app.environment import registry
 from app.environment.base import InfraError
+from app.environment.factory import check_environment_config
 from app.github_client import GitHubError, GitHubUnavailable
 from app.guardrails import GuardrailPlugin
 from app.models import (
@@ -118,13 +119,14 @@ def approval_timeout_s() -> float:
     return _positive_seconds("APPROVAL_TIMEOUT_S", raw)
 
 
-def run_timeout_s() -> float:
+def run_timeout_s(environ: Mapping[str, str] | None = None) -> float:
     """The wall-clock cap for one run, from RUN_TIMEOUT_S (default 1500 s, below the
     sandbox TTL so the driver releases the sandbox first). Anything that is not a
-    positive number is a configuration error."""
-    raw = os.environ.get("RUN_TIMEOUT_S", "1500")
+    positive number is a configuration error. `environ` defaults to os.environ."""
+    environ = os.environ if environ is None else environ
+    raw = environ.get("RUN_TIMEOUT_S", "1500")
     value = _positive_seconds("RUN_TIMEOUT_S", raw)
-    ttl_raw = os.environ.get("SANDBOX_TTL_S", "1800")  # the Docker backend's default
+    ttl_raw = environ.get("SANDBOX_TTL_S", "1800")  # the backends' default
     try:
         ttl = float(ttl_raw)
     except ValueError:
@@ -577,6 +579,7 @@ async def _run(
     """The run's record, written to record.json, and the error to raise once the
     root span has the record's outcome: RunCrashed, a cancellation, or None."""
     timeout_s = run_timeout_s()
+    check_environment_config()  # a bad backend setting fails before anything runs
     approval_limit_s = approval_timeout_s()
     check_model_call_timeout(timeout_s)
     budget = BudgetPlugin()

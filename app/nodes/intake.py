@@ -1,5 +1,6 @@
 """Issue intake and sandbox provisioning (bench and live mode)."""
 
+import logging
 import re
 import tempfile
 from pathlib import Path
@@ -17,6 +18,8 @@ from app.nodes.finish import runs_dir
 from app.schemas import IssueTask, RunRequest
 from app.task_store import load_task, materialize, test_files
 from app.textfold import normalised
+
+logger = logging.getLogger(__name__)
 
 # The pipeline's git directory lives outside the worktree, and every pipeline git
 # command names it explicitly. The worktree keeps a `.git` file so the coder's own
@@ -219,6 +222,20 @@ def _source_tree(node_input: IssueTask, source_archive: str | None, tmp: str) ->
         raise RunRefused(f"source archive refused: {exc}") from None
 
 
+async def _release_after_failure(env_id: str) -> None:
+    """Release the sandbox of a failed or cancelled set-up. A failing release (a
+    cloud delete that fails) is logged, never raised: raised, it would replace the
+    set-up's own error, and a cancellation by the run's wall-clock cap would then be
+    recorded as an infra failure instead of a budget one. The sandbox's TTL and the
+    sweeper remove what is left."""
+    try:
+        await registry.release(env_id)
+    except Exception as exc:
+        logger.warning(
+            "could not release sandbox %s: %s: %s", env_id, type(exc).__name__, exc
+        )
+
+
 async def provision_sandbox(node_input: IssueTask, source_archive: str | None = None):
     with tempfile.TemporaryDirectory() as tmp:
         repo_dir = _source_tree(node_input, source_archive, tmp)
@@ -236,7 +253,8 @@ async def provision_sandbox(node_input: IssueTask, source_archive: str | None = 
         except BaseException:
             # BaseException: a cancellation (the run's wall-clock cap, Ctrl-C) must
             # not leave the registered sandbox behind; sandbox_id is not in state yet.
-            await registry.release(env.env_id)
+            # The original error, a cancellation included, is the one that leaves.
+            await _release_after_failure(env.env_id)
             raise
     yield Event(message=f"sandbox {env.env_id} ready")
     yield Event(

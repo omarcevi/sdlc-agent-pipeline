@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 from google.adk.events import Event
 
 from app.driver import RunCrashed, run_pipeline
+from app.environment.factory import check_environment_config
 from app.review_probe import build_review_probe_workflow
 from app.schemas import ProbeRequest
 from app.tracing import enable_cloud_trace, flush_traces, trace_explorer_url
@@ -248,6 +249,10 @@ def _fail(message: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     load_dotenv()
+    try:
+        check_environment_config()
+    except ValueError as exc:
+        return _fail(str(exc))
     if args.repeats < 1 or args.concurrency < 1:
         return _fail("--repeats and --concurrency must be at least 1")
     try:
