@@ -1,7 +1,7 @@
 import type { Graphs, Replay, ReplayIndex, ReplayState } from "../replay/types";
 import multi from "./fixtures/replay-multi.json";
 import single from "./fixtures/replay-single.json";
-import graphsFixture from "./fixtures/graphs.json";
+import graphsFixture from "../graph/graphs.json";
 import indexFixture from "./fixtures/index.json";
 
 const clone = <T>(v: T): T => structuredClone(v);
