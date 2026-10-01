@@ -1,7 +1,7 @@
 """Demo repositories: export the dev tasks of a bench repo as a git repository, one
 branch per task, ready for the owner to push (Task 7, owner approval).
 
-uv run python -m bench.demo export --repo REPO --out DIR
+uv run python -m bench.demo export --repo REPO --out DIR [--email ADDRESS]
 uv run python -m bench.demo trees
 uv run python -m bench.demo verify --dir DIR/REPO
 uv run python -m bench.demo issue --task TASK_ID --repo OWNER/NAME --out DIR
@@ -37,6 +37,8 @@ _HELDOUT_ID = re.compile(r"-h\d\d$")
 _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 _REPO_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 _SLUG = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+_EMAIL = re.compile(r"[^\s<>@]+@[^\s<>@]+")
+BAD_EMAIL = "--email is not a valid address"
 BASE_MESSAGE = "Demo base"
 
 
@@ -118,9 +120,10 @@ def base_tree_sha(repo: str) -> str:
         return _tree_of(target)
 
 
-def _identity(cwd: Path) -> dict[str, str]:
+def _identity(cwd: Path, email: str | None = None) -> dict[str, str]:
     name = _git("config", "user.name", cwd=cwd, check=False)
-    email = _git("config", "user.email", cwd=cwd, check=False)
+    if email is None:
+        email = _git("config", "user.email", cwd=cwd, check=False)
     if not name or not email:
         raise DemoError("git user.name and user.email must be set to export")
     return {
@@ -148,9 +151,13 @@ def _commit_tree(
     return tree
 
 
-def export(repo: str, out: Path) -> dict[str, str]:
+def export(repo: str, out: Path, *, email: str | None = None) -> dict[str, str]:
     """A git repository at out/<repo>: `main` and one root-commit branch per demo task.
-    Returns {branch: tree sha}."""
+    `email`, when given, is the author and committer address of every commit (the name
+    still comes from git config); it is checked first and never echoed. Returns
+    {branch: tree sha}."""
+    if email is not None and not _EMAIL.fullmatch(email):
+        raise DemoError(BAD_EMAIL)
     if not _REPO_NAME.fullmatch(repo) or not (repos_dir() / repo).is_dir():
         raise DemoError(f"unknown repo: {repo}")
     tasks = demo_tasks(repo)
@@ -158,7 +165,7 @@ def export(repo: str, out: Path) -> dict[str, str]:
     if target.exists():
         raise DemoError(f"{target} already exists")
     target.parent.mkdir(parents=True, exist_ok=True)
-    who = _identity(target.parent)
+    who = _identity(target.parent, email)
     _git("init", "-q", "-b", "main", str(target))
     git_dir = target / ".git"
     trees: dict[str, str] = {}
@@ -197,7 +204,7 @@ def _fail(message: str) -> int:
 
 
 def _export(args: argparse.Namespace) -> int:
-    for branch, tree in export(args.repo, Path(args.out)).items():
+    for branch, tree in export(args.repo, Path(args.out), email=args.email).items():
         print(f"{branch} {tree}")
     return 0
 
@@ -240,6 +247,7 @@ def _parser() -> argparse.ArgumentParser:
     exp = sub.add_parser("export", help="build the demo git repository locally")
     exp.add_argument("--repo", required=True)
     exp.add_argument("--out", required=True)
+    exp.add_argument("--email", help="commit author and committer address")
     sub.add_parser("trees", help="print the expected tree sha of every demo task")
     ver = sub.add_parser("verify", help="compare fetched origin refs to the trees")
     ver.add_argument("--dir", required=True)

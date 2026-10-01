@@ -103,6 +103,45 @@ def test_export_refuses_without_a_git_identity(bench, monkeypatch, tmp_path):
     assert not (bench / "out" / "mini").exists()
 
 
+NOREPLY = "12345+owner@users.noreply.github.com"
+
+
+def test_export_uses_the_given_email_for_author_and_committer(bench):
+    add_task(bench, "t-2")
+    demo.export("mini", bench / "out", email=NOREPLY)
+    repo = bench / "out" / "mini"
+    for branch in ("main", "demo/t-1", "demo/t-2"):
+        assert git(repo, "log", "-1", "--format=%an <%ae>|%cn <%ce>", branch) == (
+            f"Owner <{NOREPLY}>|Owner <{NOREPLY}>"
+        )
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["", "nobody", "a b@example.com", "<a@example.com>", "a@", "@example.com", "a@b c"],
+)
+def test_export_refuses_an_invalid_email_without_echoing_it(bench, capsys, bad):
+    with pytest.raises(demo.DemoError) as raised:
+        demo.export("mini", bench / "out", email=bad)
+    assert str(raised.value) == "--email is not a valid address"
+    assert not (bench / "out" / "mini").exists()
+    out = str(bench / "out2")
+    status = demo.main(["export", "--repo", "mini", "--out", out, f"--email={bad}"])
+    assert status == 2
+    captured = capsys.readouterr()
+    assert captured.err.strip() == "--email is not a valid address"
+    assert captured.out == ""
+
+
+def test_identity_does_not_change_tree_shas(bench):
+    first = demo.export("mini", bench / "out-a", email="a@example.com")
+    second = demo.export("mini", bench / "out-b", email="b@example.com")
+    assert first == second
+    repo_a, repo_b = bench / "out-a" / "mini", bench / "out-b" / "mini"
+    for branch in first:
+        assert git(repo_a, "rev-parse", branch) != git(repo_b, "rev-parse", branch)
+
+
 def test_verify_reports_a_mismatch(bench, capsys):
     demo.export("mini", bench / "out")
     clone = bench / "clone" / "mini"
