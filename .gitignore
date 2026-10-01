@@ -221,3 +221,7 @@ artifacts/
 # replay site test output
 web/test-results/
 web/playwright-report/
+
+# bench.replay build: the staged and retired replay sets next to web/public/replays,
+# left behind only if a build is killed during its swap (checked files only)
+web/public/.replays-*/

@@ -962,22 +962,65 @@ def test_a_write_that_fails_midway_leaves_the_old_files(world, monkeypatch):
     assert failed >= 3  # every file was written once at least
 
 
-def test_a_swap_that_fails_leaves_the_old_files(world, monkeypatch):
+@pytest.mark.parametrize(
+    ("when", "error"),
+    [
+        ("second rename", OSError),  # moving the new set into place fails
+        ("second rename", KeyboardInterrupt),  # Ctrl-C during it
+        ("after first rename", KeyboardInterrupt),  # Ctrl-C between the renames
+    ],
+)
+def test_a_swap_that_fails_leaves_the_old_files(world, monkeypatch, when, error):
     before = _old_output(world)
     world.run(MULTI)
     world.manifest([entry(MULTI)])
     real = os.replace
 
     def replace(src, dst, *args, **kwargs):
-        if Path(src).name.startswith(".replays-new-"):
-            raise OSError("interrupted")
-        return real(src, dst, *args, **kwargs)
+        if when == "second rename" and Path(src).name.startswith(".replays-new-"):
+            raise error("interrupted")
+        done = real(src, dst, *args, **kwargs)
+        if when == "after first rename" and Path(dst).name.startswith(".replays-old-"):
+            raise error("interrupted")
+        return done
 
     monkeypatch.setattr(os, "replace", replace)
-    with pytest.raises(OSError, match="interrupted"):
+    with pytest.raises(error, match="interrupted"):
         world.build()
+    monkeypatch.setattr(os, "replace", real)
     assert world.published() == before
     assert [p.name for p in world.out.parent.iterdir()] == ["replays"]
+
+
+@pytest.mark.parametrize("refused", [True, False])
+def test_unchecked_files_never_land_next_to_the_output(world, monkeypatch, refused):
+    """The finished set is checked in the system temp directory; only checked
+    bytes are ever written next to --out."""
+    _old_output(world)
+    world.run(MULTI)
+    caption = "see /Users/alice/notes" if refused else CAPTION
+    world.manifest([entry(MULTI, caption=caption)])
+    real = replay.check_paths
+    seen: list[tuple[list[str], bool]] = []
+
+    def check_paths(paths, **kwargs):
+        (path,) = paths
+        siblings = sorted(p.name for p in world.out.parent.iterdir())
+        seen.append(
+            (siblings, Path(path).resolve().is_relative_to(world.root.resolve()))
+        )
+        return real(paths, **kwargs)
+
+    monkeypatch.setattr(replay, "check_paths", check_paths)
+    if refused:
+        assert str(world.refused()) == replay.LEAK_FOUND
+    else:
+        world.build()
+    assert seen == [(["replays"], False)]  # nothing staged yet, checked outside
+    assert [p.name for p in world.out.parent.iterdir()] == ["replays"]
+    assert ("notes.txt" in world.published()) and (
+        (f"{MULTI}.json" in world.published()) is not refused
+    )
 
 
 # --- analytics -----------------------------------------------------------------------

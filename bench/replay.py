@@ -30,6 +30,7 @@ import re
 import shutil
 import stat
 import sys
+import tempfile
 import uuid
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
@@ -1265,54 +1266,77 @@ def _sibling(out_dir: Path, kind: str) -> Path:
 
 
 def _swap_in(staging: Path, out_dir: Path) -> None:
-    """`staging` becomes `out_dir` by renames; on a failure the old directory is put
-    back. Only a hard kill between the two renames leaves `out_dir` missing, with the
-    old set intact in its `.<name>-old-*` sibling."""
+    """`staging` becomes `out_dir` by two renames (old aside, new in).
+
+    On any exception, Ctrl-C included, `out_dir` is put back from the old set. Only a
+    hard kill between the renames, or a second interrupt during that restore, leaves
+    `out_dir` missing; the old files then survive in its `.<name>-old-*` sibling.
+    """
     if not out_dir.exists():
         os.replace(staging, out_dir)
         return
     retired = _sibling(out_dir, "old")
-    os.replace(out_dir, retired)
     try:
+        os.replace(out_dir, retired)
         os.replace(staging, out_dir)
     except BaseException:
-        os.replace(retired, out_dir)
+        if retired.exists() and not out_dir.exists():
+            os.replace(retired, out_dir)
         raise
     shutil.rmtree(retired, ignore_errors=True)
 
 
-def _publish(files: dict[str, str], out_dir: Path, exact: Sequence[str]) -> None:
-    """Check the finished files (raw text included), then swap them in for `out_dir`.
+def _copy_item(item: Path, target: Path) -> None:
+    if item.is_dir() and not item.is_symlink():
+        shutil.copytree(item, target, symlinks=True)
+    elif item.is_file() and not item.is_symlink():
+        target.write_bytes(item.read_bytes())
+        shutil.copymode(item, target)
+    else:
+        shutil.copy2(item, target, follow_symlinks=False)
 
-    The new set is written into a sibling directory of `out_dir` (same filesystem),
-    with everything in `out_dir` except its `*.json` files carried over, and swapped
-    in by renames: an interruption leaves the old set or the new set, never a mix.
+
+def _publish(files: dict[str, str], out_dir: Path, exact: Sequence[str]) -> None:
+    """Check the finished set (raw text included), then swap it in for `out_dir`.
+
+    The finished set (the new files, plus everything in `out_dir` except its
+    `*.json` files) is built and leak-checked in the system temp directory, so bytes
+    that fail the check are never written under `out_dir`'s parent. Only then is it
+    copied into a sibling of `out_dir` (same filesystem) and swapped in by renames:
+    an interruption leaves the old set or the new set, never a mix.
     """
-    out_dir.parent.mkdir(parents=True, exist_ok=True)
-    staging = _sibling(out_dir, "new")
-    os.mkdir(staging)
-    try:
-        if out_dir.is_dir():
-            os.chmod(staging, stat.S_IMODE(out_dir.stat().st_mode))
-            for item in sorted(out_dir.iterdir()):
-                if item.suffix == ".json" and item.is_file():
-                    continue  # replaced, or unpublished when no longer listed
-                if item.is_dir() and not item.is_symlink():
-                    shutil.copytree(item, staging / item.name, symlinks=True)
-                else:
-                    shutil.copy2(item, staging / item.name, follow_symlinks=False)
+    carried = []
+    if out_dir.is_dir():
+        carried = [
+            item
+            for item in sorted(out_dir.iterdir())
+            if not (item.suffix == ".json" and item.is_file())
+        ]
+    with tempfile.TemporaryDirectory(prefix="replays-") as temp:
+        checked = Path(temp)
+        for item in carried:
+            _copy_item(item, checked / item.name)
         for name, text in files.items():
-            (staging / name).write_bytes(text.encode("utf-8"))
+            (checked / name).write_bytes(text.encode("utf-8"))
         try:
-            hits = check_paths([staging], exact=exact)
+            hits = check_paths([checked], exact=exact)
         except ReplayFileError:
             raise ReplayRefused(LEAK_FOUND) from None
         if hits:
             raise ReplayRefused(LEAK_FOUND, hits)
-        _swap_in(staging, out_dir)
-    finally:
-        if staging.exists():
-            shutil.rmtree(staging, ignore_errors=True)
+
+        out_dir.parent.mkdir(parents=True, exist_ok=True)
+        staging = _sibling(out_dir, "new")
+        os.mkdir(staging)
+        try:
+            if out_dir.is_dir():
+                os.chmod(staging, stat.S_IMODE(out_dir.stat().st_mode))
+            for item in sorted(checked.iterdir()):
+                _copy_item(item, staging / item.name)
+            _swap_in(staging, out_dir)
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
 
 
 def build(
