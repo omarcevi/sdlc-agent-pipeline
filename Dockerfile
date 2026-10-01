@@ -23,6 +23,8 @@ COPY ./pyproject.toml ./README.md ./uv.lock* ./
 
 COPY ./app ./app
 
+COPY ./bench ./bench
+
 RUN uv sync --frozen
 
 ARG AGENT_VERSION=0.0.0
