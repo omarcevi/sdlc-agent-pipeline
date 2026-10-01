@@ -15,6 +15,8 @@ import json
 import math
 import os
 import re
+import shutil
+import subprocess
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -894,3 +896,124 @@ def test_graphs_command_does_not_load_dotenv(monkeypatch, tmp_path):
     _fake_dotenv(monkeypatch, calls)
     assert replay.main(["graphs", "--out", str(tmp_path / "g.json")]) == 0
     assert calls == []
+
+
+def test_build_warns_when_the_project_number_is_not_checked(world, monkeypatch):
+    world.run(MULTI)
+    world.manifest([entry(MULTI)])
+    assert world.build()[0] == EXACT_RULES_OFF
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", PROJECT)
+    lines = world.build()
+    assert lines[0] == "REPLAY_REDACT unset: the project number is not checked"
+    assert EXACT_RULES_OFF not in lines
+    assert not any(PROJECT in line for line in lines)
+    monkeypatch.setenv("REPLAY_REDACT", NUMBER)
+    lines = world.build()
+    assert lines == [f"{MULTI}: {lines[0].split(': ', 1)[1]}"]
+    assert not any(NUMBER in line for line in lines)
+
+
+# --- interrupted publishing ---------------------------------------------------------
+
+
+def _old_output(world: World) -> dict[str, bytes]:
+    world.out.mkdir(parents=True)
+    (world.out / "old.json").write_text('{"old": true}\n')
+    (world.out / "index.json").write_text('{"schema": 1, "replays": []}\n')
+    (world.out / "notes.txt").write_text("not a replay\n")
+    return world.published()
+
+
+def test_a_write_that_fails_midway_leaves_the_old_files(world, monkeypatch):
+    """A failure at any write leaves exactly the old files, never a mix."""
+    world.run(MULTI)
+    world.run(SINGLE)
+    world.manifest([entry(MULTI, pair=SINGLE), entry(SINGLE, pair=MULTI)])
+    before = _old_output(world)
+    mode = world.out.stat().st_mode & 0o777
+    world.build()
+    after = world.published()
+    assert set(after) == {"index.json", f"{MULTI}.json", f"{SINGLE}.json", "notes.txt"}
+    assert world.out.stat().st_mode & 0o777 == mode
+
+    real = Path.write_bytes
+    failed = 0
+    for fail_at in range(1, 10):
+        shutil.rmtree(world.out)
+        assert _old_output(world) == before
+        writes: list[str] = []
+
+        def write_bytes(path: Path, data: bytes, fail_at=fail_at, writes=writes):
+            writes.append(path.name)
+            if len(writes) == fail_at:
+                raise OSError("disk full")
+            return real(path, data)
+
+        monkeypatch.setattr(Path, "write_bytes", write_bytes)
+        try:
+            world.build()
+        except OSError:
+            failed += 1
+            assert world.published() == before
+        else:
+            assert world.published() == after
+        monkeypatch.setattr(Path, "write_bytes", real)
+        assert [p.name for p in world.out.parent.iterdir()] == ["replays"]
+    assert failed >= 3  # every file was written once at least
+
+
+def test_a_swap_that_fails_leaves_the_old_files(world, monkeypatch):
+    before = _old_output(world)
+    world.run(MULTI)
+    world.manifest([entry(MULTI)])
+    real = os.replace
+
+    def replace(src, dst, *args, **kwargs):
+        if Path(src).name.startswith(".replays-new-"):
+            raise OSError("interrupted")
+        return real(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", replace)
+    with pytest.raises(OSError, match="interrupted"):
+        world.build()
+    assert world.published() == before
+    assert [p.name for p in world.out.parent.iterdir()] == ["replays"]
+
+
+# --- analytics -----------------------------------------------------------------------
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_analytics_switched_on_stops_the_command_before_any_app_import():
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("BQ_ANALYTICS_ENABLED", "REPLAY_REDACT")
+    }
+    # An empty project keeps app.agent from any BigQuery call even without the guard.
+    env.update(BQ_ANALYTICS_ENABLED="1", GOOGLE_CLOUD_PROJECT="")
+    code = (
+        "import runpy, sys\n"
+        "sys.argv = ['bench.replay', 'graphs', '--check']\n"
+        "try:\n"
+        "    runpy.run_module('bench.replay', run_name='__main__')\n"
+        "finally:\n"
+        "    loaded = any(m == 'app' or m.startswith('app.') for m in sys.modules)\n"
+        "    print('app imported:', loaded, file=sys.stderr)\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    assert done.returncode == 2
+    assert done.stderr.splitlines() == [
+        "error: BQ_ANALYTICS_ENABLED is set; unset it before running bench.replay",
+        "app imported: False",
+    ]
+    assert done.stdout == ""

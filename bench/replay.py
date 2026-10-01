@@ -25,9 +25,12 @@ All `app` imports sit at the top of the module, as in `bench.run`, so nothing un
 import argparse
 import json
 import math
+import os
 import re
+import shutil
+import stat
 import sys
-import tempfile
+import uuid
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -42,13 +45,24 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from pydantic import BaseModel, ValidationError
 
-from app.approval import _escaped
-from app.baseline import build_baseline_workflow
-from app.driver import PUBLIC_AGENT, PUBLIC_CRASH, PUBLIC_INFRA
-from app.models import RoleModels
-from app.pipeline import build_workflow
-from app.prompts import LEGACY_PROMPT_VERSION
-from app.schemas import (
+# Any `app` import runs `app/__init__.py`, which imports `app.agent`; with
+# BQ_ANALYTICS_ENABLED=1 that builds the BigQuery analytics plugin and creates its
+# dataset at import. Replay tooling is free and makes no cloud call, so it stops
+# first. (`uv run --env-file .env` puts .env in the environment before Python starts.)
+ANALYTICS_ON = (
+    "error: BQ_ANALYTICS_ENABLED is set; unset it before running bench.replay"
+)
+if os.environ.get("BQ_ANALYTICS_ENABLED") == "1":
+    print(ANALYTICS_ON, file=sys.stderr)
+    raise SystemExit(2)
+
+from app.approval import _escaped  # noqa: E402
+from app.baseline import build_baseline_workflow  # noqa: E402
+from app.driver import PUBLIC_AGENT, PUBLIC_CRASH, PUBLIC_INFRA  # noqa: E402
+from app.models import RoleModels  # noqa: E402
+from app.pipeline import build_workflow  # noqa: E402
+from app.prompts import LEGACY_PROMPT_VERSION  # noqa: E402
+from app.schemas import (  # noqa: E402
     Diff,
     PatchResult,
     Plan,
@@ -57,11 +71,11 @@ from app.schemas import (
     SoloResult,
     TestReport,
 )
-from app.task_store import TaskSpec
-from bench import replay_check
-from bench.probes import _HELDOUT_ID, dev_task
-from bench.progress import PIPELINE_AUTHOR, call_detail
-from bench.replay_check import (
+from app.task_store import TaskSpec  # noqa: E402
+from bench import replay_check  # noqa: E402
+from bench.probes import _HELDOUT_ID, dev_task  # noqa: E402
+from bench.progress import PIPELINE_AUTHOR, call_detail  # noqa: E402
+from bench.replay_check import (  # noqa: E402
     EXACT_RULES_OFF,
     RULES,
     UNCLEARABLE,
@@ -998,6 +1012,8 @@ ROW_NOT_SCORED = "results row is not a scored dev run"
 BAD_PAIR = "pair is not the same task on the other system"
 BAD_CAPTION = f"caption must be one line of 1 to {CAPTION_MAX} characters"
 TOO_BIG = "replay over 1 MB"
+# A warning, not a refusal: the project id is checked, the project number is not.
+REDACT_UNSET = "REPLAY_REDACT unset: the project number is not checked"
 
 
 @dataclass(frozen=True)
@@ -1244,23 +1260,59 @@ def _index_entry(entry: ManifestEntry, data: dict) -> dict:
     return item
 
 
+def _sibling(out_dir: Path, kind: str) -> Path:
+    return out_dir.parent / f".{out_dir.name}-{kind}-{uuid.uuid4().hex[:12]}"
+
+
+def _swap_in(staging: Path, out_dir: Path) -> None:
+    """`staging` becomes `out_dir` by renames; on a failure the old directory is put
+    back. Only a hard kill between the two renames leaves `out_dir` missing, with the
+    old set intact in its `.<name>-old-*` sibling."""
+    if not out_dir.exists():
+        os.replace(staging, out_dir)
+        return
+    retired = _sibling(out_dir, "old")
+    os.replace(out_dir, retired)
+    try:
+        os.replace(staging, out_dir)
+    except BaseException:
+        os.replace(retired, out_dir)
+        raise
+    shutil.rmtree(retired, ignore_errors=True)
+
+
 def _publish(files: dict[str, str], out_dir: Path, exact: Sequence[str]) -> None:
-    """Check the finished files (raw text included), then replace `out_dir/*.json`."""
-    with tempfile.TemporaryDirectory(prefix="replays-") as staging:
+    """Check the finished files (raw text included), then swap them in for `out_dir`.
+
+    The new set is written into a sibling directory of `out_dir` (same filesystem),
+    with everything in `out_dir` except its `*.json` files carried over, and swapped
+    in by renames: an interruption leaves the old set or the new set, never a mix.
+    """
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging = _sibling(out_dir, "new")
+    os.mkdir(staging)
+    try:
+        if out_dir.is_dir():
+            os.chmod(staging, stat.S_IMODE(out_dir.stat().st_mode))
+            for item in sorted(out_dir.iterdir()):
+                if item.suffix == ".json" and item.is_file():
+                    continue  # replaced, or unpublished when no longer listed
+                if item.is_dir() and not item.is_symlink():
+                    shutil.copytree(item, staging / item.name, symlinks=True)
+                else:
+                    shutil.copy2(item, staging / item.name, follow_symlinks=False)
         for name, text in files.items():
-            (Path(staging) / name).write_bytes(text.encode("utf-8"))
+            (staging / name).write_bytes(text.encode("utf-8"))
         try:
-            hits = check_paths([Path(staging)], exact=exact)
+            hits = check_paths([staging], exact=exact)
         except ReplayFileError:
             raise ReplayRefused(LEAK_FOUND) from None
-    if hits:
-        raise ReplayRefused(LEAK_FOUND, hits)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for name, text in files.items():
-        (out_dir / name).write_bytes(text.encode("utf-8"))
-    for old in sorted(out_dir.glob("*.json")):
-        if old.name not in files:
-            old.unlink()
+        if hits:
+            raise ReplayRefused(LEAK_FOUND, hits)
+        _swap_in(staging, out_dir)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
 
 
 def build(
@@ -1282,6 +1334,8 @@ def build(
     project, redact = project_value(), redact_values()
     exact = tuple(v for v in (project, *redact) if v)
     lines = [] if exact else [EXACT_RULES_OFF]
+    if project and not redact:
+        lines.append(REDACT_UNSET)
     graphs = export_graphs()
     files: dict[str, str] = {}
     index: list[dict] = []
