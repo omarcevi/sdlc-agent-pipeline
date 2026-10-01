@@ -1,7 +1,10 @@
+import httpx
 import pytest
 
+from app.github_client import GitHubClient
 from tests.fakes import make_bench_task
 from tests.unit._constants import DIFF, PROBE_NOTE
+from tests.unit.delivery_fakes import FakeGitHubRest
 
 
 @pytest.fixture
@@ -26,3 +29,28 @@ def probe_store(bench, monkeypatch):
     )
     (directory / "patch.diff").write_text(DIFF)
     return bench
+
+
+@pytest.fixture
+def github(monkeypatch):
+    server = FakeGitHubRest()
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    def factory(**kwargs):
+        return GitHubClient(
+            "tok",
+            transport=httpx.MockTransport(server),
+            sleep=no_sleep,
+            max_attempts=2,
+        )
+
+    monkeypatch.setattr(GitHubClient, "from_token_file", staticmethod(factory))
+    return server
+
+
+@pytest.fixture
+def runs(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    return tmp_path / "runs"

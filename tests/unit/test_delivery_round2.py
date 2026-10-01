@@ -11,20 +11,16 @@ from app.environment.base import InfraError
 from app.github_client import GitHubClient, GitHubError, GitHubUnavailable
 from app.nodes import finish
 from app.nodes.finish import open_pr, post_failure_comment
-from tests.unit import test_delivery as td
-from tests.unit.test_delivery import (
+from tests.unit.delivery_fakes import (
     _collect,
     _decision,
     _diff,
     _sha,
     _standard_change,
+    archive_with,
     issue_record,
     make_source,
 )
-from tests.unit.test_delivery_hardening import archive_with
-
-github = td.github
-runs = td.runs
 
 
 async def test_a_bare_repository_layout_in_the_archive_runs_nothing(
@@ -119,12 +115,14 @@ async def test_outside_the_tree_with_the_files_list_omitting_it(
     archive, _unified, _files = make_source(tmp_path, _standard_change)
     apply_root = tmp_path / "apply-root"
     apply_root.mkdir()
-    monkeypatch.setattr(tempfile, "tempdir", str(apply_root))  # ../ stays in tmp_path
+    monkeypatch.setattr(
+        tempfile, "tempdir", str(apply_root)
+    )  # ../../ from the repo lands in apply_root
     evil = (
-        "diff --git a/../escaped.txt b/../escaped.txt\n"
+        "diff --git a/../../escaped.txt b/../../escaped.txt\n"
         "new file mode 100644\n"
         "--- /dev/null\n"
-        "+++ b/../escaped.txt\n"
+        "+++ b/../../escaped.txt\n"
         "@@ -0,0 +1 @@\n"
         "+owned\n"
     )

@@ -1,7 +1,6 @@
 """open_pr against hostile archives and patches: nothing may run on the host, and
 nothing may reach GitHub."""
 
-import io
 import tarfile
 from pathlib import Path
 
@@ -10,40 +9,16 @@ import pytest
 from app.archive import UNSAFE_PATH, ArchiveError
 from app.nodes import finish
 from app.nodes.finish import open_pr
-from tests.unit import test_delivery as td
-from tests.unit.test_delivery import (
+from tests.unit.delivery_fakes import (
     _collect,
     _decision,
     _diff,
     _sha,
     _standard_change,
+    archive_with,
     issue_record,
     make_source,
 )
-
-github = td.github  # the fixtures of the delivery tests
-runs = td.runs
-TOP = "demo-widgets-abc"
-
-
-def archive_with(tmp_path: Path, extra: dict[str, bytes | None], name="evil.tar.gz"):
-    """The make_source archive plus `extra` members (None makes a directory)."""
-    base = tmp_path / "base"
-    archive = tmp_path / name
-    with tarfile.open(archive, "w:gz") as tar:
-        for path in sorted(base.iterdir()):
-            if path.name != ".git":
-                tar.add(path, arcname=f"{TOP}/{path.name}")
-        for member, data in extra.items():
-            info = tarfile.TarInfo(f"{TOP}/{member}")
-            if data is None:
-                info.type = tarfile.DIRTYPE
-                info.mode = 0o755
-                tar.addfile(info)
-            else:
-                info.size = len(data)
-                tar.addfile(info, io.BytesIO(data))
-    return archive
 
 
 def hostile_git_dir(marker: Path) -> dict[str, bytes | None]:

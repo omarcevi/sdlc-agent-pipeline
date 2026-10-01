@@ -8,24 +8,7 @@ import pytest
 
 from app import archive
 from app.archive import ArchiveError, extract_tarball
-
-
-def build(path, entries):
-    """entries: (name, bytes | None for a directory | ('link', kind, target))."""
-    with tarfile.open(path, "w:gz") as tar:
-        for name, content in entries:
-            info = tarfile.TarInfo(name)
-            if content is None:
-                info.type = tarfile.DIRTYPE
-                tar.addfile(info)
-            elif isinstance(content, tuple):
-                info.type = tarfile.SYMTYPE if content[0] == "sym" else tarfile.LNKTYPE
-                info.linkname = content[1]
-                tar.addfile(info)
-            else:
-                info.size = len(content)
-                tar.addfile(info, io.BytesIO(content))
-    return path
+from tests.unit.archives import build
 
 
 def test_top_level_directory_is_stripped(tmp_path):

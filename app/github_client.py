@@ -125,6 +125,21 @@ def _shaped(parse):
     raise GitHubError(None, "", "", f"unexpected response from GitHub ({failure})")
 
 
+def _text(value: Any) -> str:
+    """`value` when it is a string; otherwise a TypeError, which `_shaped` turns into
+    a GitHubError. Callers use these fields as strings, so a number or a list from
+    GitHub must be refused here, not crash later."""
+    if not isinstance(value, str):
+        raise TypeError("expected a string")
+    return value
+
+
+def _int(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("expected an integer")
+    return value
+
+
 class GitHubConfigError(GitHubError):
     """The token is missing, unreadable or too open, or GitHub rejected it (401,
     403 without rate-limit headers, 404)."""
@@ -296,21 +311,21 @@ def _check_change_path(path: str) -> None:
 
 def _pull_request(data: dict[str, Any]) -> PullRequest:
     return PullRequest(
-        number=data["number"],
-        html_url=data["html_url"],
-        head=data["head"]["ref"],
-        base=data["base"]["ref"],
-        state=data["state"],
-        body=data.get("body") or "",
+        number=_int(data["number"]),
+        html_url=_text(data["html_url"]),
+        head=_text(data["head"]["ref"]),
+        base=_text(data["base"]["ref"]),
+        state=_text(data["state"]),
+        body=_text(data.get("body") or ""),
     )
 
 
 def _comment(data: dict[str, Any]) -> Comment:
     return Comment(
-        id=data["id"],
-        body=data.get("body") or "",
-        author=(data.get("user") or {}).get("login", ""),
-        html_url=data["html_url"],
+        id=_int(data["id"]),
+        body=_text(data.get("body") or ""),
+        author=_text((data.get("user") or {}).get("login", "")),
+        html_url=_text(data["html_url"]),
     )
 
 
@@ -494,7 +509,7 @@ class GitHubClient:
             )
         status = response.status_code
         logger.info("%s %s %s", method, path, status)
-        if 200 <= status < 300 and parse and not stream:
+        if status < 400 and parse and not stream:
             undecodable = False
             try:
                 response.json()
@@ -626,13 +641,15 @@ class GitHubClient:
         ).json()
         return _shaped(
             lambda: Issue(
-                number=data["number"],
-                title=data.get("title") or "",
-                body=data.get("body") or "",
-                state=data["state"],
-                author=(data.get("user") or {}).get("login", ""),
-                labels=tuple(label["name"] for label in data.get("labels") or []),
-                html_url=data["html_url"],
+                number=_int(data["number"]),
+                title=_text(data.get("title") or ""),
+                body=_text(data.get("body") or ""),
+                state=_text(data["state"]),
+                author=_text((data.get("user") or {}).get("login", "")),
+                labels=tuple(
+                    _text(label["name"]) for label in data.get("labels") or []
+                ),
+                html_url=_text(data["html_url"]),
             )
         )
 
@@ -662,12 +679,14 @@ class GitHubClient:
 
     async def default_branch(self, repo: str) -> str:
         data = (await self._request("GET", f"/repos/{_check_repo(repo)}")).json()
-        return _shaped(lambda: data["default_branch"])
+        return _shaped(lambda: _text(data["default_branch"]))
 
     async def branch_head(self, repo: str, branch: str) -> tuple[str, str]:
         path = f"/repos/{_check_repo(repo)}/commits/{_branch_path(_check_ref(branch))}"
         data = (await self._request("GET", path)).json()
-        return _shaped(lambda: (data["sha"], data["commit"]["tree"]["sha"]))
+        return _shaped(
+            lambda: (_text(data["sha"]), _text(data["commit"]["tree"]["sha"]))
+        )
 
     async def download_tarball(
         self, repo: str, sha: str, dest: Path, *, max_bytes: int = 50_000_000
@@ -775,7 +794,7 @@ class GitHubClient:
                         "encoding": "base64",
                     },
                 )
-                sha = _shaped(lambda blob=blob: blob.json()["sha"])
+                sha = _shaped(lambda blob=blob: _text(blob.json()["sha"]))
             entries.append(
                 {"path": change.path, "mode": mode, "type": "blob", "sha": sha}
             )
@@ -787,7 +806,7 @@ class GitHubClient:
         author: dict[str, str] = {"name": author_name, "email": author_email}
         commit_body: dict[str, Any] = {
             "message": message,
-            "tree": _shaped(lambda: tree.json()["sha"]),
+            "tree": _shaped(lambda: _text(tree.json()["sha"])),
             "parents": [parent_sha],
             "author": author,
         }
@@ -797,7 +816,7 @@ class GitHubClient:
         commit = await self._request(
             "POST", f"/repos/{repo}/git/commits", json=commit_body
         )
-        return _shaped(lambda: commit.json()["sha"])
+        return _shaped(lambda: _text(commit.json()["sha"]))
 
     async def ensure_branch(self, repo: str, branch: str, sha: str) -> None:
         if not branch.startswith(BRANCH_PREFIX):
@@ -813,7 +832,7 @@ class GitHubClient:
             response = await self._send("GET", ref_path, allow_404=True)
             if response.status_code == 404:
                 return False
-            existing = _shaped(lambda: response.json()["object"]["sha"])
+            existing = _shaped(lambda: _text(response.json()["object"]["sha"]))
             if existing != sha:
                 raise GitHubError(
                     None,
@@ -876,7 +895,7 @@ class GitHubClient:
     async def _whoami(self) -> str:
         if self._me is None:
             response = await self._send("GET", "/user")
-            self._me = _shaped(lambda: response.json()["login"])
+            self._me = _shaped(lambda: _text(response.json()["login"]))
         return self._me
 
     async def comment_once(
@@ -887,6 +906,8 @@ class GitHubClient:
         Comments by anyone else never count: anyone can post a marker on a public
         issue, and that must not suppress the pipeline's comment.
         """
+        if not isinstance(marker, str) or not isinstance(body, str):
+            raise TypeError("marker and body must be strings")
         path = f"/repos/{_check_repo(repo)}/issues/{number}/comments"
 
         async def unit() -> Comment:

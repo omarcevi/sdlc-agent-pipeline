@@ -115,6 +115,48 @@ async def test_a_wrong_shape_in_a_listing_is_a_github_error():
             await client.open_pipeline_prs(REPO, 1)
 
 
+@pytest.mark.parametrize("status", [300, 304])
+async def test_a_non_json_3xx_is_unavailable_too(status):
+    async with make(lambda r: httpx.Response(status, content=BODY)) as client:
+        with pytest.raises(GitHubUnavailable) as caught:
+            await client.branch_head(REPO, "main")
+    err = caught.value
+    assert "was not valid JSON" in str(err)
+    assert "SECRET-RESPONSE-BODY" not in str(err)
+    assert err.__context__ is None and err.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    "call, answer",
+    [
+        ("default_branch", {"default_branch": 5}),
+        ("branch_head", {"sha": 5, "commit": {"tree": {"sha": "b" * 40}}}),
+        ("branch_head", {"sha": "a" * 40, "commit": {"tree": {"sha": ["x"]}}}),
+    ],
+)
+async def test_a_wrongly_typed_scalar_is_a_github_error(call, answer):
+    async with make(lambda r: httpx.Response(200, json=answer)) as client:
+        with pytest.raises(GitHubError) as caught:
+            await CALLS[call](client)
+    assert not isinstance(caught.value, GitHubUnavailable)
+    assert "unexpected response" in str(caught.value)
+
+
+@pytest.mark.parametrize("bad", [{"marker": None}, {"body": None}, {"marker": 5}])
+async def test_comment_once_checks_its_arguments_before_any_request(bad):
+    calls: list[int] = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(200, json=[])
+
+    args = {"body": "b", "marker": "m"} | bad
+    async with make(handler) as client:
+        with pytest.raises(TypeError):
+            await client.comment_once(REPO, 7, **args)
+    assert calls == []
+
+
 async def test_bad_caller_arguments_are_not_turned_into_github_errors():
     async with make(not_json) as client:
         with pytest.raises(TypeError):

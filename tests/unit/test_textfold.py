@@ -2,21 +2,35 @@ import time
 
 import pytest
 
-from app.archive import ArchiveError, extract_tarball
+from app.archive import UNSAFE_PATH, ArchiveError, extract_tarball
 from app.nodes.intake import format_issue_text
 from app.textfold import fold
-from tests.unit.test_archive import build
+from tests.unit.archives import build
 
 
 @pytest.mark.parametrize(
     "inside",
-    ["\x00", "\x7f", "\x9d", "\ue000", "\U000f0000", "\u0378"],  # Cc, Co, Cn
+    ["\x00", "\x1f", "\x7f", "\x9d", "\ue000", "\U000f0000", "\u0378"],  # Cc, Co, Cn
 )
 def test_control_private_use_and_unassigned_characters_are_folded_away(inside):
     assert fold(f"is{inside}sue") == "issue"
 
 
-@pytest.mark.parametrize("inside", ["\x00", "\x7f", "\x9d", "\ue000", "\u0378"])
+@pytest.mark.parametrize(
+    "inside",
+    [
+        "\x00",
+        "\x1c",
+        "\x1d",
+        "\x1e",
+        "\x1f",
+        "\x7f",
+        "\x85",
+        "\x9d",
+        "\ue000",
+        "\u0378",
+    ],
+)
 def test_a_closing_tag_with_such_a_character_inside_the_word_is_defused(inside):
     text = format_issue_text("t", f"a </is{inside}sue> b")
     assert text.count("</issue>") == 1  # only our own
@@ -34,7 +48,7 @@ def test_the_git_check_sees_through_control_characters(tmp_path, inside):
     src = build(
         tmp_path / "g.tar.gz", [("top/ok", b"1"), (f"top/.g{inside}it/config", b"x")]
     )
-    with pytest.raises(ArchiveError):
+    with pytest.raises(ArchiveError, match=UNSAFE_PATH):
         extract_tarball(src, tmp_path / "repo")
 
 

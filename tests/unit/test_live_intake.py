@@ -1,10 +1,8 @@
 """Live intake: preconditions, pinned base, archive, and how agents see the issue."""
 
-import io
 import json
-import tarfile
-from pathlib import Path
 
+import httpx
 import pytest
 from google.adk.workflow import FunctionNode, Workflow
 from pydantic import Field
@@ -14,6 +12,7 @@ from app.agents import build_coder, build_planner, build_reviewer
 from app.baseline import build_baseline_workflow
 from app.driver import run_pipeline
 from app.github_client import (
+    GitHubClient,
     GitHubConfigError,
     GitHubError,
     GitHubUnavailable,
@@ -35,6 +34,7 @@ from app.nodes.intake import (
 from app.nodes.routing import route_plan, route_review
 from app.nodes.verify import TEST_CMD, collect_diff, run_tests
 from app.pipeline import INFRA_RETRY, build_workflow
+from app.pr_text import marker
 from app.review_probe import build_review_probe_workflow
 from app.schemas import (
     IssueTask,
@@ -45,6 +45,15 @@ from app.schemas import (
     SoloResult,
 )
 from tests.fakes import BASELINE_SHA, FakeEnvironment, FakeLlm, json_out
+from tests.unit.archives import make_archive
+from tests.unit.live_fakes import (
+    BASE_SHA,
+    BODY,
+    REPO,
+    TREE_SHA,
+    FakeClientClass,
+    FakeGitHub,
+)
 from tests.unit.test_pipeline import (
     APPROVE,
     PASS,
@@ -54,111 +63,7 @@ from tests.unit.test_pipeline import (
     use_env,
 )
 
-REPO = "acme/widgets"
-BODY = "zebra-body-marker the parser drops the last row"
-BASE_SHA = "a" * 40
-TREE_SHA = "b" * 40
 SOLO = SoloResult(declined=False, summary="fixed", files_changed=["mini.py"])
-
-
-def make_archive(path: Path, files: dict[str, str]) -> Path:
-    with tarfile.open(path, "w:gz") as tar:
-        for name, content in {"acme-widgets-aaaa/": None, **files}.items():
-            if content is None:
-                info = tarfile.TarInfo(name.rstrip("/"))
-                info.type = tarfile.DIRTYPE
-                tar.addfile(info)
-                continue
-            data = content.encode()
-            info = tarfile.TarInfo(f"acme-widgets-aaaa/{name}")
-            info.size = len(data)
-            tar.addfile(info, io.BytesIO(data))
-    return path
-
-
-class FakeGitHub:
-    """Stands in for GitHubClient. Any method not listed here (a comment read, a
-    write) fails the test."""
-
-    def __init__(self, archive: Path, **overrides):
-        self.archive = archive
-        self.calls: list[tuple] = []
-        self.issue = Issue(
-            number=7,
-            title="Parser loses rows",
-            body=BODY,
-            state="open",
-            author="Owner",
-            labels=("bug", "agent-ok"),
-            html_url=f"https://github.com/{REPO}/issues/7",
-        )
-        self.label_actor: str | None = "owner"
-        self.prs: list[PullRequest] = []
-        self.default = "main"
-        self.errors: dict[str, Exception] = {}
-        self.comments: list[tuple] = []
-        self.__dict__.update(overrides)
-
-    # The node builds its client with GitHubClient.from_token_file() and uses it
-    # as an async context manager.
-    def from_token_file(self):
-        return self
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc):
-        return None
-
-    def __getattr__(self, name):
-        raise AssertionError(f"unexpected GitHub call: {name}")
-
-    async def _do(self, name, *args):
-        self.calls.append((name, *args))
-        if name in self.errors:
-            raise self.errors[name]
-
-    async def default_branch(self, repo):
-        await self._do("default_branch", repo)
-        return self.default
-
-    async def get_issue(self, repo, number):
-        await self._do("get_issue", repo, number)
-        return self.issue
-
-    async def last_label_actor(self, repo, number, label):
-        await self._do("last_label_actor", repo, number, label)
-        return self.label_actor
-
-    async def open_pipeline_prs(self, repo, number):
-        await self._do("open_pipeline_prs", repo, number)
-        return self.prs
-
-    async def branch_head(self, repo, branch):
-        await self._do("branch_head", repo, branch)
-        return BASE_SHA, TREE_SHA
-
-    async def comment_once(self, repo, number, *, body, marker):
-        # The failure comment that `report_failure` leaves in live mode (Task 3).
-        await self._do("comment_once", repo, number)
-        self.comments.append((repo, number, marker))
-
-    async def download_tarball(self, repo, sha, dest, *, max_bytes=50_000_000):
-        await self._do("download_tarball", repo, sha)
-        dest = Path(dest)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(self.archive.read_bytes())
-        return dest
-
-
-class FakeClientClass:
-    """Patched in for `intake.GitHubClient`."""
-
-    def __init__(self, fake: FakeGitHub):
-        self.fake = fake
-
-    def from_token_file(self, **kwargs):
-        return self.fake.from_token_file()
 
 
 @pytest.fixture
@@ -332,6 +237,8 @@ async def test_allowed_logins_match_case_insensitively(live):
         FakeLlm([json_out(Plan(actionable=False, decline_reason="x", summary="x"))])
     )
     assert record.outcome == "declined"  # got past every precondition
+    # a live decline leaves one marked comment, on the right issue
+    assert live.comments == [(REPO, 7, marker("r-live", "failure"))]
 
 
 async def test_closed_issue_is_refused(live):
@@ -382,13 +289,44 @@ async def test_a_listing_over_the_page_limit_is_worded_as_such(live):
     await assert_refused("GitHub response could not be read safely")
 
 
-async def test_a_bad_json_response_is_not_a_bad_branch_name(live):
-    # The client maps a non-JSON 2xx to GitHubUnavailable (infra).
-    live.errors["branch_head"] = GitHubUnavailable(
-        "GET /x: 200 response was not valid JSON"
+def real_client(answer: httpx.Response) -> GitHubClient:
+    """A real client whose every request gets `answer`."""
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    return GitHubClient(
+        "tok",
+        transport=httpx.MockTransport(lambda request: answer),
+        sleep=no_sleep,
+        max_attempts=2,
     )
-    record = await run_live()  # infra, not a refusal and not a crash
+
+
+async def test_a_bad_json_response_is_not_a_bad_branch_name(live):
+    # The real client turns a non-JSON answer into GitHubUnavailable (infra); intake
+    # must not read it as a bad branch name.
+    class HtmlHead(FakeGitHub):
+        async def branch_head(self, repo, branch):
+            async with real_client(httpx.Response(200, content=b"<html>")) as client:
+                return await client.branch_head(repo, branch)
+
+    live.__class__ = HtmlHead
+    record = await run_live()
     assert (record.outcome, record.failure_kind) == ("failed", "infra")
+    assert record.reason != "base branch name is not valid"
+
+
+async def test_a_wrongly_typed_default_branch_is_a_refusal_not_a_crash(live):
+    class NumberBranch(FakeGitHub):
+        async def default_branch(self, repo):
+            async with real_client(
+                httpx.Response(200, json={"default_branch": 5})
+            ) as client:
+                return await client.default_branch(repo)
+
+    live.__class__ = NumberBranch
+    await assert_refused("GitHub response could not be read safely")
 
 
 async def test_a_revoked_token_is_a_github_refusal(live):
@@ -490,7 +428,7 @@ async def test_comments_are_never_read(live, bench, monkeypatch):
         "open_pipeline_prs",
         "branch_head",
         "download_tarball",
-    }  # the fake raises on any other method, comments and writes included
+    }  # the fake raises on any other call; a comment read would also add to the set
 
 
 # -- provisioning from the archive ----------------------------------------------------
