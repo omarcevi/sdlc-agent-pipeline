@@ -2,16 +2,22 @@
 
 import asyncio
 import io
-import math
 import os
 import tarfile
 import uuid
 from pathlib import Path
 
-from app.environment.base import DEFAULT_TIMEOUT_S, WORKDIR, ExecResult, InfraError
+from app.environment.base import (
+    DEFAULT_TIMEOUT_S,
+    TIMEOUT_EXIT_CODES,
+    WORKDIR,
+    ExecResult,
+    InfraError,
+    sandbox_ttl_s,
+    timeout_seconds,
+)
 
 DEFAULT_IMAGE = "issue-to-pr-sandbox:dev"
-DEFAULT_TTL_S = "1800"
 # What the docker CLI itself prints when the daemon or the container is the problem.
 # Matched only at the start of stderr: a command run by the agent may print
 # anything, and its output must never be mistaken for a sandbox failure.
@@ -20,8 +26,6 @@ _DAEMON_ERROR_PREFIXES = (
     "Error: No such container",
     "Cannot connect to the Docker daemon",
 )
-# timeout(1) exits 124 after SIGTERM, or 137 when it had to follow up with SIGKILL.
-_TIMEOUT_EXIT_CODES = (124, 137)
 
 
 def _is_daemon_error(code: int, stderr: str) -> bool:
@@ -29,12 +33,10 @@ def _is_daemon_error(code: int, stderr: str) -> bool:
 
 
 def _ttl_seconds() -> str:
-    raw = os.environ.get("SANDBOX_TTL_S", DEFAULT_TTL_S)
-    if not (raw.isascii() and raw.isdigit() and int(raw) > 0):
-        raise InfraError(
-            f"SANDBOX_TTL_S must be a positive whole number of seconds, got {raw!r}"
-        )
-    return str(int(raw))
+    try:
+        return str(sandbox_ttl_s())
+    except ValueError as exc:
+        raise InfraError(str(exc)) from None
 
 
 async def _run(
@@ -121,7 +123,7 @@ class DockerEnvironment:
             "timeout",
             "-k",
             "5",
-            str(max(1, math.ceil(timeout))),
+            str(timeout_seconds(timeout)),
             "sh",
             "-c",
             command,
@@ -133,7 +135,7 @@ class DockerEnvironment:
             exit_code=code,
             stdout=out,
             stderr=err,
-            timed_out=code in _TIMEOUT_EXIT_CODES,
+            timed_out=code in TIMEOUT_EXIT_CODES,
         )
 
     def _file_error(self, action: str, path: str, code: int, err: str) -> Exception:

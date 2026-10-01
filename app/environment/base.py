@@ -1,5 +1,8 @@
 """Sandbox environment contract. Tools talk to this, never to the host."""
 
+import math
+import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Protocol
 
@@ -8,6 +11,27 @@ from pydantic import BaseModel
 WORKDIR = "/workspace/repo"
 OUTPUT_CAP = 10_000
 DEFAULT_TIMEOUT_S = 120.0
+DEFAULT_SANDBOX_TTL_S = 1800
+# Both backends run each command as `timeout -k 5 <n> sh -c <command>`. timeout(1)
+# exits 124 after SIGTERM, or 137 when it had to follow up with SIGKILL.
+TIMEOUT_EXIT_CODES = (124, 137)
+
+
+def timeout_seconds(timeout: float) -> int:
+    """The `<n>` of the `timeout` wrapper: whole seconds, rounded up, at least 1."""
+    return max(1, math.ceil(timeout))
+
+
+def sandbox_ttl_s(environ: Mapping[str, str] | None = None) -> int:
+    """SANDBOX_TTL_S (default 1800): how long a sandbox may live, on either backend.
+    Anything but a positive whole number of seconds raises ValueError."""
+    environ = os.environ if environ is None else environ
+    raw = environ.get("SANDBOX_TTL_S", str(DEFAULT_SANDBOX_TTL_S))
+    if not (raw.isascii() and raw.isdigit() and int(raw) > 0):
+        raise ValueError(
+            f"SANDBOX_TTL_S must be a positive whole number of seconds, got {raw!r}"
+        )
+    return int(raw)
 
 
 class InfraError(RuntimeError):
