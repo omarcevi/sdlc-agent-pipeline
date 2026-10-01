@@ -28,3 +28,14 @@ def test_diff_empty_flag():
 def test_run_record_roundtrips_json():
     record = RunRecord(task_id="t", run_id="r", outcome="failed", failure_kind="budget")
     assert RunRecord.model_validate_json(record.model_dump_json()) == record
+
+
+def test_run_record_counts_model_stalls_and_old_records_still_load():
+    old = (
+        '{"task_id": "t", "run_id": "r", "outcome": "failed", "failure_kind": "infra"}'
+    )
+    assert RunRecord.model_validate_json(old).model_stalls == 0
+    record = RunRecord(
+        task_id="t", run_id="r", outcome="failed", failure_kind="infra", model_stalls=2
+    )
+    assert RunRecord.model_validate_json(record.model_dump_json()).model_stalls == 2

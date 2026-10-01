@@ -5,6 +5,7 @@ import logging
 import math
 import os
 from collections.abc import AsyncGenerator
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from google.adk.models import Gemini, LlmCapabilities
@@ -18,6 +19,8 @@ DEFAULT_MODEL = "gemini-3.8-flash"
 # Twice the longest reply in completed runs up to 2026-10-01 (238 s, a flash
 # reviewer's final answer), rounded up to a whole minute.
 DEFAULT_MODEL_CALL_TIMEOUT_S = 480.0
+# How a ModelCallStalled reason starts; bench/report.py lists those runs.
+STALLED_TWICE = "model call stalled twice"
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +28,19 @@ logger = logging.getLogger(__name__)
 class ModelCallStalled(Exception):
     """A model call gave no reply within MODEL_CALL_TIMEOUT_S, and neither did its
     one retry. A provider fault: the driver records it as an infra failure."""
+
+
+@dataclass
+class StallCount:
+    """Model calls in one run that got no reply within MODEL_CALL_TIMEOUT_S."""
+
+    value: int = 0
+
+
+# The current run's stall count. The driver sets a fresh one for each run, and the
+# tasks the run starts inherit it. Outside a driver run (agents-cli) it is None and
+# a stall is only logged.
+RUN_STALLS: ContextVar[StallCount | None] = ContextVar("run_stalls", default=None)
 
 
 def model_call_timeout_s() -> float:
@@ -84,9 +100,11 @@ class ResponseToolGemini(Gemini):
             except TimeoutError as exc:
                 if not deadline.expired():
                     raise  # a transport timeout, not this deadline
+                if (stalls := RUN_STALLS.get()) is not None:
+                    stalls.value += 1
                 if attempt == 2:
                     raise ModelCallStalled(
-                        f"model call stalled twice: no reply from {self.model} "
+                        f"{STALLED_TWICE}: no reply from {self.model} "
                         f"within {timeout_s:g} s"
                     ) from exc
                 logger.warning(

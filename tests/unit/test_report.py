@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from app.models import STALLED_TWICE
+from bench import report
 from bench.report import load_rows, main, render_markdown, summarize
 
 
@@ -310,6 +312,57 @@ def test_budget_failures_grouped_by_reason():
 def test_no_budget_failures_says_none():
     md = render_markdown(summarize([row("a")]), title="T", sources=[])
     assert "None." in _section(md, "## Budget failures by cap")
+
+
+STALLED = f"{STALLED_TWICE}: no reply from gemini-3.8-flash within 480 s"
+
+
+def test_the_stall_prefix_matches_the_models_reason():
+    assert report.STALLED_TWICE == STALLED_TWICE
+
+
+def test_stalled_twice_runs_are_listed_per_configuration():
+    def stalled(task_id, run_id, **kw):
+        return row(
+            task_id,
+            run_id=run_id,
+            outcome="failed",
+            failure_kind="infra",
+            reason=STALLED,
+            infra_retries=2,
+            **kw,
+        )
+
+    other_infra = row(
+        "d", outcome="failed", failure_kind="infra", reason="ServerError: 503"
+    )
+    rows = [
+        row("a", resolved=True),
+        stalled("b", "b-retry2"),
+        stalled("c", "c-retry2"),
+        other_infra,
+        row("a", preset="pro", resolved=True),
+        stalled("a", "a-single-retry2", system="single"),
+    ]
+    multi, multi_pro, single = summarize(rows)
+    assert multi.stalled_twice == [("b-retry2", 2), ("c-retry2", 2)]
+    assert multi.infra_failures == 3 and multi.resolve_rate_mean == 1.0
+    assert multi_pro.stalled_twice == []
+    assert single.stalled_twice == [("a-single-retry2", 2)]
+
+    md = render_markdown(summarize(rows), title="T", sources=[])
+    section = _section(md, "## Model calls that stalled twice")
+    assert "| multi (flash) | 2 |" in section
+    assert "| multi (pro) | 0 |" in section
+    assert "| single (flash) | 1 |" in section
+    assert "- b-retry2 (multi (flash); infra reruns: 2)" in section
+    assert "- a-single-retry2 (single (flash); infra reruns: 2)" in section
+    assert "d-r1" not in section  # another infra failure is not a stall
+
+
+def test_no_stalled_runs_says_none():
+    md = render_markdown(summarize([row("a")]), title="T", sources=[])
+    assert "None." in _section(md, "## Model calls that stalled twice")
 
 
 def test_duplicate_rows_are_an_error(tmp_path: Path):

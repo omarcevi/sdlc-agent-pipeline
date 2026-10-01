@@ -155,9 +155,10 @@ def gemini_reply(part: dict) -> dict:
 
 class GeminiTransport:
     """Fake HTTP transport under a real google-genai client: request n gets reply
-    n, and a STALL reply never answers. No network is involved."""
+    n. A STALL reply never answers; an exception reply is raised, as a failing
+    transport would. No network is involved."""
 
-    def __init__(self, replies: list[dict | None]) -> None:
+    def __init__(self, replies: list[dict | Exception | None]) -> None:
         self._replies = list(replies)
         self.requests: list[httpx.Request] = []
 
@@ -168,16 +169,15 @@ class GeminiTransport:
         reply = self._replies.pop(0)
         if reply is STALL:
             await asyncio.Event().wait()
+        if isinstance(reply, Exception):
+            raise reply
         return httpx.Response(200, json=reply)
 
 
-def fake_gemini(
-    replies: list[dict | None],
-) -> tuple[ResponseToolGemini, GeminiTransport]:
-    """The production Gemini model class over a scripted transport. The client
-    keeps the SDK's retry layer in the call path, as make_model does."""
-    transport = GeminiTransport(replies)
-    client = genai.Client(
+def gemini_client(transport: GeminiTransport) -> genai.Client:
+    """A google-genai client over `transport`. It keeps the SDK's retry layer in
+    the call path, as make_model does."""
+    return genai.Client(
         api_key="test-key",
         vertexai=False,
         http_options=types.HttpOptions(
@@ -187,7 +187,17 @@ def fake_gemini(
             ),
         ),
     )
-    return ResponseToolGemini(model="gemini-3.8-flash", client=client), transport
+
+
+def fake_gemini(
+    replies: list[dict | Exception | None],
+) -> tuple[ResponseToolGemini, GeminiTransport]:
+    """The production Gemini model class over a scripted transport."""
+    transport = GeminiTransport(replies)
+    model = ResponseToolGemini(
+        model="gemini-3.8-flash", client=gemini_client(transport)
+    )
+    return model, transport
 
 
 class FakeEnvironment:

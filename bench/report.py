@@ -43,6 +43,9 @@ _NUMBERS = (
     "review_rounds",
 )
 _REASON_CHARS = 160
+# How the reason of a run ended by app.models.ModelCallStalled starts (a test keeps
+# the two in step; this module stays free of app imports).
+STALLED_TWICE = "model call stalled twice"
 
 
 def load_rows(paths: list[Path]) -> list[dict]:
@@ -95,6 +98,8 @@ class Summary:
     # (run id, bucket, one-line reason) for every run that is not resolved
     not_resolved: list[tuple[str, str, str]] = field(default_factory=list)
     budget_reasons: dict[str, int] = field(default_factory=dict)
+    # (run id, infra reruns) for every run whose model call stalled twice
+    stalled_twice: list[tuple[str, int]] = field(default_factory=list)
 
 
 def _counted(r: dict) -> bool:
@@ -179,6 +184,8 @@ def _summarize_group(system: str, preset: str, rows: list[dict]) -> Summary:
             )
         if r["resolved"] and r["audit"]:
             s.flagged.append((run_id, list(r["audit"])))
+        if (r.get("reason") or "").startswith(STALLED_TWICE):
+            s.stalled_twice.append((run_id, r["infra_retries"]))
     s.by_category = {c: (v[0], v[1]) for c, v in sorted(cats.items())}
     s.by_repo = {c: (v[0], v[1]) for c, v in sorted(repos.items())}
     s.by_difficulty = {
@@ -383,6 +390,30 @@ def render_markdown(summaries: list[Summary], *, title: str, sources: list[str])
             for s, cfg in zip(summaries, configs, strict=True):
                 for reason, n in s.budget_reasons.items():
                     lines.append(f"| {cfg} | {_cell(reason)} | {n} |")
+        else:
+            lines.append("None.")
+
+        lines += ["", "## Model calls that stalled twice", ""]
+        if any(s.stalled_twice for s in summaries):
+            lines += [
+                "Runs that ended because a model call gave no reply within "
+                "MODEL_CALL_TIMEOUT_S, twice in a row. They are infra failures, so "
+                "they are outside the resolve rate's denominator. Each row is the "
+                "last attempt; infra reruns counts the attempts before it.",
+                "",
+                "| configuration | stalled twice |",
+                "|---|---|",
+            ]
+            lines += [
+                f"| {cfg} | {len(s.stalled_twice)} |"
+                for s, cfg in zip(summaries, configs, strict=True)
+            ]
+            lines.append("")
+            lines += [
+                f"- {rid} ({cfg}; infra reruns: {reruns})"
+                for s, cfg in zip(summaries, configs, strict=True)
+                for rid, reruns in s.stalled_twice
+            ]
         else:
             lines.append("None.")
 

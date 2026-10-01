@@ -107,3 +107,6 @@ class RunRecord(BaseModel):
     cost_usd: float = 0.0
     tool_calls: int = 0
     duration_s: float = 0.0
+    # Model call timeouts (MODEL_CALL_TIMEOUT_S, app/models.py): each counts, so a
+    # call that stalled twice counts 2. Older records load as 0.
+    model_stalls: int = 0

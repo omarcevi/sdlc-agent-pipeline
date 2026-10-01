@@ -24,7 +24,13 @@ from app.budget import BudgetExceeded, BudgetPlugin
 from app.environment import registry
 from app.environment.base import InfraError
 from app.guardrails import GuardrailPlugin
-from app.models import ModelCallStalled, RoleModels, model_call_timeout_s
+from app.models import (
+    RUN_STALLS,
+    ModelCallStalled,
+    RoleModels,
+    StallCount,
+    model_call_timeout_s,
+)
 from app.nodes.finish import runs_dir
 from app.pipeline import build_workflow
 from app.schemas import FailureKind, Plan, Review, RunRecord, RunRequest, SoloResult
@@ -300,6 +306,9 @@ async def _run(
         role="user", parts=[types.Part.from_text(text=request.model_dump_json())]
     )
 
+    # Model calls in this run (and the tasks it starts) count their stalls here.
+    stalls = StallCount()
+    stalls_token = RUN_STALLS.set(stalls)
     started = time.monotonic()
     failure: tuple[FailureKind, str] | None = None
     crash: Exception | None = None
@@ -335,6 +344,7 @@ async def _run(
     except Exception as exc:
         failure, crash = _classify_or_crash(exc, tracker, session.id)
     finally:
+        RUN_STALLS.reset(stalls_token)
         final = await runner.session_service.get_session(
             app_name="app", user_id=USER_ID, session_id=session.id
         )
@@ -383,6 +393,7 @@ async def _run(
         cost_usd=round(usage.cost_usd, 4),
         tool_calls=usage.tool_calls,
         duration_s=round(time.monotonic() - started, 2),
+        model_stalls=stalls.value,
     )
     (run_dir / "record.json").write_text(record.model_dump_json(indent=2))
     if crash is not None:
