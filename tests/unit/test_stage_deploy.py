@@ -8,6 +8,7 @@ import builtins
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -207,6 +208,7 @@ def test_stage_refuses_a_task_yaml_that_is_not_dev(tmp_path):
 
 def test_stage_rebuilds_from_scratch(tree, tmp_path):
     out = tmp_path / "out"
+    sd.stage(tree, out)
     write(out / "leftover.txt")
     write(out / "app" / "old.py")
     sd.stage(tree, out)
@@ -223,6 +225,41 @@ def test_stage_refuses_an_out_dir_that_holds_the_project(tree):
     assert (tree / "Dockerfile").exists()
 
 
+@pytest.mark.parametrize("name", ["app", "bench", "runs", "results", "docs", "build"])
+def test_stage_refuses_an_out_dir_inside_the_repo_but_outside_build(tree, name):
+    write(tree / name / "keep.txt", "keep")
+    with pytest.raises(sd.StageRefused):
+        sd.stage(tree, tree / name)
+    assert (tree / name / "keep.txt").read_text() == "keep"
+    assert sd.main(["stage", "--out", name], repo_root=tree) == 1
+
+
+def test_stage_accepts_an_out_dir_under_build(tree):
+    sd.stage(tree, tree / "build" / "deploy")
+    assert (tree / "build" / "deploy" / "Dockerfile").is_file()
+    sd.stage(tree, tree / "build" / "deploy")  # the marker lets it rebuild
+
+
+def test_stage_removes_only_an_empty_or_marked_directory(tmp_path, tree):
+    foreign = tmp_path / "foreign"
+    write(foreign / "precious.txt", "keep")
+    with pytest.raises(sd.StageRefused):
+        sd.stage(tree, foreign)
+    assert (foreign / "precious.txt").read_text() == "keep"
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    sd.stage(tree, empty)
+    assert (empty / "Dockerfile").is_file()
+
+
+def test_a_refused_task_leaves_no_half_built_tree(tmp_path):
+    tree = make_tree(tmp_path / "repo", split="heldout")
+    out = tmp_path / "out"
+    with pytest.raises(sd.StageRefused):
+        sd.stage(tree, out)
+    assert not out.exists()
+
+
 def test_deployment_metadata_is_copied_only_when_present(tree, tmp_path):
     (tree / "deployment_metadata.json").unlink()
     staged = sd.stage(tree, tmp_path / "out")
@@ -236,9 +273,18 @@ def test_a_missing_required_root_file_stops_staging(tree, tmp_path):
         sd.stage(tree, tmp_path / "out")
 
 
-def test_real_tree_staging_has_no_sealed_paths(tmp_path):
+def test_real_tree_staging_has_no_sealed_paths(tmp_path, monkeypatch):
     out = tmp_path / "out"
+    # The spy goes in before staging: a pruning regression raises at the first
+    # access under a held-out directory, before anything in it is read.
+    seen = install_spy(
+        monkeypatch,
+        lambda p: (
+            bool(re.search(r"-h[0-9]{2}(/|$)", p)) and not p.startswith(str(tmp_path))
+        ),
+    )
     staged = sd.stage(ROOT, out)
+    assert seen == []
     held = sealed = dotenv = 0
     task_dirs = 0
     for base, dirs, files in os.walk(out):
@@ -311,11 +357,14 @@ def test_deploy_args_use_update_only_and_the_sizes():
 class FakeRun:
     """Answers git, terraform and smoke commands; records agents-cli with its cwd."""
 
-    def __init__(self, *, smoke_stdout=""):
+    def __init__(self, *, smoke_stdout="", smoke_code=0, smoke_stderr=""):
         self.calls: list[tuple[list[str], str | None]] = []
+        self.uv_calls: list[tuple[list[str], str | None, bool]] = []
         self.smoke_stdout = smoke_stdout
+        self.smoke_code = smoke_code
+        self.smoke_stderr = smoke_stderr
 
-    def __call__(self, cmd, *, capture=True, cwd=None):
+    def __call__(self, cmd, *, capture=True, cwd=None, tee=False):
         cmd = list(cmd)
         self.calls.append((cmd, None if cwd is None else str(cwd)))
         joined = " ".join(cmd)
@@ -330,7 +379,10 @@ class FakeRun:
                 write(Path(cwd) / "deployment_metadata.json", '{"deployed": true}')
             return done()
         if cmd[0] == "uv":
-            return done(self.smoke_stdout)
+            self.uv_calls.append((cmd, None if cwd is None else str(cwd), tee))
+            return subprocess.CompletedProcess(
+                cmd, self.smoke_code, stdout=self.smoke_stdout, stderr=self.smoke_stderr
+            )
         raise AssertionError(f"unexpected command: {joined}")
 
     def agents_cli(self):
@@ -442,14 +494,24 @@ def test_passthrough_url_takes_the_location_from_the_engine():
     )
 
 
-def verbose_output(*texts):
+def verbose_output(*texts, final_output=True):
     """What `agents-cli run --verbose` prints: human text, then each event as
-    indented JSON."""
+    indented JSON. In the real bench graph the last event is the `deliver_patch` node's
+    `output` event, which carries no `content`."""
     chunks = []
     for text in texts:
-        event = {"author": "report", "content": {"parts": [{"text": text}]}}
-        chunks.append(f"[report]: {text}\n\n" + json.dumps(event, indent=2) + "\n")
-    return "".join(chunks)
+        event = {"author": "deliver_patch", "content": {"parts": [{"text": text}]}}
+        chunks.append(
+            f"[deliver_patch]: {text}\n\n" + json.dumps(event, indent=2) + "\n"
+        )
+    if final_output:
+        last = {
+            "author": "issue_to_pr",
+            "output": {"patch": "p.diff"},
+            "node_info": {"path": "issue_to_pr@1/deliver_patch@1"},
+        }
+        chunks.append("\n" + json.dumps(last, indent=2) + "\n")
+    return "".join(chunks) + "\nSession: abc-123\n"
 
 
 def run_smoke(repo, stdout, *extra, code=0):
@@ -478,10 +540,39 @@ def test_smoke_passes_only_on_patch_written(tree):
         "adk",
         "--verbose",
     ]
-    # a run that does not end with the report fails, even if an earlier event passed
+    # the last event that carries text decides, not an earlier one
     assert run_smoke(tree, verbose_output("patch written", "failed: budget"))[0] == 1
     assert run_smoke(tree, verbose_output("no patch"))[0] == 1
+
+
+def test_smoke_skips_the_contentless_final_output_event(tree):
+    ok = verbose_output("working", "patch written to p.diff", final_output=True)
+    assert run_smoke(tree, ok)[0] == 0
+    assert sd.last_event_text(ok) == "patch written to p.diff"
+    failed = verbose_output("patch written", "report_failure: declined")
+    assert run_smoke(tree, failed)[0] == 1
+
+
+def test_smoke_fails_when_no_event_has_text(tree):
+    assert run_smoke(tree, verbose_output())[0] == 1
     assert run_smoke(tree, "")[0] == 1
+
+
+def test_smoke_failure_prints_the_code_stderr_and_session(tree, capsys):
+    run = FakeRun(smoke_stdout=verbose_output(), smoke_code=3, smoke_stderr="HTTP 403")
+    status = sd.main(
+        ["smoke"], repo_root=tree, run=run, environ={}, out=lambda line: None
+    )
+    err = capsys.readouterr().err
+    assert status == 1
+    assert "HTTP 403" in err and "exit code 3" in err and "abc-123" in err
+
+
+def test_smoke_streams_and_runs_from_the_project_root(tree):
+    _status, run = run_smoke(tree, verbose_output("patch written"))
+    ((_cmd, cwd, tee),) = [(c, w, t) for c, w, t in run.uv_calls]
+    assert tee is True
+    assert Path(cwd).resolve() == tree.resolve()
 
 
 def test_smoke_options_and_heldout_refusal(tree):

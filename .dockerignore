@@ -1,0 +1,12 @@
+# The deploy tree is staged by scripts/stage_deploy.py; a build from the project
+# root must not bake in sealed tasks, hidden tests or secrets.
+.env
+.env.*
+**/hidden_tests
+**/solution
+**/shortcut
+bench/tasks/*-h[0-9][0-9]
+build
+runs
+results
+.git
