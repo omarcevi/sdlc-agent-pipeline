@@ -22,6 +22,17 @@ resource "google_project_iam_member" "guard_billing_project_manager" {
   depends_on = [google_project_service.budget_services]
 }
 
+# Reading the project's billing status needs resourcemanager.projects.get, which
+# billing.projectManager does not carry (the 2026-10-02 dry run showed get=False).
+# Browser is the narrowest predefined role with it: read-only project metadata.
+resource "google_project_iam_member" "guard_browser" {
+  project = var.project_id
+  role    = "roles/browser"
+  member  = google_service_account.guard.member
+
+  depends_on = [google_project_service.budget_services]
+}
+
 resource "google_project_iam_member" "guard_build_builder" {
   project = var.project_id
   role    = "roles/cloudbuild.builds.builder"

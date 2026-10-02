@@ -212,6 +212,9 @@ def test_guard_roles_are_project_billing_manager_and_invoker_only():
         ("google_cloud_run_service_iam_member", "roles/run.invoker"),
     }
     assert ("google_project_iam_member", "roles/billing.projectManager") in granted
+    # The 2026-10-02 dry run showed roles/billing.projectManager lacks
+    # resourcemanager.projects.get, so the guard could not read the billing status.
+    assert ("google_project_iam_member", "roles/browser") in granted
     assert ("google_cloud_run_service_iam_member", "roles/run.invoker") in granted
 
     members = re.findall(r'resource "google_project_iam_member" "(\w+)" \{', text)
