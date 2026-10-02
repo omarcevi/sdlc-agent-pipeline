@@ -267,3 +267,23 @@ def test_more_than_60_runs_is_refused_after_the_cost_rule(tmp_path):
         bench(big, "--repeats", "5"),
         "worst case $65.00 is over $25; pass accept_over_25 to run it",
     )
+
+
+def test_pro_and_mixed_are_capped_at_30_runs(tmp_path):
+    # They run one at a time, so more than 30 would not finish in the 360-minute job.
+    ok = _many(tmp_path, 10)
+    for preset in ("pro", "mixed"):
+        r = bench(ok, "--preset", preset, "--repeats", "3", "--budget-usd", "0.10")
+        assert r.returncode == 0, r.stderr
+        assert r.stdout == "worst case: $3.00 for 30 runs\n"
+    big = tmp_path / "many3"
+    big.mkdir()
+    for i in range(11):
+        (big / f"tc-{i + 1:03d}").mkdir()
+    for preset in ("pro", "mixed"):
+        assert_refused(
+            bench(big, "--preset", preset, "--repeats", "3", "--budget-usd", "0.10"),
+            "more than 30 runs with pro or mixed in one dispatch; split it",
+        )
+    r = bench(big, "--preset", "flash", "--repeats", "3", "--budget-usd", "0.10")
+    assert r.returncode == 0, r.stderr

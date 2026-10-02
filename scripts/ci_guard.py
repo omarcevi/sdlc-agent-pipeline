@@ -22,6 +22,8 @@ SMOKE_TASKS = ("tc-001", "tc-003", "sr-001")
 EVAL_RUNS = 5
 LIMIT_USD = Decimal("25.00")
 MAX_RUNS = 60
+# pro and mixed run one at a time, so fewer fit in the 360-minute job.
+MAX_SLOW_RUNS = 30
 DEV_ID = re.compile(r"[a-z]{2}-[0-9]{3}")
 HELD_OUT = re.compile(r"-h[0-9][0-9]", re.IGNORECASE)
 
@@ -119,6 +121,11 @@ def main(argv: list[str]) -> int:
             )
         if runs > MAX_RUNS:
             raise Refused(f"more than {MAX_RUNS} runs in one dispatch; split it")
+        if preset in ("pro", "mixed") and runs > MAX_SLOW_RUNS:
+            raise Refused(
+                f"more than {MAX_SLOW_RUNS} runs with pro or mixed in one dispatch;"
+                " split it"
+            )
     except Refused as e:
         print(f"error: {' '.join(str(e).split())}", file=sys.stderr)
         return 2
