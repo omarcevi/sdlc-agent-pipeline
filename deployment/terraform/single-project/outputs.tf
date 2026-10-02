@@ -32,6 +32,21 @@ output "sandbox_image_repository" {
   value       = "${var.region}-docker.pkg.dev/${var.project_id}/issue-to-pr"
 }
 
+output "wif_provider" {
+  description = "Workload identity provider that GitHub Actions authenticates through"
+  value       = google_iam_workload_identity_pool_provider.github.name
+}
+
+output "ci_runner_email" {
+  description = "Service account the CI runner impersonates (main branch only)"
+  value       = google_service_account.ci_runner.email
+}
+
+output "deployer_email" {
+  description = "Service account the deploy job impersonates (production environment only)"
+  value       = google_service_account.deployer.email
+}
+
 output "project_id" {
   description = "The project this root was applied to; make's project pin compares it with GOOGLE_CLOUD_PROJECT."
   value       = var.project_id

@@ -319,6 +319,18 @@ def last_event_text(output: str) -> str:
 # ---- commands ---------------------------------------------------------------
 
 
+def _outputs_from_env(raw: str) -> dict[str, str]:
+    """Parse ITP_TF_OUTPUTS (CI has no Terraform state); never echo the value."""
+    problem = UsageError("ITP_TF_OUTPUTS must be a JSON object of strings")
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        raise problem from None
+    if not isinstance(data, dict) or not all(isinstance(v, str) for v in data.values()):
+        raise problem
+    return data
+
+
 class Context:
     def __init__(
         self,
@@ -334,9 +346,13 @@ class Context:
 
     def output(self, name: str) -> str:
         if self._outputs is None:
-            self._outputs = infra.terraform_outputs(
-                self.repo_root / infra.TERRAFORM_ROOT, self.run
-            )
+            raw = self.environ.get("ITP_TF_OUTPUTS")
+            if raw is None:
+                self._outputs = infra.terraform_outputs(
+                    self.repo_root / infra.TERRAFORM_ROOT, self.run
+                )
+            else:
+                self._outputs = _outputs_from_env(raw)
         value = self._outputs.get(name)
         if not value:
             raise UsageError(f"terraform output {name} is missing")

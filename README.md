@@ -1,5 +1,7 @@
 # issue-to-pr
 
+[![CI](https://github.com/omarcevi/sdlc-agent-pipeline/actions/workflows/ci.yaml/badge.svg)](https://github.com/omarcevi/sdlc-agent-pipeline/actions/workflows/ci.yaml)
+
 A multi-agent pipeline on Google ADK 2.x that turns a GitHub issue into a tested pull request.
 
 **Watch it work:** [replays of seven real runs](https://omarcevi.dev/sdlc-agent-pipeline/), step by step: the pipeline graph, every tool call, the diff, the tests, the reviewer's verdict and the cost. A static site, no backend.

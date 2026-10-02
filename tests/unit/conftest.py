@@ -1,6 +1,7 @@
 import httpx
 import pytest
 
+from app.environment import docker
 from app.github_client import GitHubClient
 from tests.fakes import make_bench_task
 from tests.unit._constants import DIFF, PROBE_NOTE
@@ -54,3 +55,19 @@ def github(monkeypatch):
 def runs(tmp_path, monkeypatch):
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
     return tmp_path / "runs"
+
+
+@pytest.fixture(autouse=True)
+def no_real_sandbox(request, monkeypatch):
+    """A test not marked `docker` must never run a real docker command: it would
+    pass on a machine that has the image and fail on one that has not."""
+    if request.node.get_closest_marker("docker"):
+        return
+
+    async def refuse(*args, **kwargs):
+        raise AssertionError(
+            "a test not marked `docker` tried to run a real docker command; "
+            "use a fake environment (use_env(monkeypatch, FakeEnvironment()))"
+        )
+
+    monkeypatch.setattr(docker, "_run", refuse)
