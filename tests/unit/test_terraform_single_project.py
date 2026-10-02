@@ -224,3 +224,140 @@ def test_terraform_leaves_what_the_deploy_and_the_log_sink_change():
     assert re.search(
         r"ignore_changes\s*=\s*\[\s*schema\s*\]", _block(table, "lifecycle")
     )
+
+
+def _roles(text: str, resource: str) -> set[str]:
+    body = _block(text, f'resource "google_project_iam_member" "{resource}"')
+    return set(re.findall(r'"(roles/[^"]+)"', body))
+
+
+def test_wif_provider_trusts_only_this_repository():
+    text = _tf("cicd.tf")
+    pool = _block(text, 'resource "google_iam_workload_identity_pool" "github"')
+    assert _has(pool, r'workload_identity_pool_id\s*=\s*"github-actions"')
+    provider = _block(
+        text, 'resource "google_iam_workload_identity_pool_provider" "github"'
+    )
+    assert _has(provider, r'workload_identity_pool_provider_id\s*=\s*"github-oidc"')
+    oidc = _block(provider, "oidc")
+    assert _has(
+        oidc, r'issuer_uri\s*=\s*"https://token\.actions\.githubusercontent\.com"'
+    )
+    mapping = _block(provider, "attribute_mapping =")
+    for key, value in {
+        "google.subject": "assertion.sub",
+        "attribute.repository_id": "assertion.repository_id",
+        "attribute.ref": "assertion.ref",
+        "attribute.environment": "assertion.environment",
+        "attribute.event_name": "assertion.event_name",
+    }.items():
+        assert _has(mapping, rf'"{re.escape(key)}"\s*=\s*"{re.escape(value)}"'), (
+            "attribute mapping incomplete"
+        )
+    condition = re.search(r"attribute_condition\s*=\s*(\"(?:[^\"\\]|\\.)*\")", provider)
+    assert condition, "provider needs an attribute_condition"
+    assert condition.group(1) == (
+        '"assertion.repository_id == \\"${var.github_repository_id}\\""'
+    )
+    variable = _block(_tf("variables.tf"), 'variable "github_repository_id"')
+    assert _has(variable, r'default\s*=\s*"1401169707"')
+    assert _has(variable, r"type\s*=\s*string")
+    assert _has(_block(variable, "validation"), r"\^\[0-9\]\+\$")
+
+
+def test_ci_runner_roles_are_exact():
+    text = _tf("cicd.tf")
+    assert _has(
+        _block(text, 'resource "google_service_account" "ci_runner"'),
+        r'account_id\s*=\s*"ci-runner"',
+    )
+    assert _roles(text, "ci_runner_roles") == {
+        "roles/aiplatform.user",
+        "roles/serviceusage.serviceUsageConsumer",
+    }
+
+
+def test_deployer_roles_are_exact_and_acts_only_as_the_app():
+    text = _tf("cicd.tf")
+    assert _has(
+        _block(text, 'resource "google_service_account" "deployer"'),
+        r'account_id\s*=\s*"deployer"',
+    )
+    assert _roles(text, "deployer_roles") == {
+        "roles/aiplatform.user",
+        "roles/serviceusage.serviceUsageConsumer",
+    }
+    acts = _block(
+        text, 'resource "google_service_account_iam_member" "deployer_acts_as_app"'
+    )
+    assert _has(acts, r'role\s*=\s*"roles/iam\.serviceAccountUser"')
+    assert _has(acts, r"service_account_id\s*=\s*google_service_account\.app_sa\.name")
+    assert _has(
+        acts,
+        r'member\s*=\s*"serviceAccount:\$\{google_service_account\.deployer\.email\}"',
+    )
+    others = re.findall(r'resource "google_service_account_iam_member" "(\w+)"', text)
+    assert sorted(others) == [
+        "ci_runner_wif",
+        "deployer_acts_as_app",
+        "deployer_wif",
+    ]
+
+
+def test_ci_runner_binding_is_main_only():
+    body = _block(
+        _tf("cicd.tf"), 'resource "google_service_account_iam_member" "ci_runner_wif"'
+    )
+    assert _has(body, r'role\s*=\s*"roles/iam\.workloadIdentityUser"')
+    assert _has(
+        body, r"service_account_id\s*=\s*google_service_account\.ci_runner\.name"
+    )
+    member = re.search(r"member\s*=\s*\"([^\"]+)\"", body)
+    assert member
+    assert member.group(1) == (
+        "principalSet://iam.googleapis.com/"
+        "${google_iam_workload_identity_pool.github.name}"
+        "/attribute.ref/refs/heads/main"
+    )
+
+
+def test_deployer_binding_is_production_only():
+    body = _block(
+        _tf("cicd.tf"), 'resource "google_service_account_iam_member" "deployer_wif"'
+    )
+    assert _has(body, r'role\s*=\s*"roles/iam\.workloadIdentityUser"')
+    assert _has(
+        body, r"service_account_id\s*=\s*google_service_account\.deployer\.name"
+    )
+    member = re.search(r"member\s*=\s*\"([^\"]+)\"", body)
+    assert member
+    assert member.group(1) == (
+        "principalSet://iam.googleapis.com/"
+        "${google_iam_workload_identity_pool.github.name}"
+        "/attribute.environment/production"
+    )
+
+
+def test_cicd_outputs():
+    text = _tf("outputs.tf")
+    for name, value in {
+        "wif_provider": "google_iam_workload_identity_pool_provider.github.name",
+        "ci_runner_email": "google_service_account.ci_runner.email",
+        "deployer_email": "google_service_account.deployer.email",
+    }.items():
+        body = _block(text, f'output "{name}"')
+        assert _has(body, rf"value\s*=\s*{re.escape(value)}")
+
+
+def test_cicd_resources_wait_for_their_apis():
+    assert "sts.googleapis.com" in _tf("apis.tf")
+    text = _tf("cicd.tf")
+    for header in re.findall(r'resource "[^"]+" "[^"]+"', text):
+        assert "google_project_service.services" in _block(text, header), (
+            "every CI resource must depend on the API list"
+        )
+
+
+def test_no_service_account_key_resource():
+    for path in ROOT.glob("*.tf"):
+        assert "google_service_account_key" not in _tf(path.name)

@@ -56,6 +56,17 @@ variable "agent_framework" {
   default     = "google-adk"
 }
 
+variable "github_repository_id" {
+  type        = string
+  description = "Numeric id of the GitHub repository the workload identity provider trusts (not its name: ids survive a rename)."
+  default     = "1401169707"
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_id))
+    error_message = "github_repository_id must be digits only."
+  }
+}
+
 variable "operator_member" {
   description = "IAM member (for example user:name@example.com) allowed to sign sandbox tokens. Empty: use the email of the credentials running Terraform."
   type        = string

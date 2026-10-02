@@ -31,6 +31,7 @@ locals {
     "telemetry.googleapis.com",
     "artifactregistry.googleapis.com",
     "iamcredentials.googleapis.com",
+    "sts.googleapis.com",
   ]
 }
 
