@@ -88,9 +88,9 @@ async def test_coder_is_not_capped_per_turn_only_per_run():
     await plugin.before_agent_callback(
         agent=SimpleNamespace(name="coder"), callback_context=coder
     )
-    for _ in range(75):
+    for _ in range(100):
         await plugin.before_tool_callback(tool=tool, tool_args={}, tool_context=coder)
-    with pytest.raises(BudgetExceeded, match="run exceeded 75 tool calls"):
+    with pytest.raises(BudgetExceeded, match="run exceeded 100 tool calls"):
         await plugin.before_tool_callback(tool=tool, tool_args={}, tool_context=coder)
 
 
@@ -105,7 +105,16 @@ def test_per_turn_env_var_is_not_read(monkeypatch):
     monkeypatch.setenv("MAX_TOOL_CALLS_PER_TURN", "3")
     plugin = BudgetPlugin()
     assert not hasattr(plugin, "max_turn_tool_calls")
-    assert plugin.max_tool_calls == 75
+    assert plugin.max_tool_calls == 100
+
+
+def test_default_caps_are_one_dollar_and_100_tool_calls(monkeypatch):
+    # 75 until 2026-10-02: resolved multi-agent runs in Week 2B needed up to 73 calls,
+    # so md-001 hit 75 on both backends in the parity run (spec §19, 2026-10-02).
+    monkeypatch.delenv("RUN_BUDGET_USD", raising=False)
+    monkeypatch.delenv("MAX_TOOL_CALLS_PER_RUN", raising=False)
+    plugin = BudgetPlugin()
+    assert (plugin.max_usd, plugin.max_tool_calls) == (1.0, 100)
 
 
 async def test_budget_state_lists_the_models_seen():

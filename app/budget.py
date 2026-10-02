@@ -45,7 +45,7 @@ class BudgetPlugin(BasePlugin):
         self.max_tool_calls = (
             max_tool_calls
             if max_tool_calls is not None
-            else int(os.environ.get("MAX_TOOL_CALLS_PER_RUN", "75"))
+            else int(os.environ.get("MAX_TOOL_CALLS_PER_RUN", "100"))
         )
         self._usage: dict[str, Usage] = {}
 
