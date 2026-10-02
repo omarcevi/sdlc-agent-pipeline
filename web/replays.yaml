@@ -1,0 +1,27 @@
+# Curated public replays. Edit, then run: uv run python -m bench.replay build
+# Captions: one line of plain text, at most 140 characters, true of the replay.
+note: Seven of the 90 Week 2B dev-split runs (Gemini 3.8 Flash), chosen to show each way a run can end.
+caps:                  # what the cost meter draws against; record.json does not hold the caps
+  cost_usd: 1.00       # RUN_BUDGET_USD
+  tool_calls: 75       # MAX_TOOL_CALLS_PER_RUN
+  wall_clock_s: 3000   # Week 2B ran with RUN_TIMEOUT_S=3000 (parent spec §19)
+replays:
+  # an entry may also set its own `caps`, and `allow: [{path: <JSON path>, rule: <rule>}]` (§5.5)
+  - run_id: md-001-multi-flash-r1-20261001T062611Z
+    caption: "The planner finds the README rule the code breaks; the coder widens one regex and adds tests; the reviewer approves."
+    pair: md-001-single-flash-r1-20261001T084838Z
+  - run_id: md-001-single-flash-r1-20261001T084838Z
+    caption: "Same issue, one agent with the same tools: fewer tool calls and a lower cost than the three agents, and also resolved."
+    pair: md-001-multi-flash-r1-20261001T062611Z
+  - run_id: sr-002-multi-flash-r1-20261001T062611Z
+    caption: "A shortcut would pass the visible tests. The coder fixes how tiers are sorted, so the existing check rejects the bad ladder."
+  - run_id: md-005-multi-flash-r1-20261001T062611Z
+    caption: "Trap: the issue asks for two things that cannot both hold. The planner reads the code, explains the conflict and declines."
+  - run_id: tc-005-single-flash-r1-20261001T084838Z
+    caption: "Trap on the single-agent graph: calendar sync needs network access and credentials the sandbox never has, so it declines."
+  - run_id: sr-003-multi-flash-r1-20261001T062611Z
+    caption: "A feature across several modules: the coder is still working when the run reaches the $1.00 cap and stops."
+    pair: sr-003-single-flash-r1-20261001T084838Z
+  - run_id: sr-003-single-flash-r1-20261001T084838Z
+    caption: "Same feature, single agent: it also reaches the $1.00 cap before it hands in a patch. The cap binds on both systems."
+    pair: sr-003-multi-flash-r1-20261001T062611Z

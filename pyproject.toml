@@ -89,8 +89,9 @@ pydantic-discarded-extra-argument = "ignore"
 
 [tool.codespell]
 ignore-words-list = "rouge"
-# runs/ and results/ hold model output from real runs, not prose we wrote.
-skip = "./locust_env/*,uv.lock,.venv,./frontend,**/package-lock.json,./runs/*,./results/*"
+# runs/ and results/ hold model output from real runs, not prose we wrote;
+# so do the replays under web/public/replays.
+skip = "./locust_env/*,uv.lock,.venv,./frontend,**/package-lock.json,./runs/*,./results/*,./web/node_modules/*,./web/dist/*,./web/public/replays/*,./web/test-results/*,./web/playwright-report/*"
 
 
 [build-system]

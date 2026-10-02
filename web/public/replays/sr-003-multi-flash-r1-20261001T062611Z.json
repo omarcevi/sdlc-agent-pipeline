@@ -1,0 +1,1966 @@
+{
+  "schema": 1,
+  "run": {
+    "run_id": "sr-003-multi-flash-r1-20261001T062611Z",
+    "task_id": "sr-003",
+    "repo": "stockroom",
+    "category": "feature",
+    "difficulty": "medium",
+    "tempting": false,
+    "levers": [
+      "multi_file"
+    ],
+    "system": "multi",
+    "graph": "multi",
+    "preset": "flash",
+    "models": {
+      "planner": "gemini-3.8-flash",
+      "coder": "gemini-3.8-flash"
+    },
+    "prompt_version": "2a",
+    "mode": "bench",
+    "recorded_at": "2026-10-01T06:32:19Z",
+    "issue": {
+      "title": "Load a stocktake count from a CSV file",
+      "body": "Once a month we count every shelf. The count ends up in a CSV file like this:\n\n    sku,counted\n    PEN-1,97\n    BOOK-1,24\n\nToday I record an adjustment by hand for every line and work out each difference\nmyself. Please add `store.import_stocktake(path)` that does it for the whole file:\n\n- Afterwards, every product listed in the file has exactly the counted number of\n  units on hand. Products that are not in the file are left alone.\n- Each change shows up in the ledger as one adjustment with the reason\n  `stocktake`. If a count already matches, nothing is recorded for that product.\n- The file follows the products file's conventions: UTF-8, a header row with\n  exactly the columns `sku` and `counted` in any order, SKUs in any case. A file\n  that is empty, not UTF-8 or has other columns is refused as a whole with\n  `CsvFormatError`, and nothing changes.\n- A bad row is skipped and reported with its line number in the file (the header\n  is line 1), and the other rows still apply. A row is bad if its SKU is not in\n  the catalog, if its SKU was already counted on an earlier line, if the count is\n  not a whole number of 0 or more, or if the count is lower than the units already\n  reserved for orders.\n- It returns the rejected rows as `RowError` records (the type the products import\n  reports), in file order. An empty result means every row was applied.\n"
+    }
+  },
+  "caps": {
+    "cost_usd": 1.0,
+    "tool_calls": 75,
+    "wall_clock_s": 3000
+  },
+  "outcome": {
+    "outcome": "failed",
+    "failure_kind": "budget",
+    "reason": "run cost $1.008 reached the $1.00 cap",
+    "resolved": false,
+    "cost_usd": 1.0084,
+    "tool_calls": 44,
+    "tokens_in": 983003,
+    "tokens_out": 72304,
+    "duration_s": 541.78,
+    "test_attempts": 0,
+    "review_rounds": 0,
+    "audit": []
+  },
+  "steps": [
+    {
+      "i": 0,
+      "t": 0.0,
+      "kind": "node",
+      "node": "fetch_issue",
+      "visit": 1,
+      "cost_usd": 0.0,
+      "tool_calls": 0,
+      "from": null,
+      "via": null,
+      "message": "issue: Load a stocktake count from a CSV file"
+    },
+    {
+      "i": 1,
+      "t": 0.3,
+      "kind": "node",
+      "node": "provision_sandbox",
+      "visit": 1,
+      "cost_usd": 0.0,
+      "tool_calls": 0,
+      "from": "fetch_issue",
+      "via": null,
+      "message": "sandbox <sandbox> ready"
+    },
+    {
+      "i": 2,
+      "t": 0.31,
+      "kind": "node",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0,
+      "tool_calls": 0,
+      "from": "provision_sandbox",
+      "via": null,
+      "message": null
+    },
+    {
+      "i": 3,
+      "t": 0.31,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0009,
+      "tool_calls": 0,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 1056,
+      "tokens_out": 36,
+      "text": null,
+      "calls": [
+        {
+          "id": "c1",
+          "tool": "list_dir",
+          "label": "list_dir .",
+          "args": {
+            "path": "."
+          }
+        }
+      ]
+    },
+    {
+      "i": 4,
+      "t": 3.28,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0009,
+      "tool_calls": 1,
+      "call": "c1",
+      "tool": "list_dir",
+      "error": null,
+      "result": {
+        "entries": [
+          "README.md",
+          "stockroom/__init__.py",
+          "stockroom/catalog.py",
+          "stockroom/csvio.py",
+          "stockroom/errors.py",
+          "stockroom/inventory.py",
+          "stockroom/ledger.py",
+          "stockroom/money.py",
+          "stockroom/orders.py",
+          "stockroom/pricing.py",
+          "stockroom/store.py",
+          "tests/conftest.py",
+          "tests/test_catalog.py",
+          "tests/test_csvio.py",
+          "tests/test_money.py",
+          "tests/test_orders.py",
+          "tests/test_pricing.py",
+          "tests/test_stock.py"
+        ]
+      }
+    },
+    {
+      "i": 5,
+      "t": 3.29,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0021,
+      "tool_calls": 1,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 1206,
+      "tokens_out": 70,
+      "text": null,
+      "calls": [
+        {
+          "id": "c2",
+          "tool": "read_file",
+          "label": "read_file stockroom/errors.py",
+          "args": {
+            "path": "stockroom/errors.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 6,
+      "t": 4.6,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0021,
+      "tool_calls": 2,
+      "call": "c2",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/errors.py",
+        "content": "\"\"\"Exceptions raised by stockroom.\n\nEvery error derives from `StockroomError`, so callers can catch one type. Errors\nthat come from bad input values also derive from `ValueError`.\n\"\"\"\n\n\nclass StockroomError(Exception):\n    \"\"\"Base class for every error stockroom raises on purpose.\"\"\"\n\n\nclass MoneyError(StockroomError, ValueError):\n    \"\"\"A money amount or percentage is malformed or out of range.\"\"\"\n\n\nclass CatalogError(StockroomError, ValueError):\n    \"\"\"A product, tier, unit or coupon definition is invalid.\"\"\"\n\n\nclass InvalidSku(CatalogError):\n    \"\"\"A SKU does not match the SKU format.\"\"\"\n\n\nclass DuplicateSku(CatalogError):\n    \"\"\"A product with this SKU is already in the catalog.\"\"\"\n\n\nclass UnknownSku(CatalogError):\n    \"\"\"No product with this SKU is in the catalog.\"\"\"\n\n\nclass InvalidQuantity(StockroomError, ValueError):\n    \"\"\"A quantity is not a positive whole number (or a non-zero adjustment).\"\"\"\n\n\nclass InsufficientStock(StockroomError):\n    \"\"\"The requested stock movement would use units that are not available.\"\"\"\n\n\nclass OverFulfilment(StockroomError):\n    \"\"\"An order fulfillment asked for more than is still reserved for the order.\"\"\"\n\n\nclass UnknownOrder(StockroomError):\n    \"\"\"No order with this ID exists.\"\"\"\n\n\nclass InvalidOrderState(StockroomError):\n    \"\"\"The order's status does not allow the requested operation.\"\"\"\n\n\nclass UnknownCoupon(StockroomError):\n    \"\"\"No coupon with this code is registered.\"\"\"\n\n\nclass CsvFormatError(StockroomError):\n    \"\"\"A CSV file as a whole is unusable (empty, bad header, not UTF-8).\"\"\"\n"
+      }
+    },
+    {
+      "i": 7,
+      "t": 4.61,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0035,
+      "tool_calls": 2,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 1645,
+      "tokens_out": 36,
+      "text": null,
+      "calls": [
+        {
+          "id": "c3",
+          "tool": "read_file",
+          "label": "read_file stockroom/csvio.py",
+          "args": {
+            "path": "stockroom/csvio.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 8,
+      "t": 6.23,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0035,
+      "tool_calls": 3,
+      "call": "c3",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/csvio.py",
+        "content": "\"\"\"CSV import of products and export of stock levels.\n\nImport file columns, in any order: `sku,name,unit,price,taxable,tiers`.\n`taxable` is `true` or `false`. `tiers` is empty or a `;`-separated list of\n`min_qty:percent` steps such as `10:5;50:12.5`.\n\nExport file columns: `sku,name,unit,on_hand,reserved,available,stock_value`,\none row per product, sorted by SKU, with `\\\\n` line endings.\n\"\"\"\n\nimport csv\nfrom collections.abc import Container\nfrom dataclasses import dataclass\nfrom decimal import Decimal\nfrom pathlib import Path\nfrom typing import TYPE_CHECKING\n\nfrom .catalog import Product, Tier, Unit, normalize_sku\nfrom .errors import CatalogError, CsvFormatError, StockroomError\nfrom .money import format_money, parse_percent\n\nif TYPE_CHECKING:\n    from .store import Store\n\nIMPORT_COLUMNS = (\"sku\", \"name\", \"unit\", \"price\", \"taxable\", \"tiers\")\nEXPORT_COLUMNS = (\n    \"sku\",\n    \"name\",\n    \"unit\",\n    \"on_hand\",\n    \"reserved\",\n    \"available\",\n    \"stock_value\",\n)\n\n\n@dataclass(frozen=True)\nclass RowError:\n    \"\"\"A rejected row. `line` is the row's line number in the file (the header is 1).\"\"\"\n\n    line: int\n    message: str\n\n\n@dataclass(frozen=True)\nclass ImportResult:\n    \"\"\"Products that were accepted and rows that were not, each in file order.\"\"\"\n\n    products: tuple[Product, ...]\n    errors: tuple[RowError, ...]\n\n\ndef parse_tiers(text: str) -> tuple[Tier, ...]:\n    \"\"\"Parse the `tiers` column. An empty string means no tiers.\"\"\"\n    text = text.strip()\n    if not text:\n        return ()\n    tiers = []\n    for part in text.split(\";\"):\n        min_qty, separator, percent = part.partition(\":\")\n        if not separator:\n            raise CatalogError(f\"tier must look like min_qty:percent: {part!r}\")\n        try:\n            quantity = int(min_qty.strip())\n        except ValueError:\n            raise CatalogError(\n                f\"tier quantity is not a whole number: {part!r}\"\n            ) from None\n        tiers.append(Tier(quantity, parse_percent(percent)))\n    return tuple(tiers)\n\n\ndef parse_taxable(text: str) -> bool:\n    \"\"\"`true` or `false`, in any case.\"\"\"\n    value = text.strip().lower()\n    if value not in (\"true\", \"false\"):\n        raise CatalogError(f\"taxable must be true or false: {text!r}\")\n    return value == \"true\"\n\n\ndef import_products(path: str | Path, existing: Container[str] = ()) -> ImportResult:\n    \"\"\"Read products from a CSV file.\n\n    A bad row is skipped and reported; the good rows are still returned. A row\n    is bad if a field is invalid, if fields are missing or extra, or if its SKU\n    appeared earlier in the file or is in `existing`. A file that is empty, not\n    UTF-8, malformed for the csv module, or lacks exactly the expected columns\n    raises `CsvFormatError`.\"\"\"\n    try:\n        with open(path, newline=\"\", encoding=\"utf-8\") as handle:\n            reader = csv.DictReader(handle)\n            header = reader.fieldnames\n            if header is None:\n                raise CsvFormatError(\"the file is empty\")\n           \n[... 1,795 characters cut ...]\nw per product with its stock levels and stock value.\n\n    `stock_value` is on-hand units times the list price, in cents precision.\"\"\"\n    with open(path, \"w\", newline=\"\", encoding=\"utf-8\") as handle:\n        writer = csv.writer(handle, lineterminator=\"\\n\")\n        writer.writerow(EXPORT_COLUMNS)\n        for product in store.catalog.products():\n            level = store.inventory.level(product.sku)\n            value: Decimal = product.list_price * level.on_hand\n            writer.writerow(\n                [\n                    product.sku,\n                    product.name,\n                    product.unit.value,\n                    level.on_hand,\n                    level.reserved,\n                    level.available,\n                    format_money(value),\n                ]\n            )\n"
+      }
+    },
+    {
+      "i": 9,
+      "t": 6.24,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0061,
+      "tool_calls": 3,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 3199,
+      "tokens_out": 57,
+      "text": null,
+      "calls": [
+        {
+          "id": "c4",
+          "tool": "read_file",
+          "label": "read_file stockroom/store.py",
+          "args": {
+            "path": "stockroom/store.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 10,
+      "t": 8.0,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0061,
+      "tool_calls": 4,
+      "call": "c4",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/store.py",
+        "content": "\"\"\"`Store`: one object that wires catalog, inventory, pricing and orders together.\"\"\"\n\nfrom collections.abc import Iterable, Mapping\nfrom decimal import Decimal\nfrom pathlib import Path\n\nfrom . import csvio\nfrom .catalog import Catalog, Product, merge_items\nfrom .errors import UnknownCoupon\nfrom .inventory import Inventory, StockLevel\nfrom .ledger import Ledger\nfrom .money import parse_percent\nfrom .orders import Order, OrderBook\nfrom .pricing import Coupon, Quote, quote_items\n\nDEFAULT_TAX_PERCENT = Decimal(\"8.25\")\n\n\nclass Store:\n    \"\"\"The public entry point.\n\n    `tax_percent` is the sales tax rate in percent units, applied to taxable\n    products. Everything else is reached through the methods below or through\n    the `catalog`, `inventory` and `orders` attributes.\"\"\"\n\n    def __init__(self, tax_percent: object = DEFAULT_TAX_PERCENT) -> None:\n        self.tax_percent = parse_percent(tax_percent)\n        self.catalog = Catalog()\n        self.ledger = Ledger()\n        self.inventory = Inventory(self.catalog, self.ledger)\n        self.orders = OrderBook(self.catalog, self.inventory)\n        self._coupons: dict[str, Coupon] = {}\n\n    # Catalog\n    def add_product(self, product: Product) -> None:\n        \"\"\"Add a product to the catalog (its SKU must be new).\"\"\"\n        self.catalog.add(product)\n\n    def import_products(self, path: str | Path) -> csvio.ImportResult:\n        \"\"\"Import a products CSV. Valid rows are added; bad rows are reported.\"\"\"\n        result = csvio.import_products(path, existing=self.catalog)\n        for product in result.products:\n            self.catalog.add(product)\n        return result\n\n    def export_stock(self, path: str | Path) -> None:\n        \"\"\"Write the stock levels of every product to a CSV file.\"\"\"\n        csvio.export_stock(self, path)\n\n    # Stock\n    def receive(self, sku: str, quantity: int, reason: str = \"received\") -> None:\n        \"\"\"Add units to stock.\"\"\"\n        self.inventory.receive(sku, quantity, reason)\n\n    def ship(self, sku: str, quantity: int, reason: str = \"shipped\") -> None:\n        \"\"\"Ship available units directly, without an order.\"\"\"\n        self.inventory.ship(sku, quantity, reason)\n\n    def adjust(self, sku: str, delta: int, reason: str) -> None:\n        \"\"\"Correct the on-hand count by a signed amount, with a reason.\"\"\"\n        self.inventory.adjust(sku, delta, reason)\n\n    def stock(self, sku: str) -> StockLevel:\n        \"\"\"On hand, reserved and available units for one SKU.\"\"\"\n        return self.inventory.level(sku)\n\n    # Coupons and quotes\n    def add_coupon(self, code: str, percent: object) -> Coupon:\n        \"\"\"Register (or replace) a percentage coupon under its code.\"\"\"\n        coupon = Coupon(code, parse_percent(percent))\n        self._coupons[coupon.code] = coupon\n        return coupon\n\n    def _coupon(self, code: str | None) -> Coupon | None:\n        if code is None:\n            return None\n        try:\n            return self._coupons[code.strip().upper()]\n        except KeyError:\n[... 780 characters cut ...]\nf._coupon(coupon_code), self.tax_percent)\n\n    def reserve_order(self, order_id: str) -> Order:\n        \"\"\"Reserve all of a new order's units, or none.\"\"\"\n        return self.orders.reserve(order_id)\n\n    def fulfil_order(\n        self, order_id: str, quantities: Mapping[str, int] | None = None\n    ) -> Order:\n        \"\"\"Ship reserved units: everything outstanding, or the given quantities.\"\"\"\n        return self.orders.fulfil(order_id, quantities)\n\n    def cancel_order(self, order_id: str) -> Order:\n        \"\"\"Cancel an unfinished order and release what is still reserved.\"\"\"\n        return self.orders.cancel(order_id)\n\n    def billable(self, order_id: str) -> Quote:\n        \"\"\"What the customer owes for a fulfilled or cancelled order.\"\"\"\n        return self.orders.billable_quote(order_id)\n"
+      }
+    },
+    {
+      "i": 11,
+      "t": 8.01,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0096,
+      "tool_calls": 4,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 4474,
+      "tokens_out": 42,
+      "text": null,
+      "calls": [
+        {
+          "id": "c5",
+          "tool": "read_file",
+          "label": "read_file stockroom/inventory.py",
+          "args": {
+            "path": "stockroom/inventory.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 12,
+      "t": 9.98,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0096,
+      "tool_calls": 5,
+      "call": "c5",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/inventory.py",
+        "content": "\"\"\"Stock levels, derived from the ledger.\n\nThere is no stored counter. For one SKU:\n\n    on_hand   = received + adjusted - shipped\n    reserved  = reserved - released\n    available = on_hand - reserved\n\nEvery operation checks the levels first and only then appends to the ledger, so\na refused operation leaves no trace.\n\"\"\"\n\nfrom dataclasses import dataclass\n\nfrom .catalog import Catalog, check_quantity\nfrom .errors import InsufficientStock, InvalidQuantity\nfrom .ledger import Ledger, MovementKind\n\n\n@dataclass(frozen=True)\nclass StockLevel:\n    \"\"\"The three stock figures for one SKU.\"\"\"\n\n    sku: str\n    on_hand: int\n    reserved: int\n    available: int\n\n\nclass Inventory:\n    \"\"\"Stock operations over a ledger, for the products of a catalog.\"\"\"\n\n    def __init__(self, catalog: Catalog, ledger: Ledger | None = None) -> None:\n        self.catalog = catalog\n        self.ledger = ledger if ledger is not None else Ledger()\n\n    def _sku(self, sku: str) -> str:\n        \"\"\"Normalise `sku` and make sure the catalog knows it.\"\"\"\n        product = self.catalog.get(sku)\n        return product.sku\n\n    def on_hand(self, sku: str) -> int:\n        \"\"\"Units physically in the stockroom.\"\"\"\n        key = self._sku(sku)\n        ledger = self.ledger\n        return (\n            ledger.total(key, MovementKind.RECEIVE)\n            + ledger.total(key, MovementKind.ADJUST)\n            - ledger.total(key, MovementKind.SHIP)\n        )\n\n    def reserved(self, sku: str) -> int:\n        \"\"\"Units promised to open orders.\"\"\"\n        key = self._sku(sku)\n        return self.ledger.total(key, MovementKind.RESERVE) - self.ledger.total(\n            key, MovementKind.RELEASE\n        )\n\n    def available(self, sku: str) -> int:\n        \"\"\"Units that can still be promised or shipped directly.\"\"\"\n        return self.on_hand(sku) - self.reserved(sku)\n\n    def level(self, sku: str) -> StockLevel:\n        \"\"\"All three figures for one SKU.\"\"\"\n        key = self._sku(sku)\n        on_hand, reserved = self.on_hand(key), self.reserved(key)\n        return StockLevel(key, on_hand, reserved, on_hand - reserved)\n\n    def snapshot(self) -> list[StockLevel]:\n        \"\"\"The levels of every catalog SKU, sorted by SKU.\"\"\"\n        return [self.level(product.sku) for product in self.catalog.products()]\n\n    def receive(\n        self, sku: str, quantity: int, reason: str = \"received\", ref: str = \"\"\n    ) -> None:\n        \"\"\"Add units to the stockroom.\"\"\"\n        self.ledger.append(self._sku(sku), MovementKind.RECEIVE, quantity, reason, ref)\n\n    def ship(\n        self, sku: str, quantity: int, reason: str = \"shipped\", ref: str = \"\"\n    ) -> None:\n        \"\"\"Ship units directly, without an order. Only available units can go.\"\"\"\n        key = self._sku(sku)\n        check_quantity(quantity)\n        if quantity > self.available(key):\n            raise InsufficientStock(\n                f\"cannot ship {quantity} of {key}: {self.available(key)} available\"\n            )\n        self.ledger.append(key, MovementKind\n[... 1,338 characters cut ...]\nself.reserved(key):\n            raise InvalidQuantity(\n                f\"cannot release {quantity} of {key}: only {self.reserved(key)} reserved\"\n            )\n        self.ledger.append(key, MovementKind.RELEASE, quantity, \"released\", ref)\n\n    def ship_reserved(self, sku: str, quantity: int, ref: str = \"\") -> None:\n        \"\"\"Ship reserved units: one SHIP movement, then the matching RELEASE.\"\"\"\n        key = self._sku(sku)\n        check_quantity(quantity)\n        if quantity > self.reserved(key):\n            raise InvalidQuantity(\n                f\"cannot ship {quantity} of {key}: only {self.reserved(key)} reserved\"\n            )\n        self.ledger.append(key, MovementKind.SHIP, quantity, \"fulfilled\", ref)\n        self.ledger.append(key, MovementKind.RELEASE, quantity, \"fulfilled\", ref)\n"
+      }
+    },
+    {
+      "i": 13,
+      "t": 9.99,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0142,
+      "tool_calls": 5,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 5897,
+      "tokens_out": 42,
+      "text": null,
+      "calls": [
+        {
+          "id": "c6",
+          "tool": "read_file",
+          "label": "read_file stockroom/ledger.py",
+          "args": {
+            "path": "stockroom/ledger.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 14,
+      "t": 13.52,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0142,
+      "tool_calls": 6,
+      "call": "c6",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/ledger.py",
+        "content": "\"\"\"The stock ledger: an append-only list of movements.\n\nNothing in the ledger is ever changed or removed. Stock levels are not stored\nanywhere; `inventory` derives them by summing movements.\n\"\"\"\n\nfrom dataclasses import dataclass\nfrom enum import Enum\n\nfrom .catalog import check_quantity\nfrom .errors import InvalidQuantity\n\n\nclass MovementKind(Enum):\n    \"\"\"What a movement does.\n\n    RECEIVE, SHIP and ADJUST change the units on hand. RESERVE and RELEASE\n    change the units promised to orders and leave the units on hand alone.\"\"\"\n\n    RECEIVE = \"receive\"\n    SHIP = \"ship\"\n    ADJUST = \"adjust\"\n    RESERVE = \"reserve\"\n    RELEASE = \"release\"\n\n\n@dataclass(frozen=True)\nclass Movement:\n    \"\"\"One ledger entry. `seq` counts from 1 in append order.\n\n    `quantity` is positive, except for ADJUST where it is a signed, non-zero\n    change. `ref` is free text, normally an order ID.\"\"\"\n\n    seq: int\n    sku: str\n    kind: MovementKind\n    quantity: int\n    reason: str\n    ref: str\n\n\nclass Ledger:\n    \"\"\"Append-only movement history.\"\"\"\n\n    def __init__(self) -> None:\n        self._entries: list[Movement] = []\n\n    def append(\n        self,\n        sku: str,\n        kind: MovementKind,\n        quantity: int,\n        reason: str = \"\",\n        ref: str = \"\",\n    ) -> Movement:\n        \"\"\"Record a movement and return it. `sku` must already be normalised.\"\"\"\n        if kind is MovementKind.ADJUST:\n            if (\n                isinstance(quantity, bool)\n                or not isinstance(quantity, int)\n                or quantity == 0\n            ):\n                raise InvalidQuantity(\n                    f\"an adjustment must be a non-zero whole number: {quantity!r}\"\n                )\n            if not reason.strip():\n                raise InvalidQuantity(\"an adjustment needs a reason\")\n        else:\n            check_quantity(quantity)\n        movement = Movement(\n            len(self._entries) + 1, sku, kind, quantity, reason.strip(), ref\n        )\n        self._entries.append(movement)\n        return movement\n\n    def entries(self, sku: str | None = None) -> tuple[Movement, ...]:\n        \"\"\"All movements in order, optionally only those for one (normalised) SKU.\"\"\"\n        return tuple(m for m in self._entries if sku is None or m.sku == sku)\n\n    def total(self, sku: str, kind: MovementKind) -> int:\n        \"\"\"Sum of the quantities of one kind of movement for one SKU.\"\"\"\n        return sum(m.quantity for m in self._entries if m.sku == sku and m.kind is kind)\n\n    def __len__(self) -> int:\n        return len(self._entries)\n"
+      }
+    },
+    {
+      "i": 15,
+      "t": 13.53,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0193,
+      "tool_calls": 6,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 6603,
+      "tokens_out": 36,
+      "text": null,
+      "calls": [
+        {
+          "id": "c7",
+          "tool": "read_file",
+          "label": "read_file stockroom/catalog.py",
+          "args": {
+            "path": "stockroom/catalog.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 16,
+      "t": 14.96,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0193,
+      "tool_calls": 7,
+      "call": "c7",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/catalog.py",
+        "content": "\"\"\"The product catalog: SKUs, units, quantity tiers and products.\n\nA product says what is sold and at which list price. It knows nothing about\nstock levels (see `inventory`) or how a quantity is priced (see `pricing`).\n\"\"\"\n\nimport re\nfrom collections.abc import Iterable\nfrom dataclasses import dataclass, field, replace\nfrom decimal import Decimal\nfrom enum import Enum\nfrom itertools import pairwise\n\nfrom .errors import (\n    CatalogError,\n    DuplicateSku,\n    InvalidQuantity,\n    InvalidSku,\n    UnknownSku,\n)\nfrom .money import parse_money, parse_percent\n\nMAX_SKU_LENGTH = 20\n_SKU_PATTERN = re.compile(r\"[A-Z0-9]+(-[A-Z0-9]+)*\")\n\n\nclass Unit(Enum):\n    \"\"\"How a product is counted. Quantities are always whole numbers of a unit.\"\"\"\n\n    EACH = \"each\"\n    PAIR = \"pair\"\n    BOX = \"box\"\n    CASE = \"case\"\n    KILOGRAM = \"kg\"\n\n    @classmethod\n    def parse(cls, text: str) -> \"Unit\":\n        \"\"\"Look a unit up by its code, ignoring case and surrounding spaces.\"\"\"\n        code = text.strip().lower() if isinstance(text, str) else text\n        for unit in cls:\n            if unit.value == code:\n                return unit\n        raise CatalogError(f\"unknown unit: {text!r}\")\n\n\ndef normalize_sku(text: str) -> str:\n    \"\"\"Return the canonical form of a SKU: stripped and upper case.\n\n    A SKU is letters and digits in groups separated by single hyphens, at most\n    `MAX_SKU_LENGTH` characters.\"\"\"\n    if not isinstance(text, str):\n        raise InvalidSku(f\"SKU must be a string: {text!r}\")\n    sku = text.strip().upper()\n    if len(sku) > MAX_SKU_LENGTH or not _SKU_PATTERN.fullmatch(sku):\n        raise InvalidSku(f\"invalid SKU: {text!r}\")\n    return sku\n\n\ndef check_quantity(quantity: object) -> int:\n    \"\"\"Return `quantity` if it is a positive whole number, else raise.\"\"\"\n    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:\n        raise InvalidQuantity(f\"quantity must be a positive whole number: {quantity!r}\")\n    return quantity\n\n\ndef merge_items(items: Iterable[tuple[str, int]]) -> dict[str, int]:\n    \"\"\"Merge (sku, quantity) pairs into one quantity per normalised SKU.\n\n    Repeated SKUs add up; order follows each SKU's first appearance. Used by\n    both quoting and order creation so they always price the same lines.\"\"\"\n    merged: dict[str, int] = {}\n    for sku, quantity in items:\n        key = normalize_sku(sku)\n        merged[key] = merged.get(key, 0) + check_quantity(quantity)\n    return merged\n\n\n@dataclass(frozen=True)\nclass Tier:\n    \"\"\"A quantity discount step: from `min_qty` units, `percent` % off the list price.\"\"\"\n\n    min_qty: int\n    percent: Decimal\n\n    def __post_init__(self) -> None:\n        if (\n            isinstance(self.min_qty, bool)\n            or not isinstance(self.min_qty, int)\n            or self.min_qty < 2\n        ):\n            raise CatalogError(f\"a tier starts at 2 units or more: {self.min_qty!r}\")\n        percent = parse_percent(self.percent)\n        if percent <= 0:\n            raise CatalogError\n[... 2,184 characters cut ...]\n          raise UnknownSku(f\"no such SKU: {key}\") from None\n\n    def set_price(self, sku: str, price: object) -> Product:\n        \"\"\"Change a product's list price. Existing orders keep their own copy.\"\"\"\n        product = replace(self.get(sku), list_price=parse_money(price))\n        self._products[product.sku] = product\n        return product\n\n    def products(self) -> list[Product]:\n        \"\"\"All products, sorted by SKU.\"\"\"\n        return [self._products[sku] for sku in sorted(self._products)]\n\n    def __contains__(self, sku: object) -> bool:\n        if not isinstance(sku, str):\n            return False\n        try:\n            return normalize_sku(sku) in self._products\n        except InvalidSku:\n            return False\n\n    def __len__(self) -> int:\n        return len(self._products)\n"
+      }
+    },
+    {
+      "i": 17,
+      "t": 14.97,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0256,
+      "tool_calls": 7,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 8312,
+      "tokens_out": 41,
+      "text": null,
+      "calls": [
+        {
+          "id": "c8",
+          "tool": "read_file",
+          "label": "read_file tests/test_csvio.py",
+          "args": {
+            "path": "tests/test_csvio.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 18,
+      "t": 16.57,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0256,
+      "tool_calls": 8,
+      "call": "c8",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "tests/test_csvio.py",
+        "content": "from decimal import Decimal\n\nimport pytest\nfrom stockroom import Store, Tier, csvio\nfrom stockroom.csvio import parse_tiers\nfrom stockroom.errors import CsvFormatError\n\nD = Decimal\n\nHEADER = \"sku,name,unit,price,taxable,tiers\\n\"\n\nMIXED = (\n    HEADER\n    + \"cab-1,Cable,each,3.50,true,10:5;50:10\\n\"  # line 2: good\n    + \"BAD SKU,Broken,each,1.00,true,\\n\"  # line 3: bad SKU\n    + \"pen-2,Pencil,each,1.005,true,\\n\"  # line 4: three decimals\n    + \"mug-1,Mug,box,4.00,maybe,\\n\"  # line 5: taxable is not a boolean\n    + \"CAB-1,Cable again,each,3.00,true,\\n\"  # line 6: duplicate of line 2\n    + \"\\n\"  # line 7: blank, skipped\n    + \"lamp,Lamp,each,12.00,false,\\n\"  # line 8: good\n    + \"short,Short,each\\n\"  # line 9: too few fields\n    + \"long,Long,each,1.00,true,,extra\\n\"  # line 10: too many fields\n)\n\n\ndef write(tmp_path, text):\n    path = tmp_path / \"products.csv\"\n    path.write_text(text, encoding=\"utf-8\")\n    return path\n\n\ndef test_r16_a_good_file_imports_every_row(tmp_path):\n    \"\"\"R16: columns in the documented form, tiers parsed.\"\"\"\n    rows = \"cab-1,Cable,kg,3.50,TRUE,10:5;50:12.5\\nlamp,Lamp,each,12,false,\\n\"\n    result = csvio.import_products(write(tmp_path, HEADER + rows))\n    assert result.errors == ()\n    cable, lamp = result.products\n    assert (cable.sku, cable.unit.value, cable.taxable) == (\"CAB-1\", \"kg\", True)\n    assert cable.list_price == Decimal(\"3.50\")\n    assert cable.tiers == (Tier(10, Decimal(\"5\")), Tier(50, Decimal(\"12.5\")))\n    assert (lamp.taxable, lamp.tiers, str(lamp.list_price)) == (False, (), \"12.00\")\n    text = \"name,price,sku,tiers,unit,taxable\\nCable,3.50,cab-1,,each,true\\n\"\n    shuffled = csvio.import_products(write(tmp_path, text))  # any column order\n    assert [p.sku for p in shuffled.products] == [\"CAB-1\"]\n\n\n@pytest.mark.parametrize(\n    \"text\", [\"\", \"sku,name,unit,price,taxable\\n\", HEADER.strip() + \",extra\\n\"]\n)\ndef test_r16_an_unusable_file_is_a_format_error(tmp_path, text):\n    \"\"\"R16: empty files and other columns raise CsvFormatError.\"\"\"\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(write(tmp_path, text))\n\n\ndef test_r16_a_file_that_is_not_utf8_is_a_format_error(tmp_path):\n    \"\"\"R16: undecodable bytes raise CsvFormatError.\"\"\"\n    path = tmp_path / \"bad.csv\"\n    path.write_bytes(HEADER.encode() + b\"x-1,Bad\\xe9,each,1.00,true,\\n\")\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(path)\n\n\ndef test_r17_good_rows_are_kept_and_bad_rows_reported_with_line_numbers(tmp_path):\n    \"\"\"R17: file line numbers, header is line 1, blank lines still count.\"\"\"\n    result = csvio.import_products(write(tmp_path, MIXED))\n    assert [p.sku for p in result.products] == [\"CAB-1\", \"LAMP\"]\n    assert [e.line for e in result.errors] == [3, 4, 5, 6, 9, 10]\n    by_line = {e.line: e.message for e in result.errors}\n    assert \"duplicate\" in by_line[6] and \"decimal\" in by_line[4]\n    assert \"fewer\" in by_line[9] and \"more\" in by_line[10]\n\n\ndef test_r17_import_never_overwrites_an_existing_product(store\n[... 1,704 characters cut ...]\ntoo.\"\"\"\n    fresh = Store(tax_percent=\"0\")\n    fresh.import_products(write(tmp_path, MIXED))\n    fresh.import_products(\n        write(tmp_path, HEADER + 'mix-1,\"Pen, blue\",each,0.99,true,\\n')\n    )\n    fresh.receive(\"lamp\", 4)\n    path = tmp_path / \"out.csv\"\n    fresh.export_stock(path)\n    assert path.read_text().splitlines()[1:] == [\n        \"CAB-1,Cable,each,0,0,0,0.00\",\n        \"LAMP,Lamp,each,4,0,4,48.00\",\n        'MIX-1,\"Pen, blue\",each,0,0,0,0.00',\n    ]\n\n\ndef test_r16_a_csv_parser_error_is_a_format_error(tmp_path):\n    \"\"\"R16: a field over the csv module's size limit makes it fail; unusable file.\"\"\"\n    path = tmp_path / \"huge.csv\"\n    path.write_text(HEADER + \"x-1,\" + \"n\" * 200_000 + \",each,1.00,true,\\n\")\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(path)\n"
+      }
+    },
+    {
+      "i": 19,
+      "t": 16.57,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0337,
+      "tool_calls": 8,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 10510,
+      "tokens_out": 36,
+      "text": null,
+      "calls": [
+        {
+          "id": "c9",
+          "tool": "read_file",
+          "label": "read_file tests/conftest.py",
+          "args": {
+            "path": "tests/conftest.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 20,
+      "t": 19.01,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0337,
+      "tool_calls": 9,
+      "call": "c9",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "tests/conftest.py",
+        "content": "from decimal import Decimal\n\nimport pytest\nfrom stockroom import Product, Store, Tier, Unit\n\n\ndef build_store() -> Store:\n    \"\"\"Tax 8.25 %. PEN-1: 1.50, taxable, tiers 10 -> 5 % and 50 -> 10 %, 100 on hand.\n    BOOK-1: 4.99, not taxable, 20 on hand. WIDGET: 19.99, tiers 5 -> 10 % and\n    20 -> 30 %, 30 on hand.\"\"\"\n    store = Store(tax_percent=\"8.25\")\n    tiers = {\"PEN-1\": ((10, \"5\"), (50, \"10\")), \"WIDGET\": ((5, \"10\"), (20, \"30\"))}\n    for sku, name, unit, price, taxable in (\n        (\"PEN-1\", \"Pen\", Unit.EACH, \"1.50\", True),\n        (\"BOOK-1\", \"Notebook\", Unit.EACH, \"4.99\", False),\n        (\"WIDGET\", \"Widget\", Unit.BOX, \"19.99\", True),\n    ):\n        steps = tuple(Tier(q, Decimal(p)) for q, p in tiers.get(sku, ()))\n        store.add_product(Product(sku, name, unit, Decimal(price), taxable, steps))\n    store.receive(\"PEN-1\", 100)\n    store.receive(\"BOOK-1\", 20)\n    store.receive(\"WIDGET\", 30)\n    return store\n\n\n@pytest.fixture\ndef store() -> Store:\n    return build_store()\n\n\n@pytest.fixture\ndef make_store():\n    \"\"\"The factory behind `store`, for tests that need two identical stores.\"\"\"\n    return build_store\n"
+      }
+    },
+    {
+      "i": 21,
+      "t": 19.02,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0421,
+      "tool_calls": 9,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 10982,
+      "tokens_out": 46,
+      "text": null,
+      "calls": [
+        {
+          "id": "c10",
+          "tool": "read_file",
+          "label": "read_file tests/test_stock.py",
+          "args": {
+            "path": "tests/test_stock.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 22,
+      "t": 20.98,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0421,
+      "tool_calls": 10,
+      "call": "c10",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "tests/test_stock.py",
+        "content": "import dataclasses\n\nimport pytest\nfrom stockroom.errors import InsufficientStock, InvalidQuantity, UnknownSku\nfrom stockroom.ledger import MovementKind\n\n\ndef test_r8_movements_are_numbered_in_order_and_cannot_be_edited(store):\n    \"\"\"R8: sequence numbers count from 1; entries are frozen copies.\"\"\"\n    store.ship(\"PEN-1\", 5)\n    entries = store.ledger.entries()\n    assert [m.seq for m in entries] == list(range(1, len(entries) + 1))\n    assert entries[-1].kind is MovementKind.SHIP\n    with pytest.raises(dataclasses.FrozenInstanceError):\n        entries[0].quantity = 999  # type: ignore[misc]\n    assert isinstance(entries, tuple) and len(store.ledger) == 4\n\n\ndef test_r8_quantities_must_be_positive_whole_numbers(store):\n    \"\"\"R8: receive and ship take positive ints; bools and floats are refused.\"\"\"\n    for bad in (0, -3, 1.5, True):\n        with pytest.raises(InvalidQuantity):\n            store.receive(\"PEN-1\", bad)\n        with pytest.raises(InvalidQuantity):\n            store.ship(\"PEN-1\", bad)\n    assert store.stock(\"PEN-1\").on_hand == 100\n\n\ndef test_r8_adjustments_are_signed_and_need_a_reason(store):\n    \"\"\"R8: an adjustment is non-zero and explained.\"\"\"\n    store.adjust(\"PEN-1\", -4, \"stocktake\")\n    store.adjust(\"PEN-1\", 2, \"found in aisle\")\n    assert store.stock(\"PEN-1\").on_hand == 98\n    for delta, reason in ((0, \"nothing\"), (-1, \"   \")):\n        with pytest.raises(InvalidQuantity):\n            store.adjust(\"PEN-1\", delta, reason)\n    assert store.ledger.entries(\"PEN-1\")[-1].reason == \"found in aisle\"\n\n\ndef test_r9_levels_are_derived_from_the_ledger(store):\n    \"\"\"R9: on hand, reserved and available follow from the movements.\"\"\"\n    store.ship(\"PEN-1\", 30)\n    store.adjust(\"PEN-1\", -5, \"damaged\")\n    store.reserve_order(store.create_order([(\"PEN-1\", 20)]).id)\n    level = store.stock(\"pen-1\")\n    assert (level.on_hand, level.reserved, level.available) == (65, 20, 45)\n    assert store.ledger.total(\"PEN-1\", MovementKind.RECEIVE) == 100\n    assert store.ledger.total(\"PEN-1\", MovementKind.SHIP) == 30\n\n\ndef test_r9_reserving_does_not_change_units_on_hand(store):\n    \"\"\"R9: reserve and release only move the reserved figure.\"\"\"\n    store.inventory.reserve(\"PEN-1\", 10)\n    store.inventory.release(\"PEN-1\", 4)\n    level = store.stock(\"PEN-1\")\n    assert (level.on_hand, level.reserved, level.available) == (100, 6, 94)\n    with pytest.raises(InvalidQuantity):\n        store.inventory.release(\"PEN-1\", 7)\n\n\ndef test_r10_over_shipping_and_over_reserving_are_refused_and_not_recorded(store):\n    \"\"\"R10: only available units can be shipped or reserved.\"\"\"\n    store.inventory.reserve(\"PEN-1\", 90)\n    before = len(store.ledger)\n    with pytest.raises(InsufficientStock):\n        store.ship(\"PEN-1\", 11)\n    with pytest.raises(InsufficientStock):\n        store.inventory.reserve(\"BOOK-1\", 21)\n    assert len(store.ledger) == before\n    store.ship(\"PEN-1\", 10)\n    assert store.stock(\"PEN-1\").available == 0\n\n\ndef test_r10_an_adjustment_cannot_undercut_reservations(store):\n    \"\"\"R10: on hand may not fall below reserved.\"\"\"\n    store.inventory.reserve(\"PEN-1\", 20)\n    with pytest.raises(InsufficientStock):\n        store.adjust(\"PEN-1\", -81, \"lost\")\n    store.adjust(\"PEN-1\", -80, \"lost\")\n    assert store.stock(\"PEN-1\").on_hand == 20\n    with pytest.raises(UnknownSku):  # R7: stock needs a catalog SKU\n        store.stock(\"GHOST\")\n"
+      }
+    },
+    {
+      "i": 23,
+      "t": 20.99,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0569,
+      "tool_calls": 10,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 12142,
+      "tokens_out": 1529,
+      "text": null,
+      "calls": [
+        {
+          "id": "c11",
+          "tool": "read_file",
+          "label": "read_file stockroom/__init__.py",
+          "args": {
+            "path": "stockroom/__init__.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 24,
+      "t": 31.19,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0569,
+      "tool_calls": 11,
+      "call": "c11",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/__init__.py",
+        "content": "\"\"\"stockroom: a small inventory and pricing module.\n\nStart with `Store`. The rules it follows are listed in the README.\n\"\"\"\n\nfrom . import csvio\nfrom .catalog import Product, Tier, Unit\nfrom .errors import StockroomError\nfrom .orders import OrderStatus\nfrom .store import Store\n\n__all__ = [\n    \"OrderStatus\",\n    \"Product\",\n    \"StockroomError\",\n    \"Store\",\n    \"Tier\",\n    \"Unit\",\n    \"csvio\",\n]\n"
+      }
+    },
+    {
+      "i": 25,
+      "t": 31.2,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0674,
+      "tool_calls": 11,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 13792,
+      "tokens_out": 40,
+      "text": null,
+      "calls": [
+        {
+          "id": "c12",
+          "tool": "read_file",
+          "label": "read_file README.md",
+          "args": {
+            "path": "README.md"
+          }
+        }
+      ]
+    },
+    {
+      "i": 26,
+      "t": 33.19,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0674,
+      "tool_calls": 12,
+      "call": "c12",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "README.md",
+        "content": "# stockroom\n\nA small inventory and pricing module: a product catalog, an append-only stock ledger, tiered and coupon pricing with tax, orders that reserve and ship stock, and CSV import and export. Standard library only.\n\n    from decimal import Decimal\n    from stockroom import Product, Store, Tier, Unit\n\n    store = Store(tax_percent=\"8.25\")\n    store.add_product(Product(\"PEN-1\", \"Pen\", Unit.EACH, Decimal(\"1.50\"), tiers=(Tier(10, Decimal(\"5\")),)))\n    store.receive(\"PEN-1\", 100)\n    order = store.create_order([(\"PEN-1\", 12)])\n    store.reserve_order(order.id)\n    store.fulfil_order(order.id)\n    print(store.billable(order.id).total)\n\n## Modules\n\n| Module | Job |\n|---|---|\n| `money.py` | `Decimal` parsing, the one rounding function, percentages, formatting |\n| `catalog.py` | SKUs, units, quantity tiers, products, the catalog |\n| `ledger.py` | append-only stock movements |\n| `inventory.py` | on hand, reserved and available, derived from the ledger |\n| `pricing.py` | tiers, coupons, the discount cap, tax, quotes |\n| `orders.py` | create, reserve, fulfil, cancel, billable quote |\n| `csvio.py` | products import, stock export |\n| `store.py` | `Store`, the facade over the rest |\n| `errors.py` | the exception types |\n\n## Rules\n\nPercentages are in percent units: `Decimal(\"8.25\")` means 8.25 %.\n\n1. **Money is `Decimal`.** Floats and bools are rejected with `MoneyError`. A price is non-negative and has at most two decimal places; a price with more decimals is an error, never rounded silently.\n2. **One rounding function.** `money.round_money` rounds half up (halves away from zero) to whole cents. List price times quantity is exact and needs no rounding; rounding happens once per discount amount and once per tax amount, at the order line.\n3. **Order of operations on a line.** gross = list price x quantity; discount = round(gross x combined percent); net = gross - discount; tax = round(net x tax percent) for taxable products and 0 otherwise; total = net + tax. Tax is therefore charged on the discounted amount.\n4. **Tier choice.** A product's tiers are `(min_qty, percent)` steps with `min_qty` of 2 or more and strictly rising percentages. The tier with the largest `min_qty` not above the quantity applies to every unit of the line. Below the first tier there is no tier discount.\n5. **Coupons add to tiers, and the sum is capped.** The combined discount percent is tier percent plus coupon percent, limited to 40. Coupon codes are case-insensitive.\n6. **Totals are sums of lines.** A quote's subtotal, discount, net, tax and total are sums of the line amounts, with no further rounding. A quote with no lines is all zeros.\n7. **SKUs.** A SKU is letters and digits in groups separated by single hyphens, at most 20 characters. It is case-insensitive and stored in upper case. A SKU can be added to the catalog once.\n8. **The ledger is append-only.** Movements are numbered from 1 in the order recorded. Receive, ship, reserve and release quantities are positive whole numbers\n[... 2,221 characters cut ...]\nxample a field over the csv module's size limit) or has other columns raises `CsvFormatError`.\n17. **Bad CSV rows.** A bad row is skipped and reported as a `RowError` with its line number in the file (the header is line 1); good rows are still imported. A row is bad if a field is invalid, it has too few or too many fields, or its SKU appeared earlier in the file or is already in the catalog. Import never overwrites an existing product.\n18. **CSV export.** The stock file has the columns `sku,name,unit,on_hand,reserved,available,stock_value`, one row per product sorted by SKU, `\\n` line endings. `stock_value` is on-hand units times list price with two decimals.\n\n## Tests\n\n    python -m pytest -q tests\n\nEach rule above is covered by at least one test whose docstring names it (`R1` to `R18`).\n"
+      }
+    },
+    {
+      "i": 27,
+      "t": 33.19,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.1743,
+      "tool_calls": 12,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 15389,
+      "tokens_out": 25434,
+      "text": null,
+      "calls": [
+        {
+          "id": "c13",
+          "tool": "grep",
+          "label": "grep 'stocktake' in .",
+          "args": {
+            "path": ".",
+            "pattern": "stocktake"
+          }
+        }
+      ]
+    },
+    {
+      "i": 28,
+      "t": 174.52,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.1743,
+      "tool_calls": 13,
+      "call": "c13",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "stockroom/inventory.py:92:        \"\"\"Correct the count by a signed amount, e.g. after a stocktake.\ntests/test_stock.py:31:    store.adjust(\"PEN-1\", -4, \"stocktake\")\n"
+      }
+    },
+    {
+      "i": 29,
+      "t": 174.52,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.2057,
+      "tool_calls": 13,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 40876,
+      "tokens_out": 188,
+      "text": null,
+      "calls": [
+        {
+          "id": "c14",
+          "tool": "grep",
+          "label": "grep 'def test_' in tests",
+          "args": {
+            "path": "tests",
+            "pattern": "def test_"
+          }
+        }
+      ]
+    },
+    {
+      "i": 30,
+      "t": 177.37,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.2057,
+      "tool_calls": 14,
+      "call": "c14",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "tests/test_catalog.py:22:def test_r7_skus_are_normalised_to_upper_case():\ntests/test_catalog.py:29:def test_r7_bad_skus_are_rejected(bad):\ntests/test_catalog.py:35:def test_r7_a_sku_can_be_added_once_and_is_found_in_any_case():\ntests/test_catalog.py:47:def test_r1_product_prices_are_decimal_only():\ntests/test_catalog.py:54:def test_a_product_needs_a_name_and_a_known_unit():\ntests/test_catalog.py:64:def test_r4_tiers_are_sorted_and_validated():\ntests/test_catalog.py:81:def test_r11_set_price_replaces_the_product():\ntests/test_orders.py:28:def test_r11_creating_an_order_prices_it_and_leaves_stock_alone(store):\ntests/test_orders.py:37:def test_r11_repeated_skus_merge_before_pricing(store):\ntests/test_orders.py:47:def test_r11_an_invalid_item_creates_no_order(store):\ntests/test_orders.py:57:def test_r11_orders_keep_the_product_as_it_was(store):\ntests/test_orders.py:67:def test_r12_reserving_is_all_or_nothing(store):\ntests/test_orders.py:76:def test_r12_only_a_new_order_can_be_reserved_and_holds_its_units(store):\ntests/test_orders.py:86:def test_r13_fulfilling_ships_everything_outstanding(store):\ntests/test_orders.py:96:def test_r13_partial_fulfilment_leaves_the_rest_reserved(store):\ntests/test_orders.py:110:def test_r13_over_fulfilment_ships_nothing(store):\ntests/test_orders.py:121:def test_r13_fulfilment_needs_a_reserved_order_and_real_quantities(store):\ntests/test_orders.py:135:def test_r14_cancelling_releases_reserved_units(store):\ntests/test_orders.py:148:def test_r14_cancelling_a_partly_fulfilled_order_keeps_shipped_units_shipped(store):\ntests/test_orders.py:159:def test_r14_finished_orders_cannot_be_cancelled(store):\ntests/test_orders.py:170:def test_r15_a_cancelled_order_is_billed_for_shipped_units_with_their_own_tier(store):\ntests/test_orders.py:181:def test_r15_nothing_shipped_owes_nothing_and_open_orders_have_no_bill(store):\ntests/test_orders.py:194:def test_a_run_of_operations_is_repeatable(make_store):\ntests/test_orders.py:206:def test_unknown_order_ids_raise_unknown_order(store):\ntests/test_pricing.py:15:def test_r3_order_of_operations_on_a_line(store):\ntests/test_pricing.py:21:def test_r3_below_the_first_tier_a_line_is_gross_plus_tax(store):\ntests/test_pricing.py:27:def test_r2_tax_is_rounded_half_up_per_line():\ntests/test_pricing.py:37:def test_r2_discounts_are_rounded_half_up():\ntests/test_pricing.py:46:def test_r4_tier_selection_uses_the_largest_reached_tier(store):\ntests/test_pricing.py:54:def test_r5_coupon_adds_to_the_tier(store):\ntests/test_pricing.py:62:def test_r5_the_combined_discount_is_capped_at_40_percent(store):\ntests/test_pricing.py:78:def test_r5_coupon_codes_ignore_case_and_bad_coupons_fail(store):\ntests/test_pricing.py:90:def test_r6_totals_are_sums_of_the_lines(store):\ntests/test_pricing.py:103:def test_quote_rejects_bad_items_and_bad_tax_rates(store):\ntests/test_pricing.py:115:def test_r11_quote_merges_repeated_skus_like_an_order(store):\ntests/test_stock.py:8:def test_r8_movements_are_numbered_in_order_and_cannot_be_\n[... 901 characters cut ...]\n_100():\ntests/test_csvio.py:32:def test_r16_a_good_file_imports_every_row(tmp_path):\ntests/test_csvio.py:50:def test_r16_an_unusable_file_is_a_format_error(tmp_path, text):\ntests/test_csvio.py:56:def test_r16_a_file_that_is_not_utf8_is_a_format_error(tmp_path):\ntests/test_csvio.py:64:def test_r17_good_rows_are_kept_and_bad_rows_reported_with_line_numbers(tmp_path):\ntests/test_csvio.py:74:def test_r17_import_never_overwrites_an_existing_product(store, tmp_path):\ntests/test_csvio.py:85:def test_r17_bad_tiers_are_bad_rows(tmp_path):\ntests/test_csvio.py:96:def test_r18_export_writes_the_documented_file(store, tmp_path):\ntests/test_csvio.py:108:def test_r18_import_then_export_round_trips_the_catalog(tmp_path):\ntests/test_csvio.py:125:def test_r16_a_csv_parser_error_is_a_format_error(tmp_path):\n"
+      }
+    },
+    {
+      "i": 31,
+      "t": 177.39,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.2462,
+      "tool_calls": 14,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 43034,
+      "tokens_out": 2201,
+      "text": null,
+      "calls": [
+        {
+          "id": "c15",
+          "tool": "set_model_response",
+          "label": "answer",
+          "args": {
+            "steps": [
+              "Define STOCKTAKE_COLUMNS = (\"sku\", \"counted\") in stockroom/csvio.py.",
+              "Implement import_stocktake(store, path) in stockroom/csvio.py: open with UTF-8 encoding and newline='', read with csv.DictReader; raise CsvFormatError on empty files, non-UTF-8 content, csv errors, or headers that do not match exactly 'sku' and 'counted' (in any order). Read all rows up front so file-level errors raise CsvFormatError before any inventory mutations occur.",
+              "In import_stocktake, validate each row: check for missing/extra fields, normalize SKU and verify it exists in store.catalog, ensure SKU has not already been counted on an earlier line in the file, verify counted is a non-negative whole number, and verify counted is not lower than store.inventory.reserved(sku). Collect failures as RowError(line, message).",
+              "For valid rows, mark the SKU as seen, compute delta = counted - current_on_hand, and if delta != 0, execute store.adjust(sku, delta, 'stocktake'). Return tuple(errors).",
+              "Expose Store.import_stocktake(self, path) in stockroom/store.py that delegates to csvio.import_stocktake(self, path).",
+              "Add comprehensive unit tests in tests/test_csvio.py verifying successful stocktake imports, zero-delta matching without ledger adjustments, file-level CsvFormatError conditions (no side effects), and all per-row rejection cases with line numbers and good rows still applied."
+            ],
+            "actionable": true,
+            "summary": "Add `Store.import_stocktake(path)` and helper `csvio.import_stocktake(store, path)` to load shelf stock counts from a CSV file. The file requires UTF-8 encoding and a header with exactly the `sku` and `counted` columns in any order; empty or malformed files are rejected as a whole with `CsvFormatError` without mutating the store. For each valid row, any difference between counted and current on-hand quantity is recorded as a ledger adjustment with reason 'stocktake', while matching counts record no movement. Bad rows (unknown SKUs, SKUs already counted earlier in the file, non-integer counts, negative counts, counts below reserved stock, or malformed rows) are skipped and returned in file order as `RowError` instances while good rows are applied.",
+            "test_strategy": "Add tests in tests/test_csvio.py covering:\n1. Valid import: counts adjust on-hand inventory correctly, non-listed items are untouched, ledger records one adjustment per changed item with reason 'stocktake' and correct delta, and returns empty tuple.\n2. Unchanged counts: items with counted matching current on hand generate no ledger movement and no error.\n3. File rejection with CsvFormatError: empty files, non-UTF-8 bytes, headers missing columns or containing extra columns, and malformed CSV syntax; verify store state and ledger are unchanged.\n4. Row-level errors: unknown SKUs, case-insensitive duplicate SKUs within the file, non-integer or negative counts, counts lower than reserved units, and rows with too few/many fields; verify that error line numbers are accurate (header is line 1), RowErrors are returned in order, and valid rows in the same file are applied.",
+            "files_to_inspect": [
+              "stockroom/csvio.py",
+              "stockroom/store.py",
+              "tests/test_csvio.py"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "i": 32,
+      "t": 190.34,
+      "kind": "plan",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.2462,
+      "tool_calls": 15,
+      "value": {
+        "actionable": true,
+        "decline_reason": null,
+        "summary": "Add `Store.import_stocktake(path)` and helper `csvio.import_stocktake(store, path)` to load shelf stock counts from a CSV file. The file requires UTF-8 encoding and a header with exactly the `sku` and `counted` columns in any order; empty or malformed files are rejected as a whole with `CsvFormatError` without mutating the store. For each valid row, any difference between counted and current on-hand quantity is recorded as a ledger adjustment with reason 'stocktake', while matching counts record no movement. Bad rows (unknown SKUs, SKUs already counted earlier in the file, non-integer counts, negative counts, counts below reserved stock, or malformed rows) are skipped and returned in file order as `RowError` instances while good rows are applied.",
+        "files_to_inspect": [
+          "stockroom/csvio.py",
+          "stockroom/store.py",
+          "tests/test_csvio.py"
+        ],
+        "steps": [
+          "Define STOCKTAKE_COLUMNS = (\"sku\", \"counted\") in stockroom/csvio.py.",
+          "Implement import_stocktake(store, path) in stockroom/csvio.py: open with UTF-8 encoding and newline='', read with csv.DictReader; raise CsvFormatError on empty files, non-UTF-8 content, csv errors, or headers that do not match exactly 'sku' and 'counted' (in any order). Read all rows up front so file-level errors raise CsvFormatError before any inventory mutations occur.",
+          "In import_stocktake, validate each row: check for missing/extra fields, normalize SKU and verify it exists in store.catalog, ensure SKU has not already been counted on an earlier line in the file, verify counted is a non-negative whole number, and verify counted is not lower than store.inventory.reserved(sku). Collect failures as RowError(line, message).",
+          "For valid rows, mark the SKU as seen, compute delta = counted - current_on_hand, and if delta != 0, execute store.adjust(sku, delta, 'stocktake'). Return tuple(errors).",
+          "Expose Store.import_stocktake(self, path) in stockroom/store.py that delegates to csvio.import_stocktake(self, path).",
+          "Add comprehensive unit tests in tests/test_csvio.py verifying successful stocktake imports, zero-delta matching without ledger adjustments, file-level CsvFormatError conditions (no side effects), and all per-row rejection cases with line numbers and good rows still applied."
+        ],
+        "test_strategy": "Add tests in tests/test_csvio.py covering:\n1. Valid import: counts adjust on-hand inventory correctly, non-listed items are untouched, ledger records one adjustment per changed item with reason 'stocktake' and correct delta, and returns empty tuple.\n2. Unchanged counts: items with counted matching current on hand generate no ledger movement and no error.\n3. File rejection with CsvFormatError: empty files, non-UTF-8 bytes, headers missing columns or containing extra columns, and malformed CSV syntax; verify store state and ledger are unchanged.\n4. Row-level errors: unknown SKUs, case-insensitive duplicate SKUs within the file, non-integer or negative counts, counts lower than reserved units, and rows with too few/many fields; verify that error line numbers are accurate (header is line 1), RowErrors are returned in order, and valid rows in the same file are applied."
+      }
+    },
+    {
+      "i": 33,
+      "t": 190.35,
+      "kind": "node",
+      "node": "route_plan",
+      "visit": 1,
+      "cost_usd": 0.2462,
+      "tool_calls": 15,
+      "from": "planner",
+      "via": null,
+      "message": null
+    },
+    {
+      "i": 34,
+      "t": 190.35,
+      "kind": "node",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2462,
+      "tool_calls": 15,
+      "from": "route_plan",
+      "via": "actionable",
+      "message": null
+    },
+    {
+      "i": 35,
+      "t": 190.35,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2489,
+      "tool_calls": 15,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 2680,
+      "tokens_out": 179,
+      "text": null,
+      "calls": [
+        {
+          "id": "c16",
+          "tool": "read_file",
+          "label": "read_file stockroom/csvio.py",
+          "args": {
+            "path": "stockroom/csvio.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 36,
+      "t": 194.59,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2489,
+      "tool_calls": 16,
+      "call": "c16",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/csvio.py",
+        "content": "\"\"\"CSV import of products and export of stock levels.\n\nImport file columns, in any order: `sku,name,unit,price,taxable,tiers`.\n`taxable` is `true` or `false`. `tiers` is empty or a `;`-separated list of\n`min_qty:percent` steps such as `10:5;50:12.5`.\n\nExport file columns: `sku,name,unit,on_hand,reserved,available,stock_value`,\none row per product, sorted by SKU, with `\\\\n` line endings.\n\"\"\"\n\nimport csv\nfrom collections.abc import Container\nfrom dataclasses import dataclass\nfrom decimal import Decimal\nfrom pathlib import Path\nfrom typing import TYPE_CHECKING\n\nfrom .catalog import Product, Tier, Unit, normalize_sku\nfrom .errors import CatalogError, CsvFormatError, StockroomError\nfrom .money import format_money, parse_percent\n\nif TYPE_CHECKING:\n    from .store import Store\n\nIMPORT_COLUMNS = (\"sku\", \"name\", \"unit\", \"price\", \"taxable\", \"tiers\")\nEXPORT_COLUMNS = (\n    \"sku\",\n    \"name\",\n    \"unit\",\n    \"on_hand\",\n    \"reserved\",\n    \"available\",\n    \"stock_value\",\n)\n\n\n@dataclass(frozen=True)\nclass RowError:\n    \"\"\"A rejected row. `line` is the row's line number in the file (the header is 1).\"\"\"\n\n    line: int\n    message: str\n\n\n@dataclass(frozen=True)\nclass ImportResult:\n    \"\"\"Products that were accepted and rows that were not, each in file order.\"\"\"\n\n    products: tuple[Product, ...]\n    errors: tuple[RowError, ...]\n\n\ndef parse_tiers(text: str) -> tuple[Tier, ...]:\n    \"\"\"Parse the `tiers` column. An empty string means no tiers.\"\"\"\n    text = text.strip()\n    if not text:\n        return ()\n    tiers = []\n    for part in text.split(\";\"):\n        min_qty, separator, percent = part.partition(\":\")\n        if not separator:\n            raise CatalogError(f\"tier must look like min_qty:percent: {part!r}\")\n        try:\n            quantity = int(min_qty.strip())\n        except ValueError:\n            raise CatalogError(\n                f\"tier quantity is not a whole number: {part!r}\"\n            ) from None\n        tiers.append(Tier(quantity, parse_percent(percent)))\n    return tuple(tiers)\n\n\ndef parse_taxable(text: str) -> bool:\n    \"\"\"`true` or `false`, in any case.\"\"\"\n    value = text.strip().lower()\n    if value not in (\"true\", \"false\"):\n        raise CatalogError(f\"taxable must be true or false: {text!r}\")\n    return value == \"true\"\n\n\ndef import_products(path: str | Path, existing: Container[str] = ()) -> ImportResult:\n    \"\"\"Read products from a CSV file.\n\n    A bad row is skipped and reported; the good rows are still returned. A row\n    is bad if a field is invalid, if fields are missing or extra, or if its SKU\n    appeared earlier in the file or is in `existing`. A file that is empty, not\n    UTF-8, malformed for the csv module, or lacks exactly the expected columns\n    raises `CsvFormatError`.\"\"\"\n    try:\n        with open(path, newline=\"\", encoding=\"utf-8\") as handle:\n            reader = csv.DictReader(handle)\n            header = reader.fieldnames\n            if header is None:\n                raise CsvFormatError(\"the file is empty\")\n           \n[... 1,795 characters cut ...]\nw per product with its stock levels and stock value.\n\n    `stock_value` is on-hand units times the list price, in cents precision.\"\"\"\n    with open(path, \"w\", newline=\"\", encoding=\"utf-8\") as handle:\n        writer = csv.writer(handle, lineterminator=\"\\n\")\n        writer.writerow(EXPORT_COLUMNS)\n        for product in store.catalog.products():\n            level = store.inventory.level(product.sku)\n            value: Decimal = product.list_price * level.on_hand\n            writer.writerow(\n                [\n                    product.sku,\n                    product.name,\n                    product.unit.value,\n                    level.on_hand,\n                    level.reserved,\n                    level.available,\n                    format_money(value),\n                ]\n            )\n"
+      }
+    },
+    {
+      "i": 37,
+      "t": 194.59,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2523,
+      "tool_calls": 16,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 4377,
+      "tokens_out": 45,
+      "text": null,
+      "calls": [
+        {
+          "id": "c17",
+          "tool": "read_file",
+          "label": "read_file stockroom/store.py",
+          "args": {
+            "path": "stockroom/store.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 38,
+      "t": 196.23,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2523,
+      "tool_calls": 17,
+      "call": "c17",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/store.py",
+        "content": "\"\"\"`Store`: one object that wires catalog, inventory, pricing and orders together.\"\"\"\n\nfrom collections.abc import Iterable, Mapping\nfrom decimal import Decimal\nfrom pathlib import Path\n\nfrom . import csvio\nfrom .catalog import Catalog, Product, merge_items\nfrom .errors import UnknownCoupon\nfrom .inventory import Inventory, StockLevel\nfrom .ledger import Ledger\nfrom .money import parse_percent\nfrom .orders import Order, OrderBook\nfrom .pricing import Coupon, Quote, quote_items\n\nDEFAULT_TAX_PERCENT = Decimal(\"8.25\")\n\n\nclass Store:\n    \"\"\"The public entry point.\n\n    `tax_percent` is the sales tax rate in percent units, applied to taxable\n    products. Everything else is reached through the methods below or through\n    the `catalog`, `inventory` and `orders` attributes.\"\"\"\n\n    def __init__(self, tax_percent: object = DEFAULT_TAX_PERCENT) -> None:\n        self.tax_percent = parse_percent(tax_percent)\n        self.catalog = Catalog()\n        self.ledger = Ledger()\n        self.inventory = Inventory(self.catalog, self.ledger)\n        self.orders = OrderBook(self.catalog, self.inventory)\n        self._coupons: dict[str, Coupon] = {}\n\n    # Catalog\n    def add_product(self, product: Product) -> None:\n        \"\"\"Add a product to the catalog (its SKU must be new).\"\"\"\n        self.catalog.add(product)\n\n    def import_products(self, path: str | Path) -> csvio.ImportResult:\n        \"\"\"Import a products CSV. Valid rows are added; bad rows are reported.\"\"\"\n        result = csvio.import_products(path, existing=self.catalog)\n        for product in result.products:\n            self.catalog.add(product)\n        return result\n\n    def export_stock(self, path: str | Path) -> None:\n        \"\"\"Write the stock levels of every product to a CSV file.\"\"\"\n        csvio.export_stock(self, path)\n\n    # Stock\n    def receive(self, sku: str, quantity: int, reason: str = \"received\") -> None:\n        \"\"\"Add units to stock.\"\"\"\n        self.inventory.receive(sku, quantity, reason)\n\n    def ship(self, sku: str, quantity: int, reason: str = \"shipped\") -> None:\n        \"\"\"Ship available units directly, without an order.\"\"\"\n        self.inventory.ship(sku, quantity, reason)\n\n    def adjust(self, sku: str, delta: int, reason: str) -> None:\n        \"\"\"Correct the on-hand count by a signed amount, with a reason.\"\"\"\n        self.inventory.adjust(sku, delta, reason)\n\n    def stock(self, sku: str) -> StockLevel:\n        \"\"\"On hand, reserved and available units for one SKU.\"\"\"\n        return self.inventory.level(sku)\n\n    # Coupons and quotes\n    def add_coupon(self, code: str, percent: object) -> Coupon:\n        \"\"\"Register (or replace) a percentage coupon under its code.\"\"\"\n        coupon = Coupon(code, parse_percent(percent))\n        self._coupons[coupon.code] = coupon\n        return coupon\n\n    def _coupon(self, code: str | None) -> Coupon | None:\n        if code is None:\n            return None\n        try:\n            return self._coupons[code.strip().upper()]\n        except KeyError:\n[... 780 characters cut ...]\nf._coupon(coupon_code), self.tax_percent)\n\n    def reserve_order(self, order_id: str) -> Order:\n        \"\"\"Reserve all of a new order's units, or none.\"\"\"\n        return self.orders.reserve(order_id)\n\n    def fulfil_order(\n        self, order_id: str, quantities: Mapping[str, int] | None = None\n    ) -> Order:\n        \"\"\"Ship reserved units: everything outstanding, or the given quantities.\"\"\"\n        return self.orders.fulfil(order_id, quantities)\n\n    def cancel_order(self, order_id: str) -> Order:\n        \"\"\"Cancel an unfinished order and release what is still reserved.\"\"\"\n        return self.orders.cancel(order_id)\n\n    def billable(self, order_id: str) -> Quote:\n        \"\"\"What the customer owes for a fulfilled or cancelled order.\"\"\"\n        return self.orders.billable_quote(order_id)\n"
+      }
+    },
+    {
+      "i": 39,
+      "t": 196.24,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2568,
+      "tool_calls": 17,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 5640,
+      "tokens_out": 53,
+      "text": null,
+      "calls": [
+        {
+          "id": "c18",
+          "tool": "read_file",
+          "label": "read_file stockroom/inventory.py",
+          "args": {
+            "path": "stockroom/inventory.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 40,
+      "t": 197.87,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2568,
+      "tool_calls": 18,
+      "call": "c18",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/inventory.py",
+        "content": "\"\"\"Stock levels, derived from the ledger.\n\nThere is no stored counter. For one SKU:\n\n    on_hand   = received + adjusted - shipped\n    reserved  = reserved - released\n    available = on_hand - reserved\n\nEvery operation checks the levels first and only then appends to the ledger, so\na refused operation leaves no trace.\n\"\"\"\n\nfrom dataclasses import dataclass\n\nfrom .catalog import Catalog, check_quantity\nfrom .errors import InsufficientStock, InvalidQuantity\nfrom .ledger import Ledger, MovementKind\n\n\n@dataclass(frozen=True)\nclass StockLevel:\n    \"\"\"The three stock figures for one SKU.\"\"\"\n\n    sku: str\n    on_hand: int\n    reserved: int\n    available: int\n\n\nclass Inventory:\n    \"\"\"Stock operations over a ledger, for the products of a catalog.\"\"\"\n\n    def __init__(self, catalog: Catalog, ledger: Ledger | None = None) -> None:\n        self.catalog = catalog\n        self.ledger = ledger if ledger is not None else Ledger()\n\n    def _sku(self, sku: str) -> str:\n        \"\"\"Normalise `sku` and make sure the catalog knows it.\"\"\"\n        product = self.catalog.get(sku)\n        return product.sku\n\n    def on_hand(self, sku: str) -> int:\n        \"\"\"Units physically in the stockroom.\"\"\"\n        key = self._sku(sku)\n        ledger = self.ledger\n        return (\n            ledger.total(key, MovementKind.RECEIVE)\n            + ledger.total(key, MovementKind.ADJUST)\n            - ledger.total(key, MovementKind.SHIP)\n        )\n\n    def reserved(self, sku: str) -> int:\n        \"\"\"Units promised to open orders.\"\"\"\n        key = self._sku(sku)\n        return self.ledger.total(key, MovementKind.RESERVE) - self.ledger.total(\n            key, MovementKind.RELEASE\n        )\n\n    def available(self, sku: str) -> int:\n        \"\"\"Units that can still be promised or shipped directly.\"\"\"\n        return self.on_hand(sku) - self.reserved(sku)\n\n    def level(self, sku: str) -> StockLevel:\n        \"\"\"All three figures for one SKU.\"\"\"\n        key = self._sku(sku)\n        on_hand, reserved = self.on_hand(key), self.reserved(key)\n        return StockLevel(key, on_hand, reserved, on_hand - reserved)\n\n    def snapshot(self) -> list[StockLevel]:\n        \"\"\"The levels of every catalog SKU, sorted by SKU.\"\"\"\n        return [self.level(product.sku) for product in self.catalog.products()]\n\n    def receive(\n        self, sku: str, quantity: int, reason: str = \"received\", ref: str = \"\"\n    ) -> None:\n        \"\"\"Add units to the stockroom.\"\"\"\n        self.ledger.append(self._sku(sku), MovementKind.RECEIVE, quantity, reason, ref)\n\n    def ship(\n        self, sku: str, quantity: int, reason: str = \"shipped\", ref: str = \"\"\n    ) -> None:\n        \"\"\"Ship units directly, without an order. Only available units can go.\"\"\"\n        key = self._sku(sku)\n        check_quantity(quantity)\n        if quantity > self.available(key):\n            raise InsufficientStock(\n                f\"cannot ship {quantity} of {key}: {self.available(key)} available\"\n            )\n        self.ledger.append(key, MovementKind\n[... 1,338 characters cut ...]\nself.reserved(key):\n            raise InvalidQuantity(\n                f\"cannot release {quantity} of {key}: only {self.reserved(key)} reserved\"\n            )\n        self.ledger.append(key, MovementKind.RELEASE, quantity, \"released\", ref)\n\n    def ship_reserved(self, sku: str, quantity: int, ref: str = \"\") -> None:\n        \"\"\"Ship reserved units: one SHIP movement, then the matching RELEASE.\"\"\"\n        key = self._sku(sku)\n        check_quantity(quantity)\n        if quantity > self.reserved(key):\n            raise InvalidQuantity(\n                f\"cannot ship {quantity} of {key}: only {self.reserved(key)} reserved\"\n            )\n        self.ledger.append(key, MovementKind.SHIP, quantity, \"fulfilled\", ref)\n        self.ledger.append(key, MovementKind.RELEASE, quantity, \"fulfilled\", ref)\n"
+      }
+    },
+    {
+      "i": 41,
+      "t": 197.88,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2622,
+      "tool_calls": 18,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 7074,
+      "tokens_out": 37,
+      "text": null,
+      "calls": [
+        {
+          "id": "c19",
+          "tool": "read_file",
+          "label": "read_file tests/test_csvio.py",
+          "args": {
+            "path": "tests/test_csvio.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 42,
+      "t": 209.83,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2622,
+      "tool_calls": 19,
+      "call": "c19",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "tests/test_csvio.py",
+        "content": "from decimal import Decimal\n\nimport pytest\nfrom stockroom import Store, Tier, csvio\nfrom stockroom.csvio import parse_tiers\nfrom stockroom.errors import CsvFormatError\n\nD = Decimal\n\nHEADER = \"sku,name,unit,price,taxable,tiers\\n\"\n\nMIXED = (\n    HEADER\n    + \"cab-1,Cable,each,3.50,true,10:5;50:10\\n\"  # line 2: good\n    + \"BAD SKU,Broken,each,1.00,true,\\n\"  # line 3: bad SKU\n    + \"pen-2,Pencil,each,1.005,true,\\n\"  # line 4: three decimals\n    + \"mug-1,Mug,box,4.00,maybe,\\n\"  # line 5: taxable is not a boolean\n    + \"CAB-1,Cable again,each,3.00,true,\\n\"  # line 6: duplicate of line 2\n    + \"\\n\"  # line 7: blank, skipped\n    + \"lamp,Lamp,each,12.00,false,\\n\"  # line 8: good\n    + \"short,Short,each\\n\"  # line 9: too few fields\n    + \"long,Long,each,1.00,true,,extra\\n\"  # line 10: too many fields\n)\n\n\ndef write(tmp_path, text):\n    path = tmp_path / \"products.csv\"\n    path.write_text(text, encoding=\"utf-8\")\n    return path\n\n\ndef test_r16_a_good_file_imports_every_row(tmp_path):\n    \"\"\"R16: columns in the documented form, tiers parsed.\"\"\"\n    rows = \"cab-1,Cable,kg,3.50,TRUE,10:5;50:12.5\\nlamp,Lamp,each,12,false,\\n\"\n    result = csvio.import_products(write(tmp_path, HEADER + rows))\n    assert result.errors == ()\n    cable, lamp = result.products\n    assert (cable.sku, cable.unit.value, cable.taxable) == (\"CAB-1\", \"kg\", True)\n    assert cable.list_price == Decimal(\"3.50\")\n    assert cable.tiers == (Tier(10, Decimal(\"5\")), Tier(50, Decimal(\"12.5\")))\n    assert (lamp.taxable, lamp.tiers, str(lamp.list_price)) == (False, (), \"12.00\")\n    text = \"name,price,sku,tiers,unit,taxable\\nCable,3.50,cab-1,,each,true\\n\"\n    shuffled = csvio.import_products(write(tmp_path, text))  # any column order\n    assert [p.sku for p in shuffled.products] == [\"CAB-1\"]\n\n\n@pytest.mark.parametrize(\n    \"text\", [\"\", \"sku,name,unit,price,taxable\\n\", HEADER.strip() + \",extra\\n\"]\n)\ndef test_r16_an_unusable_file_is_a_format_error(tmp_path, text):\n    \"\"\"R16: empty files and other columns raise CsvFormatError.\"\"\"\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(write(tmp_path, text))\n\n\ndef test_r16_a_file_that_is_not_utf8_is_a_format_error(tmp_path):\n    \"\"\"R16: undecodable bytes raise CsvFormatError.\"\"\"\n    path = tmp_path / \"bad.csv\"\n    path.write_bytes(HEADER.encode() + b\"x-1,Bad\\xe9,each,1.00,true,\\n\")\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(path)\n\n\ndef test_r17_good_rows_are_kept_and_bad_rows_reported_with_line_numbers(tmp_path):\n    \"\"\"R17: file line numbers, header is line 1, blank lines still count.\"\"\"\n    result = csvio.import_products(write(tmp_path, MIXED))\n    assert [p.sku for p in result.products] == [\"CAB-1\", \"LAMP\"]\n    assert [e.line for e in result.errors] == [3, 4, 5, 6, 9, 10]\n    by_line = {e.line: e.message for e in result.errors}\n    assert \"duplicate\" in by_line[6] and \"decimal\" in by_line[4]\n    assert \"fewer\" in by_line[9] and \"more\" in by_line[10]\n\n\ndef test_r17_import_never_overwrites_an_existing_product(store\n[... 1,704 characters cut ...]\ntoo.\"\"\"\n    fresh = Store(tax_percent=\"0\")\n    fresh.import_products(write(tmp_path, MIXED))\n    fresh.import_products(\n        write(tmp_path, HEADER + 'mix-1,\"Pen, blue\",each,0.99,true,\\n')\n    )\n    fresh.receive(\"lamp\", 4)\n    path = tmp_path / \"out.csv\"\n    fresh.export_stock(path)\n    assert path.read_text().splitlines()[1:] == [\n        \"CAB-1,Cable,each,0,0,0,0.00\",\n        \"LAMP,Lamp,each,4,0,4,48.00\",\n        'MIX-1,\"Pen, blue\",each,0,0,0,0.00',\n    ]\n\n\ndef test_r16_a_csv_parser_error_is_a_format_error(tmp_path):\n    \"\"\"R16: a field over the csv module's size limit makes it fail; unusable file.\"\"\"\n    path = tmp_path / \"huge.csv\"\n    path.write_text(HEADER + \"x-1,\" + \"n\" * 200_000 + \",each,1.00,true,\\n\")\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(path)\n"
+      }
+    },
+    {
+      "i": 43,
+      "t": 209.84,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2693,
+      "tool_calls": 19,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 9268,
+      "tokens_out": 40,
+      "text": null,
+      "calls": [
+        {
+          "id": "c20",
+          "tool": "bash",
+          "label": "bash python -m pytest -q",
+          "args": {
+            "command": "python -m pytest -q"
+          }
+        }
+      ]
+    },
+    {
+      "i": 44,
+      "t": 228.59,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2693,
+      "tool_calls": 20,
+      "call": "c20",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "................................................................         [100%]\n64 passed in 0.08s\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 45,
+      "t": 228.6,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2794,
+      "tool_calls": 20,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 9338,
+      "tokens_out": 831,
+      "text": null,
+      "calls": [
+        {
+          "id": "c21",
+          "tool": "grep",
+          "label": "grep 'import_products' in stockroom",
+          "args": {
+            "pattern": "import_products",
+            "path": "stockroom"
+          }
+        }
+      ]
+    },
+    {
+      "i": 46,
+      "t": 242.18,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2794,
+      "tool_calls": 21,
+      "call": "c21",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "stockroom/csvio.py:81:def import_products(path: str | Path, existing: Container[str] = ()) -> ImportResult:\nstockroom/store.py:39:    def import_products(self, path: str | Path) -> csvio.ImportResult:\nstockroom/store.py:41:        result = csvio.import_products(path, existing=self.catalog)\n"
+      }
+    },
+    {
+      "i": 47,
+      "t": 242.19,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2873,
+      "tool_calls": 21,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 10260,
+      "tokens_out": 33,
+      "text": null,
+      "calls": [
+        {
+          "id": "c22",
+          "tool": "read_file",
+          "label": "read_file stockroom/__init__.py",
+          "args": {
+            "path": "stockroom/__init__.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 48,
+      "t": 243.86,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2873,
+      "tool_calls": 22,
+      "call": "c22",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/__init__.py",
+        "content": "\"\"\"stockroom: a small inventory and pricing module.\n\nStart with `Store`. The rules it follows are listed in the README.\n\"\"\"\n\nfrom . import csvio\nfrom .catalog import Product, Tier, Unit\nfrom .errors import StockroomError\nfrom .orders import OrderStatus\nfrom .store import Store\n\n__all__ = [\n    \"OrderStatus\",\n    \"Product\",\n    \"StockroomError\",\n    \"Store\",\n    \"Tier\",\n    \"Unit\",\n    \"csvio\",\n]\n"
+      }
+    },
+    {
+      "i": 49,
+      "t": 243.87,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3025,
+      "tool_calls": 22,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 10414,
+      "tokens_out": 1979,
+      "text": null,
+      "calls": [
+        {
+          "id": "c23",
+          "tool": "read_file",
+          "label": "read_file stockroom/errors.py",
+          "args": {
+            "path": "stockroom/errors.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 50,
+      "t": 256.95,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3025,
+      "tool_calls": 23,
+      "call": "c23",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/errors.py",
+        "content": "\"\"\"Exceptions raised by stockroom.\n\nEvery error derives from `StockroomError`, so callers can catch one type. Errors\nthat come from bad input values also derive from `ValueError`.\n\"\"\"\n\n\nclass StockroomError(Exception):\n    \"\"\"Base class for every error stockroom raises on purpose.\"\"\"\n\n\nclass MoneyError(StockroomError, ValueError):\n    \"\"\"A money amount or percentage is malformed or out of range.\"\"\"\n\n\nclass CatalogError(StockroomError, ValueError):\n    \"\"\"A product, tier, unit or coupon definition is invalid.\"\"\"\n\n\nclass InvalidSku(CatalogError):\n    \"\"\"A SKU does not match the SKU format.\"\"\"\n\n\nclass DuplicateSku(CatalogError):\n    \"\"\"A product with this SKU is already in the catalog.\"\"\"\n\n\nclass UnknownSku(CatalogError):\n    \"\"\"No product with this SKU is in the catalog.\"\"\"\n\n\nclass InvalidQuantity(StockroomError, ValueError):\n    \"\"\"A quantity is not a positive whole number (or a non-zero adjustment).\"\"\"\n\n\nclass InsufficientStock(StockroomError):\n    \"\"\"The requested stock movement would use units that are not available.\"\"\"\n\n\nclass OverFulfilment(StockroomError):\n    \"\"\"An order fulfillment asked for more than is still reserved for the order.\"\"\"\n\n\nclass UnknownOrder(StockroomError):\n    \"\"\"No order with this ID exists.\"\"\"\n\n\nclass InvalidOrderState(StockroomError):\n    \"\"\"The order's status does not allow the requested operation.\"\"\"\n\n\nclass UnknownCoupon(StockroomError):\n    \"\"\"No coupon with this code is registered.\"\"\"\n\n\nclass CsvFormatError(StockroomError):\n    \"\"\"A CSV file as a whole is unusable (empty, bad header, not UTF-8).\"\"\"\n"
+      }
+    },
+    {
+      "i": 51,
+      "t": 256.96,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3122,
+      "tool_calls": 23,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 12762,
+      "tokens_out": 49,
+      "text": null,
+      "calls": [
+        {
+          "id": "c24",
+          "tool": "read_file",
+          "label": "read_file stockroom/catalog.py",
+          "args": {
+            "path": "stockroom/catalog.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 52,
+      "t": 258.57,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3122,
+      "tool_calls": 24,
+      "call": "c24",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/catalog.py",
+        "content": "\"\"\"The product catalog: SKUs, units, quantity tiers and products.\n\nA product says what is sold and at which list price. It knows nothing about\nstock levels (see `inventory`) or how a quantity is priced (see `pricing`).\n\"\"\"\n\nimport re\nfrom collections.abc import Iterable\nfrom dataclasses import dataclass, field, replace\nfrom decimal import Decimal\nfrom enum import Enum\nfrom itertools import pairwise\n\nfrom .errors import (\n    CatalogError,\n    DuplicateSku,\n    InvalidQuantity,\n    InvalidSku,\n    UnknownSku,\n)\nfrom .money import parse_money, parse_percent\n\nMAX_SKU_LENGTH = 20\n_SKU_PATTERN = re.compile(r\"[A-Z0-9]+(-[A-Z0-9]+)*\")\n\n\nclass Unit(Enum):\n    \"\"\"How a product is counted. Quantities are always whole numbers of a unit.\"\"\"\n\n    EACH = \"each\"\n    PAIR = \"pair\"\n    BOX = \"box\"\n    CASE = \"case\"\n    KILOGRAM = \"kg\"\n\n    @classmethod\n    def parse(cls, text: str) -> \"Unit\":\n        \"\"\"Look a unit up by its code, ignoring case and surrounding spaces.\"\"\"\n        code = text.strip().lower() if isinstance(text, str) else text\n        for unit in cls:\n            if unit.value == code:\n                return unit\n        raise CatalogError(f\"unknown unit: {text!r}\")\n\n\ndef normalize_sku(text: str) -> str:\n    \"\"\"Return the canonical form of a SKU: stripped and upper case.\n\n    A SKU is letters and digits in groups separated by single hyphens, at most\n    `MAX_SKU_LENGTH` characters.\"\"\"\n    if not isinstance(text, str):\n        raise InvalidSku(f\"SKU must be a string: {text!r}\")\n    sku = text.strip().upper()\n    if len(sku) > MAX_SKU_LENGTH or not _SKU_PATTERN.fullmatch(sku):\n        raise InvalidSku(f\"invalid SKU: {text!r}\")\n    return sku\n\n\ndef check_quantity(quantity: object) -> int:\n    \"\"\"Return `quantity` if it is a positive whole number, else raise.\"\"\"\n    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:\n        raise InvalidQuantity(f\"quantity must be a positive whole number: {quantity!r}\")\n    return quantity\n\n\ndef merge_items(items: Iterable[tuple[str, int]]) -> dict[str, int]:\n    \"\"\"Merge (sku, quantity) pairs into one quantity per normalised SKU.\n\n    Repeated SKUs add up; order follows each SKU's first appearance. Used by\n    both quoting and order creation so they always price the same lines.\"\"\"\n    merged: dict[str, int] = {}\n    for sku, quantity in items:\n        key = normalize_sku(sku)\n        merged[key] = merged.get(key, 0) + check_quantity(quantity)\n    return merged\n\n\n@dataclass(frozen=True)\nclass Tier:\n    \"\"\"A quantity discount step: from `min_qty` units, `percent` % off the list price.\"\"\"\n\n    min_qty: int\n    percent: Decimal\n\n    def __post_init__(self) -> None:\n        if (\n            isinstance(self.min_qty, bool)\n            or not isinstance(self.min_qty, int)\n            or self.min_qty < 2\n        ):\n            raise CatalogError(f\"a tier starts at 2 units or more: {self.min_qty!r}\")\n        percent = parse_percent(self.percent)\n        if percent <= 0:\n            raise CatalogError\n[... 2,184 characters cut ...]\n          raise UnknownSku(f\"no such SKU: {key}\") from None\n\n    def set_price(self, sku: str, price: object) -> Product:\n        \"\"\"Change a product's list price. Existing orders keep their own copy.\"\"\"\n        product = replace(self.get(sku), list_price=parse_money(price))\n        self._products[product.sku] = product\n        return product\n\n    def products(self) -> list[Product]:\n        \"\"\"All products, sorted by SKU.\"\"\"\n        return [self._products[sku] for sku in sorted(self._products)]\n\n    def __contains__(self, sku: object) -> bool:\n        if not isinstance(sku, str):\n            return False\n        try:\n            return normalize_sku(sku) in self._products\n        except InvalidSku:\n            return False\n\n    def __len__(self) -> int:\n        return len(self._products)\n"
+      }
+    },
+    {
+      "i": 53,
+      "t": 258.58,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.337,
+      "tool_calls": 24,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 14484,
+      "tokens_out": 3707,
+      "text": null,
+      "calls": [
+        {
+          "id": "c25",
+          "tool": "grep",
+          "label": "grep 'int\\(' in stockroom",
+          "args": {
+            "pattern": "int\\(",
+            "path": "stockroom"
+          }
+        }
+      ]
+    },
+    {
+      "i": 54,
+      "t": 284.44,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.337,
+      "tool_calls": 25,
+      "call": "c25",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "stockroom/csvio.py:64:            quantity = int(min_qty.strip())\n"
+      }
+    },
+    {
+      "i": 55,
+      "t": 284.45,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3574,
+      "tool_calls": 25,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 18209,
+      "tokens_out": 1803,
+      "text": null,
+      "calls": [
+        {
+          "id": "c26",
+          "tool": "read_file",
+          "label": "read_file stockroom/ledger.py",
+          "args": {
+            "path": "stockroom/ledger.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 56,
+      "t": 296.45,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3574,
+      "tool_calls": 26,
+      "call": "c26",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/ledger.py",
+        "content": "\"\"\"The stock ledger: an append-only list of movements.\n\nNothing in the ledger is ever changed or removed. Stock levels are not stored\nanywhere; `inventory` derives them by summing movements.\n\"\"\"\n\nfrom dataclasses import dataclass\nfrom enum import Enum\n\nfrom .catalog import check_quantity\nfrom .errors import InvalidQuantity\n\n\nclass MovementKind(Enum):\n    \"\"\"What a movement does.\n\n    RECEIVE, SHIP and ADJUST change the units on hand. RESERVE and RELEASE\n    change the units promised to orders and leave the units on hand alone.\"\"\"\n\n    RECEIVE = \"receive\"\n    SHIP = \"ship\"\n    ADJUST = \"adjust\"\n    RESERVE = \"reserve\"\n    RELEASE = \"release\"\n\n\n@dataclass(frozen=True)\nclass Movement:\n    \"\"\"One ledger entry. `seq` counts from 1 in append order.\n\n    `quantity` is positive, except for ADJUST where it is a signed, non-zero\n    change. `ref` is free text, normally an order ID.\"\"\"\n\n    seq: int\n    sku: str\n    kind: MovementKind\n    quantity: int\n    reason: str\n    ref: str\n\n\nclass Ledger:\n    \"\"\"Append-only movement history.\"\"\"\n\n    def __init__(self) -> None:\n        self._entries: list[Movement] = []\n\n    def append(\n        self,\n        sku: str,\n        kind: MovementKind,\n        quantity: int,\n        reason: str = \"\",\n        ref: str = \"\",\n    ) -> Movement:\n        \"\"\"Record a movement and return it. `sku` must already be normalised.\"\"\"\n        if kind is MovementKind.ADJUST:\n            if (\n                isinstance(quantity, bool)\n                or not isinstance(quantity, int)\n                or quantity == 0\n            ):\n                raise InvalidQuantity(\n                    f\"an adjustment must be a non-zero whole number: {quantity!r}\"\n                )\n            if not reason.strip():\n                raise InvalidQuantity(\"an adjustment needs a reason\")\n        else:\n            check_quantity(quantity)\n        movement = Movement(\n            len(self._entries) + 1, sku, kind, quantity, reason.strip(), ref\n        )\n        self._entries.append(movement)\n        return movement\n\n    def entries(self, sku: str | None = None) -> tuple[Movement, ...]:\n        \"\"\"All movements in order, optionally only those for one (normalised) SKU.\"\"\"\n        return tuple(m for m in self._entries if sku is None or m.sku == sku)\n\n    def total(self, sku: str, kind: MovementKind) -> int:\n        \"\"\"Sum of the quantities of one kind of movement for one SKU.\"\"\"\n        return sum(m.quantity for m in self._entries if m.sku == sku and m.kind is kind)\n\n    def __len__(self) -> int:\n        return len(self._entries)\n"
+      }
+    },
+    {
+      "i": 57,
+      "t": 296.46,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3756,
+      "tool_calls": 26,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 20676,
+      "tokens_out": 717,
+      "text": null,
+      "calls": [
+        {
+          "id": "c27",
+          "tool": "bash",
+          "label": "bash python -c ' import csv, io reader = csv.DictReader(io.StringIO(\"\")) print(\"empty",
+          "args": {
+            "command": "python -c '\nimport csv, io\nreader = csv.DictReader(io.StringIO(\"\"))\nprint(\"empty:\", reader.fieldnames)\nreader = csv.DictReader(io.StringIO(\"\\n\\n\"))\nprint(\"newlines:\", reader.fieldnames)\n'"
+          }
+        }
+      ]
+    },
+    {
+      "i": 58,
+      "t": 303.06,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3756,
+      "tool_calls": 27,
+      "call": "c27",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "empty: None\nnewlines: []\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 59,
+      "t": 303.06,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3935,
+      "tool_calls": 27,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 21409,
+      "tokens_out": 488,
+      "text": null,
+      "calls": [
+        {
+          "id": "c28",
+          "tool": "bash",
+          "label": "bash python -c ' import csv, io reader = csv.DictReader(io.StringIO(\"sku,counted\\n\"))",
+          "args": {
+            "command": "python -c '\nimport csv, io\nreader = csv.DictReader(io.StringIO(\"sku,counted\\n\"))\nprint(reader.fieldnames)\nreader2 = csv.DictReader(io.StringIO(\"sku,counted,\\n\"))\nprint(reader2.fieldnames)\n'"
+          }
+        }
+      ]
+    },
+    {
+      "i": 60,
+      "t": 307.66,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3935,
+      "tool_calls": 28,
+      "call": "c28",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "['sku', 'counted']\n['sku', 'counted', '']\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 61,
+      "t": 307.67,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4109,
+      "tool_calls": 28,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 21921,
+      "tokens_out": 259,
+      "text": null,
+      "calls": [
+        {
+          "id": "c29",
+          "tool": "bash",
+          "label": "bash python -c ' import csv, io reader = csv.DictReader(io.StringIO(\"\\n\\nsku,counted\\",
+          "args": {
+            "command": "python -c '\nimport csv, io\nreader = csv.DictReader(io.StringIO(\"\\n\\nsku,counted\\npen-1,10\\n\"))\nprint(reader.fieldnames)\nfor r in reader:\n    print(r)\n'"
+          }
+        }
+      ]
+    },
+    {
+      "i": 62,
+      "t": 310.61,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4109,
+      "tool_calls": 29,
+      "call": "c29",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "[]\n{None: ['sku', 'counted']}\n{None: ['pen-1', '10']}\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 63,
+      "t": 310.61,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4287,
+      "tool_calls": 29,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 22213,
+      "tokens_out": 290,
+      "text": null,
+      "calls": [
+        {
+          "id": "c30",
+          "tool": "bash",
+          "label": "bash python -c ' import csv, io text = \"sku,counted\\npen-1,10\\n\\npen-2,20\\n\" reader =",
+          "args": {
+            "command": "python -c '\nimport csv, io\ntext = \"sku,counted\\npen-1,10\\n\\npen-2,20\\n\"\nreader = csv.DictReader(io.StringIO(text))\nfor row in reader:\n    print(reader.line_num, row)\n'"
+          }
+        }
+      ]
+    },
+    {
+      "i": 64,
+      "t": 314.03,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4287,
+      "tool_calls": 30,
+      "call": "c30",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "2 {'sku': 'pen-1', 'counted': '10'}\n4 {'sku': 'pen-2', 'counted': '20'}\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 65,
+      "t": 314.04,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4467,
+      "tool_calls": 30,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 22545,
+      "tokens_out": 297,
+      "text": null,
+      "calls": [
+        {
+          "id": "c31",
+          "tool": "bash",
+          "label": "bash python -c ' import csv, io text = \"sku,counted\\npen-1\\npen-2,10,extra\\n\" reader",
+          "args": {
+            "command": "python -c '\nimport csv, io\ntext = \"sku,counted\\npen-1\\npen-2,10,extra\\n\"\nreader = csv.DictReader(io.StringIO(text))\nfor row in reader:\n    print(reader.line_num, row)\n'"
+          }
+        }
+      ]
+    },
+    {
+      "i": 66,
+      "t": 317.39,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4467,
+      "tool_calls": 31,
+      "call": "c31",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "2 {'sku': 'pen-1', 'counted': None}\n3 {'sku': 'pen-2', 'counted': '10', None: ['extra']}\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 67,
+      "t": 317.39,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4962,
+      "tool_calls": 31,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 22887,
+      "tokens_out": 8616,
+      "text": null,
+      "calls": [
+        {
+          "id": "c32",
+          "tool": "bash",
+          "label": "bash python -c ' import csv, io reader = csv.DictReader(io.StringIO(\" \\n\\n \")) print(",
+          "args": {
+            "command": "python -c '\nimport csv, io\nreader = csv.DictReader(io.StringIO(\"   \\n\\n  \"))\nprint(\"fieldnames:\", reader.fieldnames)\n'"
+          }
+        }
+      ]
+    },
+    {
+      "i": 68,
+      "t": 370.48,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4962,
+      "tool_calls": 32,
+      "call": "c32",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "fieldnames: ['   ']\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 69,
+      "t": 370.48,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.5328,
+      "tool_calls": 32,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 31518,
+      "tokens_out": 3452,
+      "text": null,
+      "calls": [
+        {
+          "id": "c33",
+          "tool": "bash",
+          "label": "bash python -c ' import csv, io text = \" sku , counted \\npen-1, 97 \\n\" reader = csv.D",
+          "args": {
+            "command": "python -c '\nimport csv, io\ntext = \"  sku , counted  \\npen-1, 97 \\n\"\nreader = csv.DictReader(io.StringIO(text))\nheader = reader.fieldnames\nreader.fieldnames = [name.strip() for name in header]\nfor row in reader:\n    print(row)\n'"
+          }
+        }
+      ]
+    },
+    {
+      "i": 70,
+      "t": 393.64,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.5328,
+      "tool_calls": 33,
+      "call": "c33",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "{'sku': 'pen-1', 'counted': ' 97 '}\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 71,
+      "t": 393.65,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.5633,
+      "tool_calls": 33,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 34995,
+      "tokens_out": 1134,
+      "text": null,
+      "calls": [
+        {
+          "id": "c34",
+          "tool": "bash",
+          "label": "bash python -c ' import csv, io text = \"\"\"sku,counted PEN-1,10 BAD-1,20 BOOK-1,30 \"\"\"",
+          "args": {
+            "command": "python -c '\nimport csv, io\ntext = \"\"\"sku,counted\nPEN-1,10\nBAD-1,20\n\nBOOK-1,30\n\"\"\"\nreader = csv.DictReader(io.StringIO(text))\nfor row in reader:\n    print(reader.line_num, row)\n'"
+          }
+        }
+      ]
+    },
+    {
+      "i": 72,
+      "t": 402.91,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.5633,
+      "tool_calls": 34,
+      "call": "c34",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "2 {'sku': 'PEN-1', 'counted': '10'}\n3 {'sku': 'BAD-1', 'counted': '20'}\n5 {'sku': 'BOOK-1', 'counted': '30'}\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 73,
+      "t": 402.92,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.628,
+      "tool_calls": 34,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 36188,
+      "tokens_out": 10018,
+      "text": null,
+      "calls": [
+        {
+          "id": "c35",
+          "tool": "grep",
+          "label": "grep 'import_products' in .",
+          "args": {
+            "pattern": "import_products",
+            "path": "."
+          }
+        }
+      ]
+    },
+    {
+      "i": 74,
+      "t": 467.17,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.628,
+      "tool_calls": 35,
+      "call": "c35",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "stockroom/csvio.py:81:def import_products(path: str | Path, existing: Container[str] = ()) -> ImportResult:\nstockroom/store.py:39:    def import_products(self, path: str | Path) -> csvio.ImportResult:\nstockroom/store.py:41:        result = csvio.import_products(path, existing=self.catalog)\ntests/test_csvio.py:35:    result = csvio.import_products(write(tmp_path, HEADER + rows))\ntests/test_csvio.py:43:    shuffled = csvio.import_products(write(tmp_path, text))  # any column order\ntests/test_csvio.py:53:        csvio.import_products(write(tmp_path, text))\ntests/test_csvio.py:61:        csvio.import_products(path)\ntests/test_csvio.py:66:    result = csvio.import_products(write(tmp_path, MIXED))\ntests/test_csvio.py:78:    result = store.import_products(write(tmp_path, HEADER + rows))\ntests/test_csvio.py:89:    result = csvio.import_products(write(tmp_path, HEADER + rows))\ntests/test_csvio.py:111:    fresh.import_products(write(tmp_path, MIXED))\ntests/test_csvio.py:112:    fresh.import_products(\ntests/test_csvio.py:130:        csvio.import_products(path)\n"
+      }
+    },
+    {
+      "i": 75,
+      "t": 467.18,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.663,
+      "tool_calls": 35,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 46591,
+      "tokens_out": 37,
+      "text": null,
+      "calls": [
+        {
+          "id": "c36",
+          "tool": "read_file",
+          "label": "read_file tests/conftest.py",
+          "args": {
+            "path": "tests/conftest.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 76,
+      "t": 469.79,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.663,
+      "tool_calls": 36,
+      "call": "c36",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "tests/conftest.py",
+        "content": "from decimal import Decimal\n\nimport pytest\nfrom stockroom import Product, Store, Tier, Unit\n\n\ndef build_store() -> Store:\n    \"\"\"Tax 8.25 %. PEN-1: 1.50, taxable, tiers 10 -> 5 % and 50 -> 10 %, 100 on hand.\n    BOOK-1: 4.99, not taxable, 20 on hand. WIDGET: 19.99, tiers 5 -> 10 % and\n    20 -> 30 %, 30 on hand.\"\"\"\n    store = Store(tax_percent=\"8.25\")\n    tiers = {\"PEN-1\": ((10, \"5\"), (50, \"10\")), \"WIDGET\": ((5, \"10\"), (20, \"30\"))}\n    for sku, name, unit, price, taxable in (\n        (\"PEN-1\", \"Pen\", Unit.EACH, \"1.50\", True),\n        (\"BOOK-1\", \"Notebook\", Unit.EACH, \"4.99\", False),\n        (\"WIDGET\", \"Widget\", Unit.BOX, \"19.99\", True),\n    ):\n        steps = tuple(Tier(q, Decimal(p)) for q, p in tiers.get(sku, ()))\n        store.add_product(Product(sku, name, unit, Decimal(price), taxable, steps))\n    store.receive(\"PEN-1\", 100)\n    store.receive(\"BOOK-1\", 20)\n    store.receive(\"WIDGET\", 30)\n    return store\n\n\n@pytest.fixture\ndef store() -> Store:\n    return build_store()\n\n\n@pytest.fixture\ndef make_store():\n    \"\"\"The factory behind `store`, for tests that need two identical stores.\"\"\"\n    return build_store\n"
+      }
+    },
+    {
+      "i": 77,
+      "t": 469.8,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.7098,
+      "tool_calls": 36,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 47064,
+      "tokens_out": 3068,
+      "text": null,
+      "calls": [
+        {
+          "id": "c37",
+          "tool": "edit_file",
+          "label": "edit_file stockroom/csvio.py",
+          "args": {
+            "new_string": "from .catalog import Product, Tier, Unit, normalize_sku\nfrom .errors import (\n    CatalogError,\n    CsvFormatError,\n    DuplicateSku,\n    InsufficientStock,\n    InvalidQuantity,\n    InvalidSku,\n    StockroomError,\n    UnknownSku,\n)\nfrom .money import format_money, parse_percent\n\nif TYPE_CHECKING:\n    from .store import Store\n\nIMPORT_COLUMNS = (\"sku\", \"name\", \"unit\", \"price\", \"taxable\", \"tiers\")\nEXPORT_COLUMNS = (\n    \"sku\",\n    \"name\",\n    \"unit\",\n    \"on_hand\",\n    \"reserved\",\n    \"available\",\n    \"stock_value\",\n)\nSTOCKTAKE_COLUMNS = (\"sku\", \"counted\")",
+            "old_string": "from .catalog import Product, Tier, Unit, normalize_sku\nfrom .errors import CatalogError, CsvFormatError, StockroomError\nfrom .money import format_money, parse_percent\n\nif TYPE_CHECKING:\n    from .store import Store\n\nIMPORT_COLUMNS = (\"sku\", \"name\", \"unit\", \"price\", \"taxable\", \"tiers\")\nEXPORT_COLUMNS = (\n    \"sku\",\n    \"name\",\n    \"unit\",\n    \"on_hand\",\n    \"reserved\",\n    \"available\",\n    \"stock_value\",\n)",
+            "path": "stockroom/csvio.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 78,
+      "t": 489.8,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.7098,
+      "tool_calls": 37,
+      "call": "c37",
+      "tool": "edit_file",
+      "error": null,
+      "result": {
+        "ok": true,
+        "path": "stockroom/csvio.py"
+      }
+    },
+    {
+      "i": 79,
+      "t": 489.81,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.7522,
+      "tool_calls": 37,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 50134,
+      "tokens_out": 1263,
+      "text": null,
+      "calls": [
+        {
+          "id": "c38",
+          "tool": "edit_file",
+          "label": "edit_file stockroom/csvio.py",
+          "args": {
+            "new_string": "def export_stock(store: \"Store\", path: str | Path) -> None:\n    \"\"\"Write one row per product with its stock levels and stock value.\n\n    `stock_value` is on-hand units times the list price, in cents precision.\"\"\"\n    with open(path, \"w\", newline=\"\", encoding=\"utf-8\") as handle:\n        writer = csv.writer(handle, lineterminator=\"\\n\")\n        writer.writerow(EXPORT_COLUMNS)\n        for product in store.catalog.products():\n            level = store.inventory.level(product.sku)\n            value: Decimal = product.list_price * level.on_hand\n            writer.writerow(\n                [\n                    product.sku,\n                    product.name,\n                    product.unit.value,\n                    level.on_hand,\n                    level.reserved,\n                    level.available,\n                    format_money(value),\n                ]\n            )\n\n\ndef import_stocktake(store: \"Store\", path: str | Path) -> tuple[RowError, ...]:\n    \"\"\"Read counted stock from a CSV file and adjust on-hand inventory.\n\n    A bad row is skipped and reported; good rows adjust on-hand units with reason\n    'stocktake'. If a count already matches, nothing is recorded for that SKU.\n    A file that is empty, not UTF-8, malformed for the csv module, or lacks\n    exactly the expected columns raises `CsvFormatError` and nothing changes.\"\"\"\n    try:\n        with open(path, newline=\"\", encoding=\"utf-8\") as handle:\n            reader = csv.DictReader(handle)\n            header = reader.fieldnames\n            if header is None:\n                raise CsvFormatError(\"the file is empty\")\n            if any(name is None for name in header) or sorted(\n                name.strip() for name in header\n            ) != sorted(STOCKTAKE_COLUMNS):\n                raise CsvFormatError(f\"expected columns {','.join(STOCKTAKE_COLUMNS)}\")\n            reader.fieldnames = [name.strip() for name in header]\n            raw_rows = [(reader.line_num, row) for row in reader]\n    except UnicodeDecodeError:\n        raise CsvFormatError(\"the file is not valid UTF-8\") from None\n    except csv.Error as exc:\n        raise CsvFormatError(f\"the file is not valid CSV: {exc}\") from None\n\n    errors: list[RowError] = []\n    seen: set[str] = set()\n    for line, row in raw_rows:\n        try:\n            sku, counted = _parse_stocktake_row(row, seen, store)\n        except StockroomError as exc:\n            errors.append(RowError(line, str(exc)))\n        else:\n            seen.add(sku)\n            on_hand = store.inventory.on_hand(sku)\n            delta = counted - on_hand\n            if delta != 0:\n                store.adjust(sku, delta, \"stocktake\")\n    return tuple(errors)\n\n\ndef _parse_stocktake_row(\n    row: dict[str, str | None],\n    seen: set[str],\n    store: \"Store\",\n) -> tuple[str, int]:\n    if None in row:\n        raise CatalogError(\"row has more fields than the header\")\n    if any(value is None for value in row.values()):\n        raise CatalogError(\"row has fewer fields than the header\")\n    fields = {key: (value or \"\") for key, value in row.items()}\n    product = store.catalog.get(fields[\"sku\"])\n    sku = product.sku\n    if sku in seen:\n        raise DuplicateSku(f\"duplicate SKU, already counted: {sku}\")\n    try:\n        counted = int(fields[\"counted\"].strip())\n    except (ValueError, AttributeError):\n        raise InvalidQuantity(\n            f\"count is not a whole number: {fields['counted']!r}\"\n        ) from None\n    if counted < 0:\n        raise InvalidQuantity(f\"count cannot be negative: {counted}\")\n    reserved = store.inventory.reserved(sku)\n    if counted < reserved:\n        raise InsufficientStock(\n            f\"cannot adjust {sku} to {counted}: {reserved} reserved\"\n        )\n    return sku, counted\n",
+            "path": "stockroom/csvio.py",
+            "old_string": "def export_stock(store: \"Store\", path: str | Path) -> None:\n    \"\"\"Write one row per product with its stock levels and stock value.\n\n    `stock_value` is on-hand units times the list price, in cents precision.\"\"\"\n    with open(path, \"w\", newline=\"\", encoding=\"utf-8\") as handle:\n        writer = csv.writer(handle, lineterminator=\"\\n\")\n        writer.writerow(EXPORT_COLUMNS)\n        for product in store.catalog.products():\n            level = store.inventory.level(product.sku)\n            value: Decimal = product.list_price * level.on_hand\n            writer.writerow(\n                [\n                    product.sku,\n                    product.name,\n                    product.unit.value,\n                    level.on_hand,\n                    level.reserved,\n                    level.available,\n                    format_money(value),\n                ]\n            )"
+          }
+        }
+      ]
+    },
+    {
+      "i": 80,
+      "t": 499.27,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.7522,
+      "tool_calls": 38,
+      "call": "c38",
+      "tool": "edit_file",
+      "error": null,
+      "result": {
+        "ok": true,
+        "path": "stockroom/csvio.py"
+      }
+    },
+    {
+      "i": 81,
+      "t": 499.27,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.7915,
+      "tool_calls": 38,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 51399,
+      "tokens_out": 213,
+      "text": null,
+      "calls": [
+        {
+          "id": "c39",
+          "tool": "edit_file",
+          "label": "edit_file stockroom/store.py",
+          "args": {
+            "new_string": "    def export_stock(self, path: str | Path) -> None:\n        \"\"\"Write the stock levels of every product to a CSV file.\"\"\"\n        csvio.export_stock(self, path)\n\n    def import_stocktake(self, path: str | Path) -> tuple[csvio.RowError, ...]:\n        \"\"\"Load a stocktake count from a CSV file and adjust stock levels.\"\"\"\n        return csvio.import_stocktake(self, path)\n\n    # Stock",
+            "path": "stockroom/store.py",
+            "old_string": "    def export_stock(self, path: str | Path) -> None:\n        \"\"\"Write the stock levels of every product to a CSV file.\"\"\"\n        csvio.export_stock(self, path)\n\n    # Stock"
+          }
+        }
+      ]
+    },
+    {
+      "i": 82,
+      "t": 503.1,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.7915,
+      "tool_calls": 39,
+      "call": "c39",
+      "tool": "edit_file",
+      "error": null,
+      "result": {
+        "ok": true,
+        "path": "stockroom/store.py"
+      }
+    },
+    {
+      "i": 83,
+      "t": 503.11,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.8304,
+      "tool_calls": 39,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 51613,
+      "tokens_out": 38,
+      "text": null,
+      "calls": [
+        {
+          "id": "c40",
+          "tool": "bash",
+          "label": "bash python -m pytest -q",
+          "args": {
+            "command": "python -m pytest -q"
+          }
+        }
+      ]
+    },
+    {
+      "i": 84,
+      "t": 505.6,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.8304,
+      "tool_calls": 40,
+      "call": "c40",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "................................................................         [100%]\n64 passed in 0.08s\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 85,
+      "t": 505.61,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.8831,
+      "tool_calls": 40,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 51681,
+      "tokens_out": 3723,
+      "text": null,
+      "calls": [
+        {
+          "id": "c41",
+          "tool": "write_file",
+          "label": "write_file tests/test_stocktake.py",
+          "args": {
+            "path": "tests/test_stocktake.py",
+            "content": "import csv\nfrom decimal import Decimal\n\nimport pytest\nfrom stockroom import Store, csvio\nfrom stockroom.csvio import RowError\nfrom stockroom.errors import CsvFormatError\nfrom stockroom.ledger import MovementKind\n\n\ndef write_file(tmp_path, text, filename=\"stocktake.csv\", encoding=\"utf-8\"):\n    path = tmp_path / filename\n    path.write_text(text, encoding=encoding)\n    return path\n\n\ndef test_import_stocktake_success(store, tmp_path):\n    # Initial: PEN-1: 100, BOOK-1: 20, WIDGET: 30\n    content = \"sku,counted\\nPEN-1,97\\nBOOK-1,24\\n\"\n    path = write_file(tmp_path, content)\n\n    before_ledger_len = len(store.ledger)\n    errors = store.import_stocktake(path)\n\n    assert errors == ()\n    assert store.stock(\"PEN-1\").on_hand == 97\n    assert store.stock(\"BOOK-1\").on_hand == 24\n    assert store.stock(\"WIDGET\").on_hand == 30\n\n    # Ledger should have 2 adjustments with reason 'stocktake'\n    assert len(store.ledger) == before_ledger_len + 2\n\n    pen_entries = [m for m in store.ledger.entries(\"PEN-1\") if m.kind is MovementKind.ADJUST]\n    assert len(pen_entries) == 1\n    assert pen_entries[0].quantity == -3\n    assert pen_entries[0].reason == \"stocktake\"\n\n    book_entries = [m for m in store.ledger.entries(\"BOOK-1\") if m.kind is MovementKind.ADJUST]\n    assert len(book_entries) == 1\n    assert book_entries[0].quantity == 4\n    assert book_entries[0].reason == \"stocktake\"\n\n    widget_entries = [m for m in store.ledger.entries(\"WIDGET\") if m.kind is MovementKind.ADJUST]\n    assert len(widget_entries) == 0\n\n\ndef test_import_stocktake_matching_count_records_no_movement(store, tmp_path):\n    # PEN-1 has 100 on hand\n    content = \"sku,counted\\nPEN-1,100\\n\"\n    path = write_file(tmp_path, content)\n\n    before_ledger_len = len(store.ledger)\n    errors = store.import_stocktake(path)\n\n    assert errors == ()\n    assert store.stock(\"PEN-1\").on_hand == 100\n    assert len(store.ledger) == before_ledger_len\n\n\ndef test_import_stocktake_case_insensitive_and_whitespace(store, tmp_path):\n    content = \"  sku  ,  counted  \\n  pen-1  ,  95  \\n\"\n    path = write_file(tmp_path, content)\n\n    errors = store.import_stocktake(path)\n    assert errors == ()\n    assert store.stock(\"PEN-1\").on_hand == 95\n\n\ndef test_import_stocktake_shuffled_columns(store, tmp_path):\n    content = \"counted,sku\\n90,pen-1\\n\"\n    path = write_file(tmp_path, content)\n\n    errors = store.import_stocktake(path)\n    assert errors == ()\n    assert store.stock(\"PEN-1\").on_hand == 90\n\n\ndef test_import_stocktake_zero_count(store, tmp_path):\n    content = \"sku,counted\\nBOOK-1,0\\n\"\n    path = write_file(tmp_path, content)\n\n    errors = store.import_stocktake(path)\n    assert errors == ()\n    assert store.stock(\"BOOK-1\").on_hand == 0\n\n\ndef test_import_stocktake_empty_data_rows(store, tmp_path):\n    content = \"sku,counted\\n\"\n    path = write_file(tmp_path, content)\n\n    before_ledger_len = len(store.ledger)\n    errors = store.import_stocktake(path)\n    assert errors == ()\n    assert len(store.ledger) == before_ledger\n[... 3,499 characters cut ...]\n= 10\n\n\ndef test_import_stocktake_count_equals_reserved(store, tmp_path):\n    order = store.create_order([(\"PEN-1\", 10)])\n    store.reserve_order(order.id)\n    assert store.stock(\"PEN-1\").reserved == 10\n\n    # Count exactly equal to reserved is valid\n    content = \"sku,counted\\nPEN-1,10\\n\"\n    path = write_file(tmp_path, content)\n\n    errors = store.import_stocktake(path)\n    assert errors == ()\n    assert store.stock(\"PEN-1\").on_hand == 10\n    assert store.stock(\"PEN-1\").reserved == 10\n    assert store.stock(\"PEN-1\").available == 0\n\n\ndef test_csvio_import_stocktake_direct(store, tmp_path):\n    content = \"sku,counted\\nBOOK-1,15\\n\"\n    path = write_file(tmp_path, content)\n\n    errors = csvio.import_stocktake(store, path)\n    assert errors == ()\n    assert store.stock(\"BOOK-1\").on_hand == 15\n"
+          }
+        }
+      ]
+    },
+    {
+      "i": 86,
+      "t": 529.36,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.8831,
+      "tool_calls": 41,
+      "call": "c41",
+      "tool": "write_file",
+      "error": null,
+      "result": {
+        "ok": true,
+        "path": "tests/test_stocktake.py"
+      }
+    },
+    {
+      "i": 87,
+      "t": 529.36,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.9248,
+      "tool_calls": 41,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 55411,
+      "tokens_out": 33,
+      "text": null,
+      "calls": [
+        {
+          "id": "c42",
+          "tool": "bash",
+          "label": "bash python -m pytest -q",
+          "args": {
+            "command": "python -m pytest -q"
+          }
+        }
+      ]
+    },
+    {
+      "i": 88,
+      "t": 531.5,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.9248,
+      "tool_calls": 42,
+      "call": "c42",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "........................................................................ [ 86%]\n...........                                                              [100%]\n83 passed in 0.10s\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 89,
+      "t": 531.51,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.9665,
+      "tool_calls": 42,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 55483,
+      "tokens_out": 35,
+      "text": null,
+      "calls": [
+        {
+          "id": "c43",
+          "tool": "bash",
+          "label": "bash git status",
+          "args": {
+            "command": "git status"
+          }
+        }
+      ]
+    },
+    {
+      "i": 90,
+      "t": 539.39,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.9665,
+      "tool_calls": 43,
+      "call": "c43",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "On branch master\nChanges not staged for commit:\n  (use \"git add <file>...\" to update what will be committed)\n  (use \"git restore <file>...\" to discard changes in working directory)\n\tmodified:   stockroom/csvio.py\n\tmodified:   stockroom/store.py\n\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\ttests/test_stocktake.py\n\nno changes added to commit (use \"git add\" and/or \"git commit -a\")\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 91,
+      "t": 539.4,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 1.0084,
+      "tool_calls": 43,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 55652,
+      "tokens_out": 33,
+      "text": null,
+      "calls": [
+        {
+          "id": "c44",
+          "tool": "bash",
+          "label": "bash git diff stockroom/",
+          "args": {
+            "command": "git diff stockroom/"
+          }
+        }
+      ]
+    },
+    {
+      "i": 92,
+      "t": 541.84,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 1.0084,
+      "tool_calls": 44,
+      "call": "c44",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "diff --git a/stockroom/csvio.py b/stockroom/csvio.py\nindex 1463421..be8dc9e 100644\n--- a/stockroom/csvio.py\n+++ b/stockroom/csvio.py\n@@ -16,7 +16,16 @@ from pathlib import Path\n from typing import TYPE_CHECKING\n \n from .catalog import Product, Tier, Unit, normalize_sku\n-from .errors import CatalogError, CsvFormatError, StockroomError\n+from .errors import (\n+    CatalogError,\n+    CsvFormatError,\n+    DuplicateSku,\n+    InsufficientStock,\n+    InvalidQuantity,\n+    InvalidSku,\n+    StockroomError,\n+    UnknownSku,\n+)\n from .money import format_money, parse_percent\n \n if TYPE_CHECKING:\n@@ -32,6 +41,7 @@ EXPORT_COLUMNS = (\n     \"available\",\n     \"stock_value\",\n )\n+STOCKTAKE_COLUMNS = (\"sku\", \"counted\")\n \n \n @dataclass(frozen=True)\n@@ -156,3 +166,74 @@ def export_stock(store: \"Store\", path: str | Path) -> None:\n                     format_money(value),\n                 ]\n             )\n+\n+\n+def import_stocktake(store: \"Store\", path: str | Path) -> tuple[RowError, ...]:\n+    \"\"\"Read counted stock from a CSV file and adjust on-hand inventory.\n+\n+    A bad row is skipped and reported; good rows adjust on-hand units with reason\n+    'stocktake'. If a count already matches, nothing is recorded for that SKU.\n+    A file that is empty, not UTF-8, malformed for the csv module, or lacks\n+    exactly the expected columns raises `CsvFormatError` and nothing changes.\"\"\"\n+    try:\n+        with open(path, newline=\"\", encoding=\"utf-8\") as handle:\n+            reader = csv.DictReader(handle)\n+            header = reader.fieldnames\n+            if header is None:\n+                raise CsvFormatError(\"the file is empty\")\n+            if any(name is None for name in header) or sorted(\n+                name.strip() for name in header\n+            ) != sorted(STOCKTAKE_COLUMNS):\n+                raise CsvFormatError(f\"expected columns {','.join(STOCKTAKE_COLUMNS)}\")\n+            reader.fieldnames = [name.strip() for name in header]\n+            raw_rows = [(reader.line_num, row) for row in reader]\n+    except UnicodeDecodeError:\n+        raise CsvFormatError(\"the file is not valid UTF-8\") from None\n+    except csv.Error as exc:\n+        raise CsvFormatError(f\"the file is not valid CSV: {exc}\") from None\n+\n+    errors: list[RowError] = []\n+    seen: set[str] = set()\n+    for line, row in raw_rows:\n+        try:\n+            sku, counted = _parse_stocktake_row(row, seen, store)\n+        except StockroomError as exc:\n+            errors.append(RowError(line, str(exc)))\n+        else:\n+            seen.add(sku)\n+            on_hand = store.inventory.on_hand(sku)\n+            delta = counted - on_hand\n+            if delta != 0:\n+                store.adjust(sku, delta, \"stocktake\")\n+    return tuple(errors)\n+\n+\n+def _parse_stocktake_row(\n+    row: dict[str, str | None],\n+    seen: set[str],\n+    store: \"Store\",\n+) -> tuple[str, int]:\n+    if None in row:\n+        raise CatalogError(\"row has more fields than the header\")\n+    if any(value is None for value in row.values()):\n[... 647 characters cut ...]\nved(sku)\n+    if counted < reserved:\n+        raise InsufficientStock(\n+            f\"cannot adjust {sku} to {counted}: {reserved} reserved\"\n+        )\n+    return sku, counted\n+\ndiff --git a/stockroom/store.py b/stockroom/store.py\nindex 8586cc5..4463cee 100644\n--- a/stockroom/store.py\n+++ b/stockroom/store.py\n@@ -47,6 +47,10 @@ class Store:\n         \"\"\"Write the stock levels of every product to a CSV file.\"\"\"\n         csvio.export_stock(self, path)\n \n+    def import_stocktake(self, path: str | Path) -> tuple[csvio.RowError, ...]:\n+        \"\"\"Load a stocktake count from a CSV file and adjust stock levels.\"\"\"\n+        return csvio.import_stocktake(self, path)\n+\n     # Stock\n     def receive(self, sku: str, quantity: int, reason: str = \"received\") -> None:\n         \"\"\"Add units to stock.\"\"\"\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 93,
+      "t": 541.85,
+      "kind": "stop",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 1.0084,
+      "tool_calls": 44,
+      "text": "run cost $1.008 reached the $1.00 cap"
+    },
+    {
+      "i": 94,
+      "t": 541.85,
+      "kind": "outcome",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 1.0084,
+      "tool_calls": 44
+    }
+  ]
+}

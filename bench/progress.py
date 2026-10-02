@@ -10,7 +10,8 @@ def _clip(value: object, limit: int) -> str:
     return " ".join(str(value).split())[:limit]
 
 
-def _detail(name: str, args: dict) -> str:
+def call_detail(name: str, args: dict) -> str:
+    """The short argument summary shown after a tool's name (the replay's labels too)."""
     if name == "bash":
         return _clip(args.get("command", ""), 80)
     if name in _PATH_TOOLS:
@@ -34,7 +35,7 @@ def format_event(task_id: str, event: Event) -> list[str]:
         elif part.function_call:
             call = part.function_call
             name = call.name or "?"
-            detail = _detail(name, call.args or {})
+            detail = call_detail(name, call.args or {})
             lines.append(f"{task_id}  {event.author:>8} → {name} {detail}".rstrip())
         elif part.function_response:
             response = part.function_response.response

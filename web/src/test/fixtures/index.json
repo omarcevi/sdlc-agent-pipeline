@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "note": "synthetic fixture",
+  "replays": [
+    {
+      "run_id": "synth-001-multi-flash-r1",
+      "file": "synth-001-multi-flash-r1.json",
+      "caption": "Multi-agent run that resolves a small bug.",
+      "pair": "synth-001-single-flash-r1",
+      "task_id": "synth-001",
+      "issue_title": "Parser drops the last item",
+      "repo": "example-repo",
+      "category": "bug",
+      "system": "multi",
+      "preset": "flash",
+      "outcome": "patch_written",
+      "failure_kind": "none",
+      "resolved": true,
+      "cost_usd": 0.0123,
+      "tool_calls": 2,
+      "duration_s": 41.5,
+      "recorded_at": "2026-10-01T06:26:11Z"
+    },
+    {
+      "run_id": "synth-001-single-flash-r1",
+      "file": "synth-001-single-flash-r1.json",
+      "caption": "Single-agent baseline on the same issue.",
+      "pair": "synth-001-multi-flash-r1",
+      "task_id": "synth-001",
+      "issue_title": "Parser drops the last item",
+      "repo": "example-repo",
+      "category": "bug",
+      "system": "single",
+      "preset": "flash",
+      "outcome": "failed",
+      "failure_kind": "agent",
+      "resolved": false,
+      "cost_usd": 0.004,
+      "tool_calls": 1,
+      "duration_s": 20.0,
+      "recorded_at": "2026-10-01T08:48:38Z"
+    }
+  ]
+}

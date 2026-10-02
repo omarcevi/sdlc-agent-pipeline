@@ -1,0 +1,3110 @@
+{
+  "schema": 1,
+  "run": {
+    "run_id": "md-001-multi-flash-r1-20261001T062611Z",
+    "task_id": "md-001",
+    "repo": "mdlite",
+    "category": "bug",
+    "difficulty": "medium",
+    "tempting": false,
+    "levers": [
+      "distant_symptom"
+    ],
+    "system": "multi",
+    "graph": "multi",
+    "preset": "flash",
+    "models": {
+      "planner": "gemini-3.8-flash",
+      "coder": "gemini-3.8-flash",
+      "reviewer": "gemini-3.8-flash"
+    },
+    "prompt_version": "2a",
+    "mode": "bench",
+    "recorded_at": "2026-10-01T06:26:11Z",
+    "issue": {
+      "title": "Angle brackets stay in the output for some autolinks",
+      "body": "Autolinks like `<https://example.com>` work, but with some URLs the angle brackets\nend up in the HTML. From our install docs:\n\n    >>> mdlite.to_html(\"Or install from source: <git+https://github.com/acme/tool.git>\")\n    '<p>Or install from source: &lt;git+https://github.com/acme/tool.git&gt;</p>\\n'\n\nThe same happens with `<x-man-page://ls>` and `<com.example.app:settings>`.\n\nCompare `<ftp://files.example.com/a.txt>`: it comes out as\n`<p>ftp://files.example.com/a.txt</p>`, the address without the brackets. It is not a\nclickable link, which is fine, because the README says only http, https and mailto\nget linked.\n\nExpected: URLs like the ones above get the same treatment as the ftp one.\n"
+    }
+  },
+  "caps": {
+    "cost_usd": 1.0,
+    "tool_calls": 75,
+    "wall_clock_s": 3000
+  },
+  "outcome": {
+    "outcome": "patch_written",
+    "failure_kind": "none",
+    "reason": "",
+    "resolved": true,
+    "cost_usd": 0.6595,
+    "tool_calls": 70,
+    "tokens_in": 795061,
+    "tokens_out": 16855,
+    "duration_s": 365.37,
+    "test_attempts": 0,
+    "review_rounds": 0,
+    "audit": []
+  },
+  "steps": [
+    {
+      "i": 0,
+      "t": 0.0,
+      "kind": "node",
+      "node": "fetch_issue",
+      "visit": 1,
+      "cost_usd": 0.0,
+      "tool_calls": 0,
+      "from": null,
+      "via": null,
+      "message": "issue: Angle brackets stay in the output for some autolinks"
+    },
+    {
+      "i": 1,
+      "t": 1.25,
+      "kind": "node",
+      "node": "provision_sandbox",
+      "visit": 1,
+      "cost_usd": 0.0,
+      "tool_calls": 0,
+      "from": "fetch_issue",
+      "via": null,
+      "message": "sandbox <sandbox> ready"
+    },
+    {
+      "i": 2,
+      "t": 1.26,
+      "kind": "node",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0,
+      "tool_calls": 0,
+      "from": "provision_sandbox",
+      "via": null,
+      "message": null
+    },
+    {
+      "i": 3,
+      "t": 1.26,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0008,
+      "tool_calls": 0,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 914,
+      "tokens_out": 28,
+      "text": null,
+      "calls": [
+        {
+          "id": "c1",
+          "tool": "list_dir",
+          "label": "list_dir .",
+          "args": {
+            "path": "."
+          }
+        }
+      ]
+    },
+    {
+      "i": 4,
+      "t": 4.11,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0008,
+      "tool_calls": 1,
+      "call": "c1",
+      "tool": "list_dir",
+      "error": null,
+      "result": {
+        "entries": [
+          "README.md",
+          "conftest.py",
+          "mdlite/__init__.py",
+          "mdlite/__main__.py",
+          "mdlite/blocks.py",
+          "mdlite/cli.py",
+          "mdlite/escape.py",
+          "mdlite/inline.py",
+          "mdlite/nodes.py",
+          "mdlite/render.py",
+          "mdlite/slug.py",
+          "mdlite/toc.py",
+          "tests/test_blocks.py",
+          "tests/test_cli.py",
+          "tests/test_inline.py",
+          "tests/test_slugs_and_toc.py"
+        ]
+      }
+    },
+    {
+      "i": 5,
+      "t": 4.12,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0017,
+      "tool_calls": 1,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 1043,
+      "tokens_out": 39,
+      "text": null,
+      "calls": [
+        {
+          "id": "c2",
+          "tool": "grep",
+          "label": "grep 'autolink' in mdlite",
+          "args": {
+            "pattern": "autolink",
+            "path": "mdlite"
+          }
+        }
+      ]
+    },
+    {
+      "i": 6,
+      "t": 5.5,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0017,
+      "tool_calls": 2,
+      "call": "c2",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "mdlite/inline.py:4:autolinks are recognised as the scanner meets them; runs of `*` and `_` are kept as\nmdlite/inline.py:60:    With `allow_links=False` a `[` or `<` never starts a link or autolink; this is\nmdlite/inline.py:210:        \"\"\"An autolink (rule R17), or a literal `<`.\"\"\"\nmdlite/nodes.py:47:    \"\"\"A link or autolink. `children` is the link text.\"\"\"\n"
+      }
+    },
+    {
+      "i": 7,
+      "t": 5.5,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0028,
+      "tool_calls": 2,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 1205,
+      "tokens_out": 48,
+      "text": null,
+      "calls": [
+        {
+          "id": "c3",
+          "tool": "read_file",
+          "label": "read_file mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 8,
+      "t": 6.81,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0028,
+      "tool_calls": 3,
+      "call": "c3",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "mdlite/inline.py",
+        "content": "\"\"\"Inline parser: turns the raw text of one block into inline nodes.\n\n`parse_inline` scans left to right. Code spans, backslash escapes, links, images and\nautolinks are recognised as the scanner meets them; runs of `*` and `_` are kept as\ndelimiter markers and paired afterwards (`_pair_emphasis`). Because the scanner\nconsumes a whole code span at once, delimiters inside a code span can never pair with\ndelimiters outside it.\n\n`plain_text` flattens parsed inlines back to text; the renderer uses it for image alt\ntext and the table of contents and the slug builder use it for headings.\n\nThe rules are numbered R11 to R17 in the README.\n\"\"\"\n\nimport re\nimport string\nfrom dataclasses import dataclass\n\nfrom mdlite.escape import url_scheme\nfrom mdlite.nodes import (\n    Code,\n    Emphasis,\n    Image,\n    Inline,\n    LineBreak,\n    Link,\n    Strong,\n    Text,\n)\n\n_ESCAPABLE = frozenset(string.punctuation)\n_ESCAPE = re.compile(r\"\\\\([!-/:-@\\[-`{-~])\")\n_BACKTICK_RUN = re.compile(r\"`+\")\n_AUTOLINK_FORBIDDEN = re.compile(r\"[\\s<]\")\n_EMAIL = re.compile(r\"^[^\\s<>@]+@[^\\s<>@]+$\")\nMAX_IMAGE_DEPTH = 10\nMAX_EMPHASIS_DEPTH = 20\n_MIN_SCHEME = 2\n_MAX_SCHEME = 32\n\n\n@dataclass\nclass _Delimiter:\n    \"\"\"A run of `*` or `_` waiting to be paired (rule R14).\"\"\"\n\n    char: str\n    count: int\n    can_open: bool\n    can_close: bool\n\n\n_Node = Inline | _Delimiter\n\n\ndef parse_inline(\n    text: str, *, allow_links: bool = True, image_depth: int = 0\n) -> list[Inline]:\n    \"\"\"Parse inline markup in `text`.\n\n    With `allow_links=False` a `[` or `<` never starts a link or autolink; this is\n    how the label of a link is parsed, since links do not nest (rules R15, R17).\n    `image_depth` is how many image labels enclose `text`; at `MAX_IMAGE_DEPTH` a\n    further `![` is literal (rule R22).\n    \"\"\"\n    return _Scanner(text, allow_links, image_depth).scan()\n\n\ndef plain_text(nodes: list[Inline]) -> str:\n    \"\"\"The text of `nodes` without markup: code content, link text, image labels.\"\"\"\n    parts: list[str] = []\n    for node in nodes:\n        match node:\n            case Text(value) | Code(value):\n                parts.append(value)\n            case Emphasis(children) | Strong(children):\n                parts.append(plain_text(children))\n            case Link(children) | Image(children):\n                parts.append(plain_text(children))\n            case LineBreak():\n                parts.append(\"\\n\")\n    return \"\".join(parts)\n\n\ndef unescape(text: str) -> str:\n    \"\"\"Resolve backslash escapes (rule R11).\"\"\"\n    return _ESCAPE.sub(r\"\\1\", text)\n\n\nclass _Scanner:\n    \"\"\"One pass over the text of a block.\"\"\"\n\n    def __init__(self, text: str, allow_links: bool, image_depth: int) -> None:\n        self.text = text\n        self.allow_links = allow_links\n        self.image_depth = image_depth\n        self.pos = 0\n        self.nodes: list[_Node] = []\n        self.buffer: list[str] = []\n\n    def scan(self) -> list[Inline]:\n        while self.pos < len(self.text):\n            char = self.text[self.pos]\n   \n[... 6,232 characters cut ...]\nat]\n    assert isinstance(closer, _Delimiter)\n    for i in range(closer_at - 1, -1, -1):\n        node = nodes[i]\n        if isinstance(node, _Delimiter) and node.char == closer.char and node.can_open:\n            return i\n    return None\n\n\ndef _finish(nodes: list[_Node]) -> list[Inline]:\n    \"\"\"Turn unpaired delimiter runs into text and merge neighbouring text nodes.\"\"\"\n    result: list[Inline] = []\n    for node in nodes:\n        piece = Text(node.char * node.count) if isinstance(node, _Delimiter) else node\n        if isinstance(piece, Text):\n            if not piece.value:\n                continue\n            if result and isinstance(result[-1], Text):\n                result[-1] = Text(result[-1].value + piece.value)\n                continue\n        result.append(piece)\n    return result\n"
+      }
+    },
+    {
+      "i": 9,
+      "t": 6.82,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0061,
+      "tool_calls": 3,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 4135,
+      "tokens_out": 49,
+      "text": null,
+      "calls": [
+        {
+          "id": "c4",
+          "tool": "grep",
+          "label": "grep '_angle' in mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py",
+            "pattern": "_angle"
+          }
+        }
+      ]
+    },
+    {
+      "i": 10,
+      "t": 8.36,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0061,
+      "tool_calls": 4,
+      "call": "c4",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "120:                self._angle()\n209:    def _angle(self) -> None:\n315:        close = _find_angle_end(text, pos)\n348:def _find_angle_end(text: str, start: int) -> int | None:\n"
+      }
+    },
+    {
+      "i": 11,
+      "t": 8.37,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0094,
+      "tool_calls": 4,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 4249,
+      "tokens_out": 40,
+      "text": null,
+      "calls": [
+        {
+          "id": "c5",
+          "tool": "read_file",
+          "label": "read_file mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 12,
+      "t": 10.17,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0094,
+      "tool_calls": 5,
+      "call": "c5",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "mdlite/inline.py",
+        "content": "\"\"\"Inline parser: turns the raw text of one block into inline nodes.\n\n`parse_inline` scans left to right. Code spans, backslash escapes, links, images and\nautolinks are recognised as the scanner meets them; runs of `*` and `_` are kept as\ndelimiter markers and paired afterwards (`_pair_emphasis`). Because the scanner\nconsumes a whole code span at once, delimiters inside a code span can never pair with\ndelimiters outside it.\n\n`plain_text` flattens parsed inlines back to text; the renderer uses it for image alt\ntext and the table of contents and the slug builder use it for headings.\n\nThe rules are numbered R11 to R17 in the README.\n\"\"\"\n\nimport re\nimport string\nfrom dataclasses import dataclass\n\nfrom mdlite.escape import url_scheme\nfrom mdlite.nodes import (\n    Code,\n    Emphasis,\n    Image,\n    Inline,\n    LineBreak,\n    Link,\n    Strong,\n    Text,\n)\n\n_ESCAPABLE = frozenset(string.punctuation)\n_ESCAPE = re.compile(r\"\\\\([!-/:-@\\[-`{-~])\")\n_BACKTICK_RUN = re.compile(r\"`+\")\n_AUTOLINK_FORBIDDEN = re.compile(r\"[\\s<]\")\n_EMAIL = re.compile(r\"^[^\\s<>@]+@[^\\s<>@]+$\")\nMAX_IMAGE_DEPTH = 10\nMAX_EMPHASIS_DEPTH = 20\n_MIN_SCHEME = 2\n_MAX_SCHEME = 32\n\n\n@dataclass\nclass _Delimiter:\n    \"\"\"A run of `*` or `_` waiting to be paired (rule R14).\"\"\"\n\n    char: str\n    count: int\n    can_open: bool\n    can_close: bool\n\n\n_Node = Inline | _Delimiter\n\n\ndef parse_inline(\n    text: str, *, allow_links: bool = True, image_depth: int = 0\n) -> list[Inline]:\n    \"\"\"Parse inline markup in `text`.\n\n    With `allow_links=False` a `[` or `<` never starts a link or autolink; this is\n    how the label of a link is parsed, since links do not nest (rules R15, R17).\n    `image_depth` is how many image labels enclose `text`; at `MAX_IMAGE_DEPTH` a\n    further `![` is literal (rule R22).\n    \"\"\"\n    return _Scanner(text, allow_links, image_depth).scan()\n\n\ndef plain_text(nodes: list[Inline]) -> str:\n    \"\"\"The text of `nodes` without markup: code content, link text, image labels.\"\"\"\n    parts: list[str] = []\n    for node in nodes:\n        match node:\n            case Text(value) | Code(value):\n                parts.append(value)\n            case Emphasis(children) | Strong(children):\n                parts.append(plain_text(children))\n            case Link(children) | Image(children):\n                parts.append(plain_text(children))\n            case LineBreak():\n                parts.append(\"\\n\")\n    return \"\".join(parts)\n\n\ndef unescape(text: str) -> str:\n    \"\"\"Resolve backslash escapes (rule R11).\"\"\"\n    return _ESCAPE.sub(r\"\\1\", text)\n\n\nclass _Scanner:\n    \"\"\"One pass over the text of a block.\"\"\"\n\n    def __init__(self, text: str, allow_links: bool, image_depth: int) -> None:\n        self.text = text\n        self.allow_links = allow_links\n        self.image_depth = image_depth\n        self.pos = 0\n        self.nodes: list[_Node] = []\n        self.buffer: list[str] = []\n\n    def scan(self) -> list[Inline]:\n        while self.pos < len(self.text):\n            char = self.text[self.pos]\n   \n[... 6,232 characters cut ...]\nat]\n    assert isinstance(closer, _Delimiter)\n    for i in range(closer_at - 1, -1, -1):\n        node = nodes[i]\n        if isinstance(node, _Delimiter) and node.char == closer.char and node.can_open:\n            return i\n    return None\n\n\ndef _finish(nodes: list[_Node]) -> list[Inline]:\n    \"\"\"Turn unpaired delimiter runs into text and merge neighbouring text nodes.\"\"\"\n    result: list[Inline] = []\n    for node in nodes:\n        piece = Text(node.char * node.count) if isinstance(node, _Delimiter) else node\n        if isinstance(piece, Text):\n            if not piece.value:\n                continue\n            if result and isinstance(result[-1], Text):\n                result[-1] = Text(result[-1].value + piece.value)\n                continue\n        result.append(piece)\n    return result\n"
+      }
+    },
+    {
+      "i": 13,
+      "t": 10.18,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0153,
+      "tool_calls": 5,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 7171,
+      "tokens_out": 122,
+      "text": null,
+      "calls": [
+        {
+          "id": "c6",
+          "tool": "read_file",
+          "label": "read_file README.md",
+          "args": {
+            "path": "README.md"
+          }
+        }
+      ]
+    },
+    {
+      "i": 14,
+      "t": 12.31,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0153,
+      "tool_calls": 6,
+      "call": "c6",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "README.md",
+        "content": "# mdlite\n\nA small Markdown-to-HTML library with no dependencies. It supports a deliberately\nlimited dialect of Markdown, described by the rules below.\n\n    import mdlite\n\n    mdlite.to_html(\"# Hello *world*\")   # '<h1 id=\"hello-world\">Hello <em>world</em></h1>\\n'\n    mdlite.toc(\"# A\\n## B\")             # [(1, 'A', 'a'), (2, 'B', 'b')]\n\n    python -m mdlite notes.md           # prints the HTML (use `-` to read standard input)\n\n`to_html(text: str) -> str` and `toc(text: str) -> list[tuple[int, str, str]]`\n(level, plain text, slug) are the public API. The converter is a pure function of its\ninput: same text, same output.\n\n## Layout\n\n| Module | Job |\n|---|---|\n| `nodes.py` | AST dataclasses (block and inline nodes) |\n| `blocks.py` | Block parser: text to a `Document` of block nodes |\n| `inline.py` | Inline parser: one block's text to inline nodes; `plain_text` |\n| `render.py` | AST to HTML |\n| `escape.py` | HTML escaping and URL scheme checks (the only place that does either) |\n| `slug.py` | Heading slugs and duplicate handling |\n| `toc.py` | Table of contents |\n| `cli.py`, `__main__.py` | `python -m mdlite <file>` |\n\nThe renderer and the table of contents both call the inline parser for heading text\nand both take their slugs from `slug.Slugger`, so the ids in the HTML always match\nthe table of contents.\n\n## Rules\n\nEverything the library does is specified here. \"Line\" means a line after rule R1. In\nthe block rules (R1 to R9) \"whitespace\" and \"blank\" mean spaces and tabs only; other\ncharacters such as a no-break space are ordinary text there. Elsewhere \"space\" and\n\"whitespace\" mean any Unicode whitespace character (Python's `str.isspace`), unless a\nrule says otherwise (R5, R12, R13 and R15 name the exact characters they mean).\n\n**R1. Input normalisation.** `\\r\\n` and `\\r` become `\\n`. Tabs in the leading\nwhitespace of a line are expanded to 4-column tab stops; tabs elsewhere are left\nalone. A final newline ends the last line; it does not start another one. A blank line\nis one with only spaces and tabs. The empty document renders as the empty string.\n\n**R2. ATX headings.** A line of 1 to 6 `#`, indented by at most 3 spaces and followed\nby a space or a tab (or the end of the line), is a heading of that level. Its text is\nthe rest of the line, trimmed, minus an optional closing run of `#` that is preceded by\na space or tab (or is the whole text). Seven or more `#`, or anything else after them,\nmake a paragraph.\nThere are no setext headings. Output: `<hN id=\"slug\">...</hN>`.\n\n**R3. Paragraphs.** Consecutive non-blank lines form one paragraph, unless a line\nstarts another block (R2, R4, R5, R6, R7; any list marker interrupts a paragraph).\nLeading whitespace of each line and trailing whitespace of the paragraph are removed;\nlines are joined by `\\n`. There are no indented code blocks: a line indented by 4 or\nmore spaces is ordinary paragraph text. Output: `<p>...</p>`.\n\n**R4. Thematic breaks.** A line of three or more `-`, `*` or `_` (one kind only, spaces\na\n[... 6,232 characters cut ...]\nthose slugs.\nThe plain text is the same text R18 starts from.\n\n**R21. Command line.** `python -m mdlite FILE` reads FILE as UTF-8 (`-` is standard\ninput), writes the HTML to standard output as UTF-8 and exits 0. An unreadable or\nundecodable file prints `mdlite: ...` to standard error and exits 1. Wrong arguments\nexit 2.\n\n**R22. Nesting limits.** Every input renders; none raises. Block quotes nest at most 20\nlevels: a `>` line at that depth is ordinary text. It starts no block and interrupts no\nparagraph or list item, so it continues them (and is escaped as `&gt;`). Image labels nest at most 10 levels: a deeper `![` is literal text. Emphasis and\nstrong nest at most 20 levels: a closing run that would pair at a deeper level becomes\nliteral text for good (it cannot open a later pair either).\n"
+      }
+    },
+    {
+      "i": 15,
+      "t": 12.32,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0241,
+      "tool_calls": 6,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 10065,
+      "tokens_out": 349,
+      "text": null,
+      "calls": [
+        {
+          "id": "c7",
+          "tool": "read_file",
+          "label": "read_file mdlite/escape.py",
+          "args": {
+            "path": "mdlite/escape.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 16,
+      "t": 15.63,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0241,
+      "tool_calls": 7,
+      "call": "c7",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "mdlite/escape.py",
+        "content": "\"\"\"HTML escaping and URL scheme checks.\n\nEvery character that reaches the output goes through `escape_text` or `escape_attr`,\nand every url goes through `is_safe_url` before it becomes an `href` or `src`. No\nother module escapes or checks anything, so a rule change is made here once.\n\"\"\"\n\nimport re\n\n_TEXT_TABLE = str.maketrans({\"&\": \"&amp;\", \"<\": \"&lt;\", \">\": \"&gt;\"})\n_ATTR_TABLE = str.maketrans(\n    {\"&\": \"&amp;\", \"<\": \"&lt;\", \">\": \"&gt;\", '\"': \"&quot;\", \"'\": \"&#39;\"}\n)\n\n# Browsers ignore ASCII whitespace and control characters inside a url scheme\n# (\"java\\tscript:\"), so U+0000 to U+0020 and U+007F are deleted before the scheme is\n# read. Other characters, such as U+00A0, are kept and end the scheme.\n_IGNORED_IN_SCHEME = re.compile(r\"[\\x00-\\x20\\x7f]\")\n_SCHEME = re.compile(r\"([A-Za-z][A-Za-z0-9]*):\")\n\nSAFE_SCHEMES = frozenset({\"http\", \"https\", \"mailto\"})\n\n\ndef escape_text(text: str) -> str:\n    \"\"\"Escape `&`, `<` and `>` for use as element content.\"\"\"\n    return text.translate(_TEXT_TABLE)\n\n\ndef escape_attr(text: str) -> str:\n    \"\"\"Escape `&`, `<`, `>`, `\"` and `'` for use inside a quoted attribute value.\"\"\"\n    return text.translate(_ATTR_TABLE)\n\n\ndef url_scheme(url: str) -> str | None:\n    \"\"\"The lowercase scheme of `url`, or None when it has no scheme.\n\n    The characters U+0000 to U+0020 and U+007F are deleted first, so\n    `\" JaVa\\\\nScript:x\"` has the scheme `javascript`.\n    \"\"\"\n    match = _SCHEME.match(_IGNORED_IN_SCHEME.sub(\"\", url))\n    return match.group(1).lower() if match else None\n\n\ndef is_safe_url(url: str) -> bool:\n    \"\"\"True for urls without a scheme and for http, https and mailto urls.\"\"\"\n    scheme = url_scheme(url)\n    return scheme is None or scheme in SAFE_SCHEMES\n"
+      }
+    },
+    {
+      "i": 17,
+      "t": 15.64,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0345,
+      "tool_calls": 7,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 10984,
+      "tokens_out": 576,
+      "text": null,
+      "calls": [
+        {
+          "id": "c8",
+          "tool": "grep",
+          "label": "grep 'def _angle' in mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py",
+            "pattern": "def _angle"
+          }
+        }
+      ]
+    },
+    {
+      "i": 18,
+      "t": 22.46,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0345,
+      "tool_calls": 8,
+      "call": "c8",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "209:    def _angle(self) -> None:\n"
+      }
+    },
+    {
+      "i": 19,
+      "t": 22.46,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0435,
+      "tool_calls": 8,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 11570,
+      "tokens_out": 89,
+      "text": null,
+      "calls": [
+        {
+          "id": "c9",
+          "tool": "grep",
+          "label": "grep 'def _angle[\\s\\S]*?def ' in mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py",
+            "pattern": "def _angle[\\s\\S]*?def "
+          }
+        }
+      ]
+    },
+    {
+      "i": 20,
+      "t": 28.37,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0435,
+      "tool_calls": 9,
+      "call": "c9",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": ""
+      }
+    },
+    {
+      "i": 21,
+      "t": 28.37,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0525,
+      "tool_calls": 9,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 11654,
+      "tokens_out": 58,
+      "text": null,
+      "calls": [
+        {
+          "id": "c10",
+          "tool": "grep",
+          "label": "grep 'def _angle.*|.*scheme.*' in mdlite/inline.py",
+          "args": {
+            "pattern": "def _angle.*|.*scheme.*",
+            "path": "mdlite/inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 22,
+      "t": 31.76,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0525,
+      "tool_calls": 10,
+      "call": "c10",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "19:from mdlite.escape import url_scheme\n209:    def _angle(self) -> None:\n214:            scheme = url_scheme(candidate)\n215:            if scheme is not None and _MIN_SCHEME <= len(scheme) <= _MAX_SCHEME:\n"
+      }
+    },
+    {
+      "i": 23,
+      "t": 31.77,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0616,
+      "tool_calls": 10,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 11778,
+      "tokens_out": 79,
+      "text": null,
+      "calls": [
+        {
+          "id": "c11",
+          "tool": "grep",
+          "label": "grep '\\s{8}.*' in mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py",
+            "pattern": "\\s{8}.*"
+          }
+        }
+      ]
+    },
+    {
+      "i": 24,
+      "t": 33.79,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0616,
+      "tool_calls": 11,
+      "call": "c11",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "72:        match node:\n73:            case Text(value) | Code(value):\n74:                parts.append(value)\n75:            case Emphasis(children) | Strong(children):\n76:                parts.append(plain_text(children))\n77:            case Link(children) | Image(children):\n78:                parts.append(plain_text(children))\n79:            case LineBreak():\n80:                parts.append(\"\\n\")\n93:        self.text = text\n94:        self.allow_links = allow_links\n95:        self.image_depth = image_depth\n96:        self.pos = 0\n97:        self.nodes: list[_Node] = []\n98:        self.buffer: list[str] = []\n101:        while self.pos < len(self.text):\n102:            char = self.text[self.pos]\n103:            if char == \"\\\\\":\n104:                self._backslash()\n105:            elif char == \"\\n\":\n106:                self._newline()\n107:            elif char == \"`\":\n108:                self._code_span()\n109:            elif char in \"*_\":\n110:                self._delimiter_run()\n111:            elif char == \"[\" and self.allow_links:\n112:                self._bracket(image=False)\n113:            elif (\n114:                char == \"!\"\n115:                and self.text.startswith(\"![\", self.pos)\n116:                and self.image_depth < MAX_IMAGE_DEPTH\n117:            ):\n118:                self._bracket(image=True)\n119:            elif char == \"<\" and self.allow_links:\n120:                self._angle()\n121:            else:\n122:                self._literal(char)\n123:        self._flush()\n124:        return _finish(_pair_emphasis(self.nodes))\n129:        self.buffer.append(chars)\n130:        self.pos += len(chars)\n133:        if self.buffer:\n134:            self.nodes.append(Text(\"\".join(self.buffer)))\n135:            self.buffer = []\n138:        self._flush()\n139:        self.nodes.append(node)\n144:        \"\"\"A backslash escape (R11) or a backslash-newline hard break (R12).\"\"\"\n145:        following = self.text[self.pos + 1 : self.pos + 2]\n146:        if following and following in _ESCAPABLE:\n147:            self.buffer.append(following)\n"
+      }
+    },
+    {
+      "i": 25,
+      "t": 33.8,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0712,
+      "tool_calls": 11,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 12532,
+      "tokens_out": 61,
+      "text": null,
+      "calls": [
+        {
+          "id": "c12",
+          "tool": "grep",
+          "label": "grep '_angle[\\s\\S]{1,600}' in mdlite/inline.py",
+          "args": {
+            "pattern": "_angle[\\s\\S]{1,600}",
+            "path": "mdlite/inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 26,
+      "t": 35.57,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0712,
+      "tool_calls": 12,
+      "call": "c12",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "120:                self._angle()\n209:    def _angle(self) -> None:\n315:        close = _find_angle_end(text, pos)\n348:def _find_angle_end(text: str, start: int) -> int | None:\n"
+      }
+    },
+    {
+      "i": 27,
+      "t": 35.57,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0812,
+      "tool_calls": 12,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 12658,
+      "tokens_out": 118,
+      "text": null,
+      "calls": [
+        {
+          "id": "c13",
+          "tool": "grep",
+          "label": "grep 'candidate' in mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py",
+            "pattern": "candidate"
+          }
+        }
+      ]
+    },
+    {
+      "i": 28,
+      "t": 39.0,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0812,
+      "tool_calls": 13,
+      "call": "c13",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "212:        candidate = self.text[self.pos + 1 : close] if close != -1 else \"\"\n213:        if candidate and not _AUTOLINK_FORBIDDEN.search(candidate):\n214:            scheme = url_scheme(candidate)\n216:                self._emit(Link([Text(candidate)], candidate))\n219:            if _EMAIL.match(candidate):\n220:                self._emit(Link([Text(candidate)], \"mailto:\" + candidate))\n"
+      }
+    },
+    {
+      "i": 29,
+      "t": 39.01,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0911,
+      "tool_calls": 13,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 12890,
+      "tokens_out": 61,
+      "text": null,
+      "calls": [
+        {
+          "id": "c14",
+          "tool": "grep",
+          "label": "grep 'self\\.pos\\s*\\+=' in mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py",
+            "pattern": "self\\.pos\\s*\\+="
+          }
+        }
+      ]
+    },
+    {
+      "i": 30,
+      "t": 41.86,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0911,
+      "tool_calls": 14,
+      "call": "c14",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "130:        self.pos += len(chars)\n148:            self.pos += 2\n151:            self.pos += 2\n165:        self.pos += 1\n"
+      }
+    },
+    {
+      "i": 31,
+      "t": 41.87,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.1012,
+      "tool_calls": 14,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 12996,
+      "tokens_out": 88,
+      "text": null,
+      "calls": [
+        {
+          "id": "c15",
+          "tool": "grep",
+          "label": "grep '(close|candidate|_EMAIL|mailto)' in mdlite/inline.py",
+          "args": {
+            "pattern": "(close|candidate|_EMAIL|mailto)",
+            "path": "mdlite/inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 32,
+      "t": 43.69,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.1012,
+      "tool_calls": 15,
+      "call": "c15",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "35:_EMAIL = re.compile(r\"^[^\\s<>@]+@[^\\s<>@]+$\")\n49:    can_close: bool\n62:    `image_depth` is how many image labels enclose `text`; at `MAX_IMAGE_DEPTH` a\n168:        \"\"\"A code span (rule R13), or literal backticks when it never closes.\"\"\"\n186:        can_close = not before.isspace()\n189:            can_close = can_close and not after.isalnum()\n190:        self._emit(_Delimiter(char, end - self.pos, can_open, can_close))\n211:        close = self.text.find(\">\", self.pos + 1)\n212:        candidate = self.text[self.pos + 1 : close] if close != -1 else \"\"\n213:        if candidate and not _AUTOLINK_FORBIDDEN.search(candidate):\n214:            scheme = url_scheme(candidate)\n216:                self._emit(Link([Text(candidate)], candidate))\n217:                self.pos = close + 1\n219:            if _EMAIL.match(candidate):\n220:                self._emit(Link([Text(candidate)], \"mailto:\" + candidate))\n221:                self.pos = close + 1\n232:    The span closes at the next backtick run of exactly the opening length.\n262:    \"\"\"The index of the `]` that closes the `[` at `start`.\n315:        close = _find_angle_end(text, pos)\n316:        if close is None:\n318:        url, pos = text[pos + 1 : close], close + 1\n351:    `\\\\>` does not close it; a `<` or a newline inside means there is no url.\n368:    \"\"\"Parse a quoted title starting at `pos`; (None, pos) if it is not closed.\"\"\"\n393:        closer = nodes[i]\n394:        opener_at = _find_opener(nodes, i) if _is_closer(closer) else None\n399:        assert isinstance(opener, _Delimiter) and isinstance(closer, _Delimiter)\n402:            closer.can_open = False  # nested too deeply: it stays text for good\n405:        used = 2 if opener.count >= 2 and closer.count >= 2 else 1\n408:        closer.count -= used\n411:        if closer.count:\n412:            replacement.append(closer)\n414:        i = opener_at + len(replacement) - (1 if closer.count else 0)\n430:def _is_closer(node: _Node) -> bool:\n431:    return isinstance(node, _Delimiter) and node.can_close\n434:def _find_opener(nodes: list[_Node], closer_at: int) -> int | None:\n435:    closer = nodes[closer_at]\n436:    assert isinstance(closer, _Delimiter)\n437:    for i in range(closer_at - 1, -1, -1):\n439:        if isinstance(node, _Delimiter) and node.char == closer.char and node.can_open:\n"
+      }
+    },
+    {
+      "i": 33,
+      "t": 43.7,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.113,
+      "tool_calls": 15,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 13874,
+      "tokens_out": 375,
+      "text": null,
+      "calls": [
+        {
+          "id": "c16",
+          "tool": "read_file",
+          "label": "read_file mdlite/render.py",
+          "args": {
+            "path": "mdlite/render.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 34,
+      "t": 47.09,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.113,
+      "tool_calls": 16,
+      "call": "c16",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "mdlite/render.py",
+        "content": "\"\"\"Renderer: turns a parsed `Document` into HTML.\n\nBlock nodes become lines of HTML that each end in a newline. Running text is parsed\nwith `mdlite.inline.parse_inline` here, at render time. All escaping and url checks\nare delegated to `mdlite.escape`; heading ids come from `mdlite.slug.Slugger`.\n\"\"\"\n\nimport re\n\nfrom mdlite.escape import escape_attr, escape_text, is_safe_url\nfrom mdlite.inline import parse_inline, plain_text\nfrom mdlite.nodes import (\n    Block,\n    BlockQuote,\n    Code,\n    CodeBlock,\n    Document,\n    Emphasis,\n    Heading,\n    Image,\n    Inline,\n    LineBreak,\n    Link,\n    ListBlock,\n    ListItem,\n    Paragraph,\n    Strong,\n    Text,\n    ThematicBreak,\n)\nfrom mdlite.slug import Slugger\n\n\ndef render_document(document: Document) -> str:\n    \"\"\"Render a whole document (rules R2 to R10, R20).\"\"\"\n    return _Renderer().blocks(document.children)\n\n\ndef render_inline(nodes: list[Inline]) -> str:\n    \"\"\"Render inline nodes to HTML (rules R10 to R17).\"\"\"\n    return \"\".join(_inline(node) for node in nodes)\n\n\ndef _inline(node: Inline) -> str:\n    match node:\n        case Text(value):\n            return escape_text(value)\n        case Emphasis(children):\n            return f\"<em>{render_inline(children)}</em>\"\n        case Strong(children):\n            return f\"<strong>{render_inline(children)}</strong>\"\n        case Code(value):\n            return f\"<code>{escape_text(value)}</code>\"\n        case LineBreak():\n            return \"<br>\\n\"\n        case Link(children, url, title):\n            return _link(children, url, title)\n        case Image(children, url, title):\n            return _image(children, url, title)\n    raise TypeError(f\"not an inline node: {node!r}\")\n\n\ndef _title_attr(title: str | None) -> str:\n    return \"\" if title is None else f' title=\"{escape_attr(title)}\"'\n\n\ndef _link(children: list[Inline], url: str, title: str | None) -> str:\n    \"\"\"A link; an unsafe url leaves just the text (rule R16).\"\"\"\n    inner = render_inline(children)\n    if not is_safe_url(url):\n        return inner\n    return f'<a href=\"{escape_attr(url)}\"{_title_attr(title)}>{inner}</a>'\n\n\ndef _image(children: list[Inline], url: str, title: str | None) -> str:\n    \"\"\"An image; an unsafe url leaves just the alt text (rule R16).\"\"\"\n    alt = plain_text(children)\n    if not is_safe_url(url):\n        return escape_text(alt)\n    return (\n        f'<img src=\"{escape_attr(url)}\" alt=\"{escape_attr(alt)}\"{_title_attr(title)}>'\n    )\n\n\nclass _Renderer:\n    \"\"\"Renders blocks; owns the slug state, so make one per document.\"\"\"\n\n    def __init__(self) -> None:\n        self.slugger = Slugger()\n\n    def blocks(self, blocks: list[Block]) -> str:\n        return \"\".join(self.block(block) for block in blocks)\n\n    def block(self, block: Block) -> str:\n        match block:\n            case Heading(level, text):\n                return self.heading(level, text)\n            case Paragraph(text):\n                return f\"<p>{render_inline(parse_inline(text))}</p>\\n\"\n            cas\n[... 698 characters cut ...]\ntr) -> str:\n        words = re.split(r\"[ \\t]+\", info) if info else []\n        css_class = f' class=\"language-{escape_attr(words[0])}\"' if words else \"\"\n        body = escape_text(code)\n        return f\"<pre><code{css_class}>{body}</code></pre>\\n\"\n\n    def list_block(self, block: ListBlock) -> str:\n        tag = \"ol\" if block.ordered else \"ul\"\n        start = f' start=\"{block.start}\"' if block.ordered and block.start != 1 else \"\"\n        items = \"\".join(self.list_item(item) for item in block.items)\n        return f\"<{tag}{start}>\\n{items}</{tag}>\\n\"\n\n    def list_item(self, item: ListItem) -> str:\n        text = render_inline(parse_inline(item.text))\n        if item.sublist is None:\n            return f\"<li>{text}</li>\\n\"\n        return f\"<li>{text}\\n{self.list_block(item.sublist)}</li>\\n\"\n"
+      }
+    },
+    {
+      "i": 35,
+      "t": 47.1,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.1293,
+      "tool_calls": 16,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 15589,
+      "tokens_out": 1228,
+      "text": null,
+      "calls": [
+        {
+          "id": "c17",
+          "tool": "read_file",
+          "label": "read_file tests/test_inline.py",
+          "args": {
+            "path": "tests/test_inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 36,
+      "t": 54.95,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.1293,
+      "tool_calls": 17,
+      "call": "c17",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "tests/test_inline.py",
+        "content": "\"\"\"Inline markup: escapes, breaks, code spans, emphasis, links and autolinks.\"\"\"\n\nimport pytest\nfrom mdlite import to_html\nfrom mdlite.inline import parse_inline, plain_text\nfrom mdlite.nodes import Code, Emphasis, Image, LineBreak, Link, Strong, Text\n\n\ndef p(body: str) -> str:\n    \"\"\"The HTML of a one-paragraph document, without the paragraph tags.\"\"\"\n    html = to_html(body)\n    assert html.startswith(\"<p>\") and html.endswith(\"</p>\\n\"), html\n    return html[3:-5]\n\n\ndef test_text_is_escaped():\n    \"\"\"R10: text escapes & < > but leaves quotes; raw html and entities are text.\"\"\"\n    assert p(\"<b>&amp; \\\"q\\\" 'x'</b>\") == \"&lt;b&gt;&amp;amp; \\\"q\\\" 'x'&lt;/b&gt;\"\n\n\ndef test_code_span_is_escaped():\n    \"\"\"R10: code spans escape & < >.\"\"\"\n    assert p(\"`<a> & b`\") == \"<code>&lt;a&gt; &amp; b</code>\"\n\n\ndef test_attribute_values_escape_quotes_too():\n    \"\"\"R10: href and title escape & < > and both kinds of quote.\"\"\"\n    html = p('[x](/a\"b\\'c&d \"t\\\\\"\\'<\")')\n    assert html == '<a href=\"/a&quot;b&#39;c&amp;d\" title=\"t&quot;&#39;&lt;\">x</a>'\n\n\ndef test_backslash_escapes_punctuation():\n    \"\"\"R11: a backslash before ASCII punctuation makes it literal.\"\"\"\n    assert parse_inline(\"\\\\*not em\\\\*\") == [Text(\"*not em*\")]\n    assert p(\"\\\\<b\\\\> \\\\[x\\\\](/u) \\\\`c\\\\`\") == \"&lt;b&gt; [x](/u) `c`\"\n\n\ndef test_backslash_before_other_characters_is_literal():\n    \"\"\"R11: before a letter a backslash stays; `\\\\\\\\` is one backslash.\"\"\"\n    assert parse_inline(\"\\\\a \\\\\\\\ \\\\é\") == [Text(\"\\\\a \\\\ \\\\é\")]\n\n\ndef test_backslash_is_not_processed_in_code():\n    \"\"\"R11: code spans, code blocks and info strings keep backslashes.\"\"\"\n    assert p(\"`\\\\*`\") == \"<code>\\\\*</code>\"\n    assert to_html(\"```a\\\\*b\\n\\\\*\\n```\") == (\n        '<pre><code class=\"language-a\\\\*b\">\\\\*\\n</code></pre>\\n'\n    )\n\n\ndef test_escaped_delimiters_do_not_pair():\n    \"\"\"R11: an escaped * or _ never takes part in emphasis.\"\"\"\n    assert p(\"\\\\*a*\") == \"*a*\"\n    assert p(\"*a\\\\*\") == \"*a*\"\n\n\ndef test_soft_and_hard_breaks():\n    \"\"\"R12: a newline is kept; two spaces or a backslash before it make <br>.\"\"\"\n    assert parse_inline(\"a\\nb\") == [Text(\"a\\nb\")]\n    assert parse_inline(\"a \\nb\") == [Text(\"a\\nb\")]\n    assert parse_inline(\"a  \\nb\") == [Text(\"a\"), LineBreak(), Text(\"b\")]\n    assert parse_inline(\"a\\\\\\nb\") == [Text(\"a\"), LineBreak(), Text(\"b\")]\n    assert p(\"a   \\nb\") == \"a<br>\\nb\"\n\n\ndef test_breaks_at_the_end_of_a_block():\n    \"\"\"R12: trailing spaces go; a final backslash stays a backslash.\"\"\"\n    assert to_html(\"a  \") == \"<p>a</p>\\n\"\n    assert to_html(\"a\\\\\") == \"<p>a\\\\</p>\\n\"\n    assert to_html(\"- a  \\n  b\") == \"<ul>\\n<li>a<br>\\nb</li>\\n</ul>\\n\"\n\n\ndef test_code_span_delimiters():\n    \"\"\"R13: the span closes at a run of the same length; inner backticks stay.\"\"\"\n    assert parse_inline(\"``a`b``\") == [Code(\"a`b\")]\n    assert parse_inline(\"`a``b`\") == [Code(\"a``b\")]\n    assert parse_inline(\"``a`\") == [Text(\"``a`\")]\n\n\ndef test_code_span_space_and_newline_handling():\n    \"\"\"R13: newlines become spaces; one space is trimmed fr\n[... 6,232 characters cut ...]\n\") == \"[a](&lt;b&lt;c&gt;)\"\n    assert p(\"[a](<b\\nc>)\") == \"[a](&lt;b\\nc&gt;)\"\n    assert parse_inline(\"[a](<b\\\\<c>)\") == [Link([Text(\"a\")], \"b<c\")]\n\n\ndef test_title_separator_is_space_tab_or_newline():\n    \"\"\"R15: only a space, tab or newline separates the url from the title.\"\"\"\n    assert parse_inline('[a](/u\\t\"t\")') == [Link([Text(\"a\")], \"/u\", \"t\")]\n    assert parse_inline('[a](/u\\n\"t\")') == [Link([Text(\"a\")], \"/u\", \"t\")]\n    assert p('[a](/u\\u00a0\"t\")') == '[a](/u\\u00a0\"t\")'\n\n\ndef test_emphasis_closer_skipped_by_the_depth_limit_stays_text():\n    \"\"\"R22: a run that would pair too deep is text and cannot open later either.\"\"\"\n    html = to_html(\"*\" * 42 + \"a\" + \"*\" * 42 + \"b*\")\n    assert html.endswith(\"</strong>**b*</p>\\n\")\n    assert html.count(\"<strong>\") == 20 and \"<em>\" not in html\n"
+      }
+    },
+    {
+      "i": 37,
+      "t": 54.96,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.1517,
+      "tool_calls": 17,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 20582,
+      "tokens_out": 1863,
+      "text": null,
+      "calls": [
+        {
+          "id": "c18",
+          "tool": "grep",
+          "label": "grep 'url_scheme' in mdlite",
+          "args": {
+            "path": "mdlite",
+            "pattern": "url_scheme"
+          }
+        }
+      ]
+    },
+    {
+      "i": 38,
+      "t": 75.27,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.1517,
+      "tool_calls": 18,
+      "call": "c18",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "mdlite/escape.py:34:def url_scheme(url: str) -> str | None:\nmdlite/escape.py:46:    scheme = url_scheme(url)\nmdlite/inline.py:19:from mdlite.escape import url_scheme\nmdlite/inline.py:214:            scheme = url_scheme(candidate)\n"
+      }
+    },
+    {
+      "i": 39,
+      "t": 75.27,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.1687,
+      "tool_calls": 18,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 22526,
+      "tokens_out": 41,
+      "text": null,
+      "calls": [
+        {
+          "id": "c19",
+          "tool": "grep",
+          "label": "grep 'is_safe_url' in mdlite",
+          "args": {
+            "pattern": "is_safe_url",
+            "path": "mdlite"
+          }
+        }
+      ]
+    },
+    {
+      "i": 40,
+      "t": 76.75,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.1687,
+      "tool_calls": 19,
+      "call": "c19",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "mdlite/escape.py:4:and every url goes through `is_safe_url` before it becomes an `href` or `src`. No\nmdlite/escape.py:44:def is_safe_url(url: str) -> bool:\nmdlite/render.py:10:from mdlite.escape import escape_attr, escape_text, is_safe_url\nmdlite/render.py:70:    if not is_safe_url(url):\nmdlite/render.py:78:    if not is_safe_url(url):\n"
+      }
+    },
+    {
+      "i": 41,
+      "t": 76.76,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.1859,
+      "tool_calls": 19,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 22695,
+      "tokens_out": 41,
+      "text": null,
+      "calls": [
+        {
+          "id": "c20",
+          "tool": "grep",
+          "label": "grep 'SAFE_SCHEMES' in mdlite",
+          "args": {
+            "path": "mdlite",
+            "pattern": "SAFE_SCHEMES"
+          }
+        }
+      ]
+    },
+    {
+      "i": 42,
+      "t": 84.05,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.1859,
+      "tool_calls": 20,
+      "call": "c20",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "mdlite/escape.py:21:SAFE_SCHEMES = frozenset({\"http\", \"https\", \"mailto\"})\nmdlite/escape.py:47:    return scheme is None or scheme in SAFE_SCHEMES\n"
+      }
+    },
+    {
+      "i": 43,
+      "t": 84.06,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.2031,
+      "tool_calls": 20,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 22784,
+      "tokens_out": 30,
+      "text": null,
+      "calls": [
+        {
+          "id": "c21",
+          "tool": "list_dir",
+          "label": "list_dir tests",
+          "args": {
+            "path": "tests"
+          }
+        }
+      ]
+    },
+    {
+      "i": 44,
+      "t": 88.41,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.2031,
+      "tool_calls": 21,
+      "call": "c21",
+      "tool": "list_dir",
+      "error": null,
+      "result": {
+        "entries": [
+          "tests/test_blocks.py",
+          "tests/test_cli.py",
+          "tests/test_inline.py",
+          "tests/test_slugs_and_toc.py"
+        ]
+      }
+    },
+    {
+      "i": 45,
+      "t": 88.41,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.2205,
+      "tool_calls": 21,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 22848,
+      "tokens_out": 79,
+      "text": null,
+      "calls": [
+        {
+          "id": "c22",
+          "tool": "grep",
+          "label": "grep 'scheme|autolink' in tests/test_inline.py",
+          "args": {
+            "pattern": "scheme|autolink",
+            "path": "tests/test_inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 46,
+      "t": 94.05,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.2205,
+      "tool_calls": 22,
+      "call": "c22",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "1:\"\"\"Inline markup: escapes, breaks, code spans, emphasis, links and autolinks.\"\"\"\n191:    \"\"\"R16: a link with an unsafe scheme is just its text.\"\"\"\n196:    \"\"\"R16: whitespace inside the scheme is ignored; images fall back to alt text.\"\"\"\n206:    \"\"\"R16: no scheme, http, https and mailto (any case) are rendered as links.\"\"\"\n210:def test_autolinks():\n211:    \"\"\"R17: `<scheme:rest>` and `<name@host>` become links showing their text.\"\"\"\n219:def test_autolink_needs_a_valid_shape():\n220:    \"\"\"R17: spaces, a one-letter scheme, two @ or nothing inside leave a literal <.\"\"\"\n225:    ok, too_long = \"a\" * 32 + \":x\", \"a\" * 33 + \":x\"  # schemes have 2 to 32 characters\n231:def test_autolink_with_unsafe_scheme_is_text():\n232:    \"\"\"R17: R16 applies to autolinks too.\"\"\"\n242:def test_autolinks_do_not_process_escapes():\n243:    \"\"\"R11: inside `<...>` an autolink keeps backslashes, and any `>` closes it.\"\"\"\n"
+      }
+    },
+    {
+      "i": 47,
+      "t": 94.05,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.246,
+      "tool_calls": 22,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 23249,
+      "tokens_out": 2141,
+      "text": null,
+      "calls": [
+        {
+          "id": "c23",
+          "tool": "grep",
+          "label": "grep 'SCHEME' in .",
+          "args": {
+            "path": ".",
+            "pattern": "SCHEME"
+          }
+        }
+      ]
+    },
+    {
+      "i": 48,
+      "t": 108.95,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.246,
+      "tool_calls": 23,
+      "call": "c23",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "mdlite/escape.py:18:_IGNORED_IN_SCHEME = re.compile(r\"[\\x00-\\x20\\x7f]\")\nmdlite/escape.py:19:_SCHEME = re.compile(r\"([A-Za-z][A-Za-z0-9]*):\")\nmdlite/escape.py:21:SAFE_SCHEMES = frozenset({\"http\", \"https\", \"mailto\"})\nmdlite/escape.py:40:    match = _SCHEME.match(_IGNORED_IN_SCHEME.sub(\"\", url))\nmdlite/escape.py:47:    return scheme is None or scheme in SAFE_SCHEMES\nmdlite/inline.py:38:_MIN_SCHEME = 2\nmdlite/inline.py:39:_MAX_SCHEME = 32\nmdlite/inline.py:215:            if scheme is not None and _MIN_SCHEME <= len(scheme) <= _MAX_SCHEME:\n"
+      }
+    },
+    {
+      "i": 49,
+      "t": 108.96,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.2713,
+      "tool_calls": 23,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 25619,
+      "tokens_out": 1618,
+      "text": null,
+      "calls": [
+        {
+          "id": "c24",
+          "tool": "set_model_response",
+          "label": "answer",
+          "args": {
+            "actionable": true,
+            "steps": [
+              "In `mdlite/escape.py`, update `_SCHEME` regex from `re.compile(r\"([A-Za-z][A-Za-z0-9]*):\")` to `re.compile(r\"([A-Za-z][A-Za-z0-9+.-]*):\")` so that characters `+`, `.`, and `-` are recognized in URL schemes according to rule R16.",
+              "In `tests/test_inline.py`, add unit test cases verifying that autolinks with `+`, `-`, and `.` in their schemes (such as `<git+https://github.com/acme/tool.git>`, `<x-man-page://ls>`, and `<com.example.app:settings>`) are parsed as autolinks and rendered without angle brackets (as unlinked text for unsafe schemes).",
+              "Run pytest across the test suite to ensure existing tests pass and the new tests succeed."
+            ],
+            "summary": "Fix URL scheme regex in `mdlite/escape.py` to allow `+`, `.`, and `-` after the initial letter as specified by rule R16, allowing autolinks with complex schemes (e.g. `git+https`, `x-man-page`, `com.example.app`) to be recognized and stripped of enclosing angle brackets.",
+            "files_to_inspect": [
+              "mdlite/escape.py",
+              "mdlite/inline.py",
+              "tests/test_inline.py"
+            ],
+            "test_strategy": "Add test cases to `tests/test_inline.py` asserting that markdown inputs like `<git+https://github.com/acme/tool.git>`, `<x-man-page://ls>`, and `<com.example.app:settings>` render without angle brackets or links, matching the behavior of `<ftp://...>`. Run pytest to verify all inline tests and full suite tests pass.",
+            "decline_reason": null
+          }
+        }
+      ]
+    },
+    {
+      "i": 50,
+      "t": 120.2,
+      "kind": "plan",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.2713,
+      "tool_calls": 24,
+      "value": {
+        "actionable": true,
+        "decline_reason": null,
+        "summary": "Fix URL scheme regex in `mdlite/escape.py` to allow `+`, `.`, and `-` after the initial letter as specified by rule R16, allowing autolinks with complex schemes (e.g. `git+https`, `x-man-page`, `com.example.app`) to be recognized and stripped of enclosing angle brackets.",
+        "files_to_inspect": [
+          "mdlite/escape.py",
+          "mdlite/inline.py",
+          "tests/test_inline.py"
+        ],
+        "steps": [
+          "In `mdlite/escape.py`, update `_SCHEME` regex from `re.compile(r\"([A-Za-z][A-Za-z0-9]*):\")` to `re.compile(r\"([A-Za-z][A-Za-z0-9+.-]*):\")` so that characters `+`, `.`, and `-` are recognized in URL schemes according to rule R16.",
+          "In `tests/test_inline.py`, add unit test cases verifying that autolinks with `+`, `-`, and `.` in their schemes (such as `<git+https://github.com/acme/tool.git>`, `<x-man-page://ls>`, and `<com.example.app:settings>`) are parsed as autolinks and rendered without angle brackets (as unlinked text for unsafe schemes).",
+          "Run pytest across the test suite to ensure existing tests pass and the new tests succeed."
+        ],
+        "test_strategy": "Add test cases to `tests/test_inline.py` asserting that markdown inputs like `<git+https://github.com/acme/tool.git>`, `<x-man-page://ls>`, and `<com.example.app:settings>` render without angle brackets or links, matching the behavior of `<ftp://...>`. Run pytest to verify all inline tests and full suite tests pass."
+      }
+    },
+    {
+      "i": 51,
+      "t": 120.2,
+      "kind": "node",
+      "node": "route_plan",
+      "visit": 1,
+      "cost_usd": 0.2713,
+      "tool_calls": 24,
+      "from": "planner",
+      "via": null,
+      "message": null
+    },
+    {
+      "i": 52,
+      "t": 120.21,
+      "kind": "node",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2713,
+      "tool_calls": 24,
+      "from": "route_plan",
+      "via": "actionable",
+      "message": null
+    },
+    {
+      "i": 53,
+      "t": 120.21,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2735,
+      "tool_calls": 24,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 1857,
+      "tokens_out": 217,
+      "text": null,
+      "calls": [
+        {
+          "id": "c25",
+          "tool": "grep",
+          "label": "grep '_SCHEME' in mdlite",
+          "args": {
+            "pattern": "_SCHEME",
+            "path": "mdlite"
+          }
+        }
+      ]
+    },
+    {
+      "i": 54,
+      "t": 124.69,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2735,
+      "tool_calls": 25,
+      "call": "c25",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "mdlite/escape.py:18:_IGNORED_IN_SCHEME = re.compile(r\"[\\x00-\\x20\\x7f]\")\nmdlite/escape.py:19:_SCHEME = re.compile(r\"([A-Za-z][A-Za-z0-9]*):\")\nmdlite/escape.py:21:SAFE_SCHEMES = frozenset({\"http\", \"https\", \"mailto\"})\nmdlite/escape.py:40:    match = _SCHEME.match(_IGNORED_IN_SCHEME.sub(\"\", url))\nmdlite/escape.py:47:    return scheme is None or scheme in SAFE_SCHEMES\nmdlite/inline.py:38:_MIN_SCHEME = 2\nmdlite/inline.py:39:_MAX_SCHEME = 32\nmdlite/inline.py:215:            if scheme is not None and _MIN_SCHEME <= len(scheme) <= _MAX_SCHEME:\n"
+      }
+    },
+    {
+      "i": 55,
+      "t": 124.7,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2754,
+      "tool_calls": 25,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 2303,
+      "tokens_out": 42,
+      "text": null,
+      "calls": [
+        {
+          "id": "c26",
+          "tool": "read_file",
+          "label": "read_file mdlite/escape.py",
+          "args": {
+            "path": "mdlite/escape.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 56,
+      "t": 126.75,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2754,
+      "tool_calls": 26,
+      "call": "c26",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "mdlite/escape.py",
+        "content": "\"\"\"HTML escaping and URL scheme checks.\n\nEvery character that reaches the output goes through `escape_text` or `escape_attr`,\nand every url goes through `is_safe_url` before it becomes an `href` or `src`. No\nother module escapes or checks anything, so a rule change is made here once.\n\"\"\"\n\nimport re\n\n_TEXT_TABLE = str.maketrans({\"&\": \"&amp;\", \"<\": \"&lt;\", \">\": \"&gt;\"})\n_ATTR_TABLE = str.maketrans(\n    {\"&\": \"&amp;\", \"<\": \"&lt;\", \">\": \"&gt;\", '\"': \"&quot;\", \"'\": \"&#39;\"}\n)\n\n# Browsers ignore ASCII whitespace and control characters inside a url scheme\n# (\"java\\tscript:\"), so U+0000 to U+0020 and U+007F are deleted before the scheme is\n# read. Other characters, such as U+00A0, are kept and end the scheme.\n_IGNORED_IN_SCHEME = re.compile(r\"[\\x00-\\x20\\x7f]\")\n_SCHEME = re.compile(r\"([A-Za-z][A-Za-z0-9]*):\")\n\nSAFE_SCHEMES = frozenset({\"http\", \"https\", \"mailto\"})\n\n\ndef escape_text(text: str) -> str:\n    \"\"\"Escape `&`, `<` and `>` for use as element content.\"\"\"\n    return text.translate(_TEXT_TABLE)\n\n\ndef escape_attr(text: str) -> str:\n    \"\"\"Escape `&`, `<`, `>`, `\"` and `'` for use inside a quoted attribute value.\"\"\"\n    return text.translate(_ATTR_TABLE)\n\n\ndef url_scheme(url: str) -> str | None:\n    \"\"\"The lowercase scheme of `url`, or None when it has no scheme.\n\n    The characters U+0000 to U+0020 and U+007F are deleted first, so\n    `\" JaVa\\\\nScript:x\"` has the scheme `javascript`.\n    \"\"\"\n    match = _SCHEME.match(_IGNORED_IN_SCHEME.sub(\"\", url))\n    return match.group(1).lower() if match else None\n\n\ndef is_safe_url(url: str) -> bool:\n    \"\"\"True for urls without a scheme and for http, https and mailto urls.\"\"\"\n    scheme = url_scheme(url)\n    return scheme is None or scheme in SAFE_SCHEMES\n"
+      }
+    },
+    {
+      "i": 57,
+      "t": 126.76,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2777,
+      "tool_calls": 26,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 2915,
+      "tokens_out": 36,
+      "text": null,
+      "calls": [
+        {
+          "id": "c27",
+          "tool": "read_file",
+          "label": "read_file mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 58,
+      "t": 128.49,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2777,
+      "tool_calls": 27,
+      "call": "c27",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "mdlite/inline.py",
+        "content": "\"\"\"Inline parser: turns the raw text of one block into inline nodes.\n\n`parse_inline` scans left to right. Code spans, backslash escapes, links, images and\nautolinks are recognised as the scanner meets them; runs of `*` and `_` are kept as\ndelimiter markers and paired afterwards (`_pair_emphasis`). Because the scanner\nconsumes a whole code span at once, delimiters inside a code span can never pair with\ndelimiters outside it.\n\n`plain_text` flattens parsed inlines back to text; the renderer uses it for image alt\ntext and the table of contents and the slug builder use it for headings.\n\nThe rules are numbered R11 to R17 in the README.\n\"\"\"\n\nimport re\nimport string\nfrom dataclasses import dataclass\n\nfrom mdlite.escape import url_scheme\nfrom mdlite.nodes import (\n    Code,\n    Emphasis,\n    Image,\n    Inline,\n    LineBreak,\n    Link,\n    Strong,\n    Text,\n)\n\n_ESCAPABLE = frozenset(string.punctuation)\n_ESCAPE = re.compile(r\"\\\\([!-/:-@\\[-`{-~])\")\n_BACKTICK_RUN = re.compile(r\"`+\")\n_AUTOLINK_FORBIDDEN = re.compile(r\"[\\s<]\")\n_EMAIL = re.compile(r\"^[^\\s<>@]+@[^\\s<>@]+$\")\nMAX_IMAGE_DEPTH = 10\nMAX_EMPHASIS_DEPTH = 20\n_MIN_SCHEME = 2\n_MAX_SCHEME = 32\n\n\n@dataclass\nclass _Delimiter:\n    \"\"\"A run of `*` or `_` waiting to be paired (rule R14).\"\"\"\n\n    char: str\n    count: int\n    can_open: bool\n    can_close: bool\n\n\n_Node = Inline | _Delimiter\n\n\ndef parse_inline(\n    text: str, *, allow_links: bool = True, image_depth: int = 0\n) -> list[Inline]:\n    \"\"\"Parse inline markup in `text`.\n\n    With `allow_links=False` a `[` or `<` never starts a link or autolink; this is\n    how the label of a link is parsed, since links do not nest (rules R15, R17).\n    `image_depth` is how many image labels enclose `text`; at `MAX_IMAGE_DEPTH` a\n    further `![` is literal (rule R22).\n    \"\"\"\n    return _Scanner(text, allow_links, image_depth).scan()\n\n\ndef plain_text(nodes: list[Inline]) -> str:\n    \"\"\"The text of `nodes` without markup: code content, link text, image labels.\"\"\"\n    parts: list[str] = []\n    for node in nodes:\n        match node:\n            case Text(value) | Code(value):\n                parts.append(value)\n            case Emphasis(children) | Strong(children):\n                parts.append(plain_text(children))\n            case Link(children) | Image(children):\n                parts.append(plain_text(children))\n            case LineBreak():\n                parts.append(\"\\n\")\n    return \"\".join(parts)\n\n\ndef unescape(text: str) -> str:\n    \"\"\"Resolve backslash escapes (rule R11).\"\"\"\n    return _ESCAPE.sub(r\"\\1\", text)\n\n\nclass _Scanner:\n    \"\"\"One pass over the text of a block.\"\"\"\n\n    def __init__(self, text: str, allow_links: bool, image_depth: int) -> None:\n        self.text = text\n        self.allow_links = allow_links\n        self.image_depth = image_depth\n        self.pos = 0\n        self.nodes: list[_Node] = []\n        self.buffer: list[str] = []\n\n    def scan(self) -> list[Inline]:\n        while self.pos < len(self.text):\n            char = self.text[self.pos]\n   \n[... 6,232 characters cut ...]\nat]\n    assert isinstance(closer, _Delimiter)\n    for i in range(closer_at - 1, -1, -1):\n        node = nodes[i]\n        if isinstance(node, _Delimiter) and node.char == closer.char and node.can_open:\n            return i\n    return None\n\n\ndef _finish(nodes: list[_Node]) -> list[Inline]:\n    \"\"\"Turn unpaired delimiter runs into text and merge neighbouring text nodes.\"\"\"\n    result: list[Inline] = []\n    for node in nodes:\n        piece = Text(node.char * node.count) if isinstance(node, _Delimiter) else node\n        if isinstance(piece, Text):\n            if not piece.value:\n                continue\n            if result and isinstance(result[-1], Text):\n                result[-1] = Text(result[-1].value + piece.value)\n                continue\n        result.append(piece)\n    return result\n"
+      }
+    },
+    {
+      "i": 59,
+      "t": 128.5,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2823,
+      "tool_calls": 27,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 5833,
+      "tokens_out": 57,
+      "text": null,
+      "calls": [
+        {
+          "id": "c28",
+          "tool": "grep",
+          "label": "grep 'def _angle' in mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py",
+            "pattern": "def _angle"
+          }
+        }
+      ]
+    },
+    {
+      "i": 60,
+      "t": 130.64,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2823,
+      "tool_calls": 28,
+      "call": "c28",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "209:    def _angle(self) -> None:\n"
+      }
+    },
+    {
+      "i": 61,
+      "t": 130.64,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2869,
+      "tool_calls": 28,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 5900,
+      "tokens_out": 40,
+      "text": null,
+      "calls": [
+        {
+          "id": "c29",
+          "tool": "read_file",
+          "label": "read_file mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 62,
+      "t": 132.31,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2869,
+      "tool_calls": 29,
+      "call": "c29",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "mdlite/inline.py",
+        "content": "\"\"\"Inline parser: turns the raw text of one block into inline nodes.\n\n`parse_inline` scans left to right. Code spans, backslash escapes, links, images and\nautolinks are recognised as the scanner meets them; runs of `*` and `_` are kept as\ndelimiter markers and paired afterwards (`_pair_emphasis`). Because the scanner\nconsumes a whole code span at once, delimiters inside a code span can never pair with\ndelimiters outside it.\n\n`plain_text` flattens parsed inlines back to text; the renderer uses it for image alt\ntext and the table of contents and the slug builder use it for headings.\n\nThe rules are numbered R11 to R17 in the README.\n\"\"\"\n\nimport re\nimport string\nfrom dataclasses import dataclass\n\nfrom mdlite.escape import url_scheme\nfrom mdlite.nodes import (\n    Code,\n    Emphasis,\n    Image,\n    Inline,\n    LineBreak,\n    Link,\n    Strong,\n    Text,\n)\n\n_ESCAPABLE = frozenset(string.punctuation)\n_ESCAPE = re.compile(r\"\\\\([!-/:-@\\[-`{-~])\")\n_BACKTICK_RUN = re.compile(r\"`+\")\n_AUTOLINK_FORBIDDEN = re.compile(r\"[\\s<]\")\n_EMAIL = re.compile(r\"^[^\\s<>@]+@[^\\s<>@]+$\")\nMAX_IMAGE_DEPTH = 10\nMAX_EMPHASIS_DEPTH = 20\n_MIN_SCHEME = 2\n_MAX_SCHEME = 32\n\n\n@dataclass\nclass _Delimiter:\n    \"\"\"A run of `*` or `_` waiting to be paired (rule R14).\"\"\"\n\n    char: str\n    count: int\n    can_open: bool\n    can_close: bool\n\n\n_Node = Inline | _Delimiter\n\n\ndef parse_inline(\n    text: str, *, allow_links: bool = True, image_depth: int = 0\n) -> list[Inline]:\n    \"\"\"Parse inline markup in `text`.\n\n    With `allow_links=False` a `[` or `<` never starts a link or autolink; this is\n    how the label of a link is parsed, since links do not nest (rules R15, R17).\n    `image_depth` is how many image labels enclose `text`; at `MAX_IMAGE_DEPTH` a\n    further `![` is literal (rule R22).\n    \"\"\"\n    return _Scanner(text, allow_links, image_depth).scan()\n\n\ndef plain_text(nodes: list[Inline]) -> str:\n    \"\"\"The text of `nodes` without markup: code content, link text, image labels.\"\"\"\n    parts: list[str] = []\n    for node in nodes:\n        match node:\n            case Text(value) | Code(value):\n                parts.append(value)\n            case Emphasis(children) | Strong(children):\n                parts.append(plain_text(children))\n            case Link(children) | Image(children):\n                parts.append(plain_text(children))\n            case LineBreak():\n                parts.append(\"\\n\")\n    return \"\".join(parts)\n\n\ndef unescape(text: str) -> str:\n    \"\"\"Resolve backslash escapes (rule R11).\"\"\"\n    return _ESCAPE.sub(r\"\\1\", text)\n\n\nclass _Scanner:\n    \"\"\"One pass over the text of a block.\"\"\"\n\n    def __init__(self, text: str, allow_links: bool, image_depth: int) -> None:\n        self.text = text\n        self.allow_links = allow_links\n        self.image_depth = image_depth\n        self.pos = 0\n        self.nodes: list[_Node] = []\n        self.buffer: list[str] = []\n\n    def scan(self) -> list[Inline]:\n        while self.pos < len(self.text):\n            char = self.text[self.pos]\n   \n[... 6,232 characters cut ...]\nat]\n    assert isinstance(closer, _Delimiter)\n    for i in range(closer_at - 1, -1, -1):\n        node = nodes[i]\n        if isinstance(node, _Delimiter) and node.char == closer.char and node.can_open:\n            return i\n    return None\n\n\ndef _finish(nodes: list[_Node]) -> list[Inline]:\n    \"\"\"Turn unpaired delimiter runs into text and merge neighbouring text nodes.\"\"\"\n    result: list[Inline] = []\n    for node in nodes:\n        piece = Text(node.char * node.count) if isinstance(node, _Delimiter) else node\n        if isinstance(piece, Text):\n            if not piece.value:\n                continue\n            if result and isinstance(result[-1], Text):\n                result[-1] = Text(result[-1].value + piece.value)\n                continue\n        result.append(piece)\n    return result\n"
+      }
+    },
+    {
+      "i": 63,
+      "t": 132.32,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2937,
+      "tool_calls": 29,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 8822,
+      "tokens_out": 66,
+      "text": null,
+      "calls": [
+        {
+          "id": "c30",
+          "tool": "grep",
+          "label": "grep '_angle' in mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py",
+            "pattern": "_angle"
+          }
+        }
+      ]
+    },
+    {
+      "i": 64,
+      "t": 134.44,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.2937,
+      "tool_calls": 30,
+      "call": "c30",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "120:                self._angle()\n209:    def _angle(self) -> None:\n315:        close = _find_angle_end(text, pos)\n348:def _find_angle_end(text: str, start: int) -> int | None:\n"
+      }
+    },
+    {
+      "i": 65,
+      "t": 134.44,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3006,
+      "tool_calls": 30,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 8953,
+      "tokens_out": 38,
+      "text": null,
+      "calls": [
+        {
+          "id": "c31",
+          "tool": "grep",
+          "label": "grep 'R16' in README",
+          "args": {
+            "path": "README",
+            "pattern": "R16"
+          }
+        }
+      ]
+    },
+    {
+      "i": 66,
+      "t": 136.27,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3006,
+      "tool_calls": 31,
+      "call": "c31",
+      "tool": "grep",
+      "error": "rg: /workspace/repo/README: IO error for operation on /workspace/repo/README: No such file or directory (os error 2)\n",
+      "result": {}
+    },
+    {
+      "i": 67,
+      "t": 136.28,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3074,
+      "tool_calls": 31,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 9019,
+      "tokens_out": 25,
+      "text": null,
+      "calls": [
+        {
+          "id": "c32",
+          "tool": "list_dir",
+          "label": "list_dir .",
+          "args": {
+            "path": "."
+          }
+        }
+      ]
+    },
+    {
+      "i": 68,
+      "t": 138.31,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3074,
+      "tool_calls": 32,
+      "call": "c32",
+      "tool": "list_dir",
+      "error": null,
+      "result": {
+        "entries": [
+          "README.md",
+          "conftest.py",
+          "mdlite/__init__.py",
+          "mdlite/__main__.py",
+          "mdlite/blocks.py",
+          "mdlite/cli.py",
+          "mdlite/escape.py",
+          "mdlite/inline.py",
+          "mdlite/nodes.py",
+          "mdlite/render.py",
+          "mdlite/slug.py",
+          "mdlite/toc.py",
+          "tests/test_blocks.py",
+          "tests/test_cli.py",
+          "tests/test_inline.py",
+          "tests/test_slugs_and_toc.py"
+        ]
+      }
+    },
+    {
+      "i": 69,
+      "t": 138.32,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3145,
+      "tool_calls": 32,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 9145,
+      "tokens_out": 42,
+      "text": null,
+      "calls": [
+        {
+          "id": "c33",
+          "tool": "grep",
+          "label": "grep 'R16' in README.md",
+          "args": {
+            "pattern": "R16",
+            "path": "README.md"
+          }
+        }
+      ]
+    },
+    {
+      "i": 70,
+      "t": 140.24,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3145,
+      "tool_calls": 33,
+      "call": "c33",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "149:**R16. URL safety.** A url has a scheme when, after deleting the characters U+0000 to\n156:**R17. Autolinks.** `<scheme:rest>`, where the scheme is 2 to 32 characters (R16's\n160:address. R16 applies: an autolink with an unsafe scheme renders as its text.\n"
+      }
+    },
+    {
+      "i": 71,
+      "t": 140.25,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3216,
+      "tool_calls": 33,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 9272,
+      "tokens_out": 49,
+      "text": null,
+      "calls": [
+        {
+          "id": "c34",
+          "tool": "bash",
+          "label": "bash sed -n '145,175p' README.md",
+          "args": {
+            "command": "sed -n '145,175p' README.md"
+          }
+        }
+      ]
+    },
+    {
+      "i": 72,
+      "t": 142.51,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3216,
+      "tool_calls": 34,
+      "call": "c34",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "another link or autolink (an inner `[` or `<` is literal). An image's `alt` is the plain text of its\nlabel. Without a `(` right after the closing `]`, the brackets are literal text. Image\nlabels nest at most 10 levels deep (R22).\n\n**R16. URL safety.** A url has a scheme when, after deleting the characters U+0000 to\nU+0020 and U+007F (control characters and ASCII whitespace), it starts with a letter, then letters, digits, `+`, `.` or `-`, then `:`.\nUrls without a scheme (relative urls, `#anchors`, `//host/path`) and with the scheme\n`http`, `https` or `mailto` (case-insensitive) are safe. Any other scheme is unsafe: a\nlink with an unsafe url renders as its text alone, without `<a>`, and an image renders\nas its alt text alone.\n\n**R17. Autolinks.** `<scheme:rest>`, where the scheme is 2 to 32 characters (R16's\nsyntax) and the text has no whitespace, `<` or `>`, is a link whose text is the url\nitself. Nothing inside is a backslash escape, so the first `>` always ends it.\n`<name@host>` (no spaces, exactly one `@`) is a link to `mailto:name@host` showing the\naddress. R16 applies: an autolink with an unsafe scheme renders as its text.\n\n**R18. Slugs.** A heading's slug is built from its plain text (emphasis markers\ndropped, code span content, link text, image alt, escapes resolved): lowercase it,\ndrop every character that is not a letter, digit, whitespace or `-`, turn each run of\nwhitespace and `-` into one `-`, and trim `-` from both ends. Letters and digits are\nUnicode ones. An empty result becomes `section`.\n\n**R19. Duplicate slugs.** Within one document the first heading keeps its slug; the\nk-th repeat gets the suffix `-k` (`intro`, `intro-1`, `intro-2`), skipping any slug\nalready in use (the headings `a`, `a`, `a-1` get `a`, `a-1`, `a-1-1`).\n\n**R20. Heading ids and table of contents.** Every heading, including those inside block\nquotes, gets `id=\"slug\"` by R18 and R19, in document order. `toc(text)` returns one\n`(level, plain_text, slug)` per heading in document order with exactly those slugs.\nThe plain text is the same text R18 starts from.\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 73,
+      "t": 142.52,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3304,
+      "tool_calls": 34,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 9923,
+      "tokens_out": 375,
+      "text": null,
+      "calls": [
+        {
+          "id": "c35",
+          "tool": "bash",
+          "label": "bash sed -n '205,235p' mdlite/inline.py",
+          "args": {
+            "command": "sed -n '205,235p' mdlite/inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 74,
+      "t": 145.97,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3304,
+      "tool_calls": 35,
+      "call": "c35",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "        )\n        self._emit(Image(children, url, title) if image else Link(children, url, title))\n        self.pos = end\n\n    def _angle(self) -> None:\n        \"\"\"An autolink (rule R17), or a literal `<`.\"\"\"\n        close = self.text.find(\">\", self.pos + 1)\n        candidate = self.text[self.pos + 1 : close] if close != -1 else \"\"\n        if candidate and not _AUTOLINK_FORBIDDEN.search(candidate):\n            scheme = url_scheme(candidate)\n            if scheme is not None and _MIN_SCHEME <= len(scheme) <= _MAX_SCHEME:\n                self._emit(Link([Text(candidate)], candidate))\n                self.pos = close + 1\n                return\n            if _EMAIL.match(candidate):\n                self._emit(Link([Text(candidate)], \"mailto:\" + candidate))\n                self.pos = close + 1\n                return\n        self._literal(\"<\")\n\n\n# Code spans ------------------------------------------------------------------\n\n\ndef _find_code_span(text: str, start: int) -> tuple[str, int] | None:\n    \"\"\"The code span opening at `start`: (content, index after the closing run).\n\n    The span closes at the next backtick run of exactly the opening length.\n    \"\"\"\n    length = _run_length(text, start)\n    for run in _BACKTICK_RUN.finditer(text, start + length):\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 75,
+      "t": 145.98,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.34,
+      "tool_calls": 35,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 10653,
+      "tokens_out": 414,
+      "text": null,
+      "calls": [
+        {
+          "id": "c36",
+          "tool": "grep",
+          "label": "grep 'Link' in mdlite/render.py",
+          "args": {
+            "pattern": "Link",
+            "path": "mdlite/render.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 76,
+      "t": 150.6,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.34,
+      "tool_calls": 36,
+      "call": "c36",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "23:    Link,\n56:        case Link(children, url, title):\n"
+      }
+    },
+    {
+      "i": 77,
+      "t": 150.61,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3485,
+      "tool_calls": 36,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 11083,
+      "tokens_out": 50,
+      "text": null,
+      "calls": [
+        {
+          "id": "c37",
+          "tool": "bash",
+          "label": "bash sed -n '50,70p' mdlite/render.py",
+          "args": {
+            "command": "sed -n '50,70p' mdlite/render.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 78,
+      "t": 152.43,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3485,
+      "tool_calls": 37,
+      "call": "c37",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "        case Strong(children):\n            return f\"<strong>{render_inline(children)}</strong>\"\n        case Code(value):\n            return f\"<code>{escape_text(value)}</code>\"\n        case LineBreak():\n            return \"<br>\\n\"\n        case Link(children, url, title):\n            return _link(children, url, title)\n        case Image(children, url, title):\n            return _image(children, url, title)\n    raise TypeError(f\"not an inline node: {node!r}\")\n\n\ndef _title_attr(title: str | None) -> str:\n    return \"\" if title is None else f' title=\"{escape_attr(title)}\"'\n\n\ndef _link(children: list[Inline], url: str, title: str | None) -> str:\n    \"\"\"A link; an unsafe url leaves just the text (rule R16).\"\"\"\n    inner = render_inline(children)\n    if not is_safe_url(url):\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 79,
+      "t": 152.43,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.359,
+      "tool_calls": 37,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 11364,
+      "tokens_out": 532,
+      "text": null,
+      "calls": [
+        {
+          "id": "c38",
+          "tool": "bash",
+          "label": "bash python -m pytest -q",
+          "args": {
+            "command": "python -m pytest -q"
+          }
+        }
+      ]
+    },
+    {
+      "i": 80,
+      "t": 158.62,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.359,
+      "tool_calls": 38,
+      "call": "c38",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "........................................................................ [ 60%]\n................................................                         [100%]\n120 passed in 0.86s\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 81,
+      "t": 158.63,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3681,
+      "tool_calls": 38,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 11937,
+      "tokens_out": 44,
+      "text": null,
+      "calls": [
+        {
+          "id": "c39",
+          "tool": "grep",
+          "label": "grep 'autolink' in tests/test_inline.py",
+          "args": {
+            "pattern": "autolink",
+            "path": "tests/test_inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 82,
+      "t": 163.27,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3681,
+      "tool_calls": 39,
+      "call": "c39",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "1:\"\"\"Inline markup: escapes, breaks, code spans, emphasis, links and autolinks.\"\"\"\n210:def test_autolinks():\n219:def test_autolink_needs_a_valid_shape():\n231:def test_autolink_with_unsafe_scheme_is_text():\n232:    \"\"\"R17: R16 applies to autolinks too.\"\"\"\n242:def test_autolinks_do_not_process_escapes():\n243:    \"\"\"R11: inside `<...>` an autolink keeps backslashes, and any `>` closes it.\"\"\"\n"
+      }
+    },
+    {
+      "i": 83,
+      "t": 163.28,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3774,
+      "tool_calls": 39,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 12125,
+      "tokens_out": 56,
+      "text": null,
+      "calls": [
+        {
+          "id": "c40",
+          "tool": "bash",
+          "label": "bash sed -n '210,250p' tests/test_inline.py",
+          "args": {
+            "command": "sed -n '210,250p' tests/test_inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 84,
+      "t": 166.25,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3774,
+      "tool_calls": 40,
+      "call": "c40",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "def test_autolinks():\n    \"\"\"R17: `<scheme:rest>` and `<name@host>` become links showing their text.\"\"\"\n    assert p(\"<https://a.example/x?a=1&b=2>\") == (\n        '<a href=\"https://a.example/x?a=1&amp;b=2\">https://a.example/x?a=1&amp;b=2</a>'\n    )\n    assert p(\"<mailto:a@b.c>\") == '<a href=\"mailto:a@b.c\">mailto:a@b.c</a>'\n    assert p(\"<a@b.c>\") == '<a href=\"mailto:a@b.c\">a@b.c</a>'\n\n\ndef test_autolink_needs_a_valid_shape():\n    \"\"\"R17: spaces, a one-letter scheme, two @ or nothing inside leave a literal <.\"\"\"\n    assert p(\"<a b@c>\") == \"&lt;a b@c&gt;\"\n    assert p(\"<x:y>\") == \"&lt;x:y&gt;\"\n    assert p(\"<a@b@c>\") == \"&lt;a@b@c&gt;\"\n    assert p(\"<>\") == \"&lt;&gt;\"\n    ok, too_long = \"a\" * 32 + \":x\", \"a\" * 33 + \":x\"  # schemes have 2 to 32 characters\n    assert parse_inline(f\"<{ok}>\") == [Link([Text(ok)], ok)]\n    assert parse_inline(f\"<{too_long}>\") == [Text(f\"<{too_long}>\")]\n    assert p(\"a < b\") == \"a &lt; b\"\n\n\ndef test_autolink_with_unsafe_scheme_is_text():\n    \"\"\"R17: R16 applies to autolinks too.\"\"\"\n    assert p(\"<javascript:alert(1)>\") == \"javascript:alert(1)\"\n\n\ndef test_plain_text_flattens_markup():\n    \"\"\"R18: the plain text drops markers and keeps code, link text and alt text.\"\"\"\n    nodes = parse_inline(\"A *b* **c** `d` [e](/u) ![f](/i) g\\\\*\")\n    assert plain_text(nodes) == \"A b c d e f g*\"\n\n\ndef test_autolinks_do_not_process_escapes():\n    \"\"\"R11: inside `<...>` an autolink keeps backslashes, and any `>` closes it.\"\"\"\n    assert p(\"<http://a\\\\*b>\") == '<a href=\"http://a\\\\*b\">http://a\\\\*b</a>'\n    assert p(\"<http://a\\\\>b>\") == '<a href=\"http://a\\\\\">http://a\\\\</a>b&gt;'\n\n\ndef test_images_nest_to_a_fixed_depth():\n    \"\"\"R22: image labels nest 10 levels deep; deeper `![` are text; no input raises.\"\"\"\n\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 85,
+      "t": 166.26,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3874,
+      "tool_calls": 40,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 12872,
+      "tokens_out": 83,
+      "text": null,
+      "calls": [
+        {
+          "id": "c41",
+          "tool": "bash",
+          "label": "bash head -n 30 tests/test_inline.py",
+          "args": {
+            "command": "head -n 30 tests/test_inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 86,
+      "t": 247.19,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.3874,
+      "tool_calls": 41,
+      "call": "c41",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "\"\"\"Inline markup: escapes, breaks, code spans, emphasis, links and autolinks.\"\"\"\n\nimport pytest\nfrom mdlite import to_html\nfrom mdlite.inline import parse_inline, plain_text\nfrom mdlite.nodes import Code, Emphasis, Image, LineBreak, Link, Strong, Text\n\n\ndef p(body: str) -> str:\n    \"\"\"The HTML of a one-paragraph document, without the paragraph tags.\"\"\"\n    html = to_html(body)\n    assert html.startswith(\"<p>\") and html.endswith(\"</p>\\n\"), html\n    return html[3:-5]\n\n\ndef test_text_is_escaped():\n    \"\"\"R10: text escapes & < > but leaves quotes; raw html and entities are text.\"\"\"\n    assert p(\"<b>&amp; \\\"q\\\" 'x'</b>\") == \"&lt;b&gt;&amp;amp; \\\"q\\\" 'x'&lt;/b&gt;\"\n\n\ndef test_code_span_is_escaped():\n    \"\"\"R10: code spans escape & < >.\"\"\"\n    assert p(\"`<a> & b`\") == \"<code>&lt;a&gt; &amp; b</code>\"\n\n\ndef test_attribute_values_escape_quotes_too():\n    \"\"\"R10: href and title escape & < > and both kinds of quote.\"\"\"\n    html = p('[x](/a\"b\\'c&d \"t\\\\\"\\'<\")')\n    assert html == '<a href=\"/a&quot;b&#39;c&amp;d\" title=\"t&quot;&#39;&lt;\">x</a>'\n\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 87,
+      "t": 247.2,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4004,
+      "tool_calls": 41,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 13319,
+      "tokens_out": 794,
+      "text": null,
+      "calls": [
+        {
+          "id": "c42",
+          "tool": "grep",
+          "label": "grep 'SCHEME' in mdlite",
+          "args": {
+            "pattern": "SCHEME",
+            "path": "mdlite"
+          }
+        }
+      ]
+    },
+    {
+      "i": 88,
+      "t": 258.97,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4004,
+      "tool_calls": 42,
+      "call": "c42",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "mdlite/escape.py:18:_IGNORED_IN_SCHEME = re.compile(r\"[\\x00-\\x20\\x7f]\")\nmdlite/escape.py:19:_SCHEME = re.compile(r\"([A-Za-z][A-Za-z0-9]*):\")\nmdlite/escape.py:21:SAFE_SCHEMES = frozenset({\"http\", \"https\", \"mailto\"})\nmdlite/escape.py:40:    match = _SCHEME.match(_IGNORED_IN_SCHEME.sub(\"\", url))\nmdlite/escape.py:47:    return scheme is None or scheme in SAFE_SCHEMES\nmdlite/inline.py:38:_MIN_SCHEME = 2\nmdlite/inline.py:39:_MAX_SCHEME = 32\nmdlite/inline.py:215:            if scheme is not None and _MIN_SCHEME <= len(scheme) <= _MAX_SCHEME:\n"
+      }
+    },
+    {
+      "i": 89,
+      "t": 258.98,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4113,
+      "tool_calls": 42,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 14342,
+      "tokens_out": 51,
+      "text": null,
+      "calls": [
+        {
+          "id": "c43",
+          "tool": "grep",
+          "label": "grep 'scheme' in mdlite",
+          "args": {
+            "pattern": "scheme",
+            "path": "mdlite"
+          }
+        }
+      ]
+    },
+    {
+      "i": 90,
+      "t": 261.52,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4113,
+      "tool_calls": 43,
+      "call": "c43",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "mdlite/escape.py:1:\"\"\"HTML escaping and URL scheme checks.\nmdlite/escape.py:15:# Browsers ignore ASCII whitespace and control characters inside a url scheme\nmdlite/escape.py:16:# (\"java\\tscript:\"), so U+0000 to U+0020 and U+007F are deleted before the scheme is\nmdlite/escape.py:17:# read. Other characters, such as U+00A0, are kept and end the scheme.\nmdlite/escape.py:34:def url_scheme(url: str) -> str | None:\nmdlite/escape.py:35:    \"\"\"The lowercase scheme of `url`, or None when it has no scheme.\nmdlite/escape.py:38:    `\" JaVa\\\\nScript:x\"` has the scheme `javascript`.\nmdlite/escape.py:45:    \"\"\"True for urls without a scheme and for http, https and mailto urls.\"\"\"\nmdlite/escape.py:46:    scheme = url_scheme(url)\nmdlite/escape.py:47:    return scheme is None or scheme in SAFE_SCHEMES\nmdlite/inline.py:19:from mdlite.escape import url_scheme\nmdlite/inline.py:214:            scheme = url_scheme(candidate)\nmdlite/inline.py:215:            if scheme is not None and _MIN_SCHEME <= len(scheme) <= _MAX_SCHEME:\n"
+      }
+    },
+    {
+      "i": 91,
+      "t": 261.53,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4228,
+      "tool_calls": 43,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 14737,
+      "tokens_out": 131,
+      "text": null,
+      "calls": [
+        {
+          "id": "c44",
+          "tool": "edit_file",
+          "label": "edit_file mdlite/escape.py",
+          "args": {
+            "old_string": "_SCHEME = re.compile(r\"([A-Za-z][A-Za-z0-9]*):\")",
+            "path": "mdlite/escape.py",
+            "new_string": "_SCHEME = re.compile(r\"([A-Za-z][A-Za-z0-9+.-]*):\")"
+          }
+        }
+      ]
+    },
+    {
+      "i": 92,
+      "t": 265.8,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4228,
+      "tool_calls": 44,
+      "call": "c44",
+      "tool": "edit_file",
+      "error": null,
+      "result": {
+        "ok": true,
+        "path": "mdlite/escape.py"
+      }
+    },
+    {
+      "i": 93,
+      "t": 265.81,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4349,
+      "tool_calls": 44,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 14869,
+      "tokens_out": 247,
+      "text": null,
+      "calls": [
+        {
+          "id": "c45",
+          "tool": "bash",
+          "label": "bash python -c ' import mdlite print(repr(mdlite.to_html(\"Or install from source: <gi",
+          "args": {
+            "command": "python -c '\nimport mdlite\nprint(repr(mdlite.to_html(\"Or install from source: <git+https://github.com/acme/tool.git>\")))\nprint(repr(mdlite.to_html(\"<x-man-page://ls>\")))\nprint(repr(mdlite.to_html(\"<com.example.app:settings>\")))\nprint(repr(mdlite.to_html(\"<ftp://files.example.com/a.txt>\")))\n'"
+          }
+        }
+      ]
+    },
+    {
+      "i": 94,
+      "t": 269.07,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4349,
+      "tool_calls": 45,
+      "call": "c45",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "'<p>Or install from source: git+https://github.com/acme/tool.git</p>\\n'\n'<p>x-man-page://ls</p>\\n'\n'<p>com.example.app:settings</p>\\n'\n'<p>ftp://files.example.com/a.txt</p>\\n'\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 95,
+      "t": 269.08,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4464,
+      "tool_calls": 45,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 15204,
+      "tokens_out": 28,
+      "text": null,
+      "calls": [
+        {
+          "id": "c46",
+          "tool": "bash",
+          "label": "bash python -m pytest -q",
+          "args": {
+            "command": "python -m pytest -q"
+          }
+        }
+      ]
+    },
+    {
+      "i": 96,
+      "t": 274.85,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4464,
+      "tool_calls": 46,
+      "call": "c46",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "........................................................................ [ 60%]\n................................................                         [100%]\n120 passed in 0.84s\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 97,
+      "t": 274.86,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4584,
+      "tool_calls": 46,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 15273,
+      "tokens_out": 127,
+      "text": null,
+      "calls": [
+        {
+          "id": "c47",
+          "tool": "list_dir",
+          "label": "list_dir tests",
+          "args": {
+            "path": "tests"
+          }
+        }
+      ]
+    },
+    {
+      "i": 98,
+      "t": 279.86,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4584,
+      "tool_calls": 47,
+      "call": "c47",
+      "tool": "list_dir",
+      "error": null,
+      "result": {
+        "entries": [
+          "tests/test_blocks.py",
+          "tests/test_cli.py",
+          "tests/test_inline.py",
+          "tests/test_slugs_and_toc.py"
+        ]
+      }
+    },
+    {
+      "i": 99,
+      "t": 279.87,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4735,
+      "tool_calls": 47,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 15434,
+      "tokens_out": 948,
+      "text": null,
+      "calls": [
+        {
+          "id": "c48",
+          "tool": "write_file",
+          "label": "write_file tests/test_scheme_autolinks.py",
+          "args": {
+            "content": "\"\"\"Tests for URL schemes containing '+', '-', and '.' in autolinks.\"\"\"\n\nfrom mdlite import to_html\nfrom mdlite.escape import is_safe_url, url_scheme\nfrom mdlite.inline import parse_inline\nfrom mdlite.nodes import Link, Text\n\n\ndef p(body: str) -> str:\n    \"\"\"The HTML of a one-paragraph document, without the paragraph tags.\"\"\"\n    html = to_html(body)\n    assert html.startswith(\"<p>\") and html.endswith(\"</p>\\n\"), html\n    return html[3:-5]\n\n\ndef test_url_scheme_with_plus_dash_dot():\n    \"\"\"R16: schemes may contain letters, digits, '+', '.', and '-' after initial letter.\"\"\"\n    assert url_scheme(\"git+https://github.com/acme/tool.git\") == \"git+https\"\n    assert url_scheme(\"x-man-page://ls\") == \"x-man-page\"\n    assert url_scheme(\"com.example.app:settings\") == \"com.example.app\"\n    assert not is_safe_url(\"git+https://github.com/acme/tool.git\")\n    assert not is_safe_url(\"x-man-page://ls\")\n    assert not is_safe_url(\"com.example.app:settings\")\n\n\ndef test_autolinks_with_complex_schemes():\n    \"\"\"R17: autolinks with schemes containing '+', '-', '.' are parsed and stripped of angle brackets.\"\"\"\n    assert parse_inline(\"<git+https://github.com/acme/tool.git>\") == [\n        Link(\n            [Text(\"git+https://github.com/acme/tool.git\")],\n            \"git+https://github.com/acme/tool.git\",\n        )\n    ]\n    assert p(\"Or install from source: <git+https://github.com/acme/tool.git>\") == (\n        \"Or install from source: git+https://github.com/acme/tool.git\"\n    )\n    assert p(\"<x-man-page://ls>\") == \"x-man-page://ls\"\n    assert p(\"<com.example.app:settings>\") == \"com.example.app:settings\"\n",
+            "path": "tests/test_scheme_autolinks.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 100,
+      "t": 288.34,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4735,
+      "tool_calls": 48,
+      "call": "c48",
+      "tool": "write_file",
+      "error": null,
+      "result": {
+        "ok": true,
+        "path": "tests/test_scheme_autolinks.py"
+      }
+    },
+    {
+      "i": 101,
+      "t": 288.35,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4859,
+      "tool_calls": 48,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 16392,
+      "tokens_out": 35,
+      "text": null,
+      "calls": [
+        {
+          "id": "c49",
+          "tool": "bash",
+          "label": "bash python -m pytest -q",
+          "args": {
+            "command": "python -m pytest -q"
+          }
+        }
+      ]
+    },
+    {
+      "i": 102,
+      "t": 293.15,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4859,
+      "tool_calls": 49,
+      "call": "c49",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "........................................................................ [ 59%]\n..................................................                       [100%]\n122 passed in 0.85s\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 103,
+      "t": 293.16,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4984,
+      "tool_calls": 49,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 16469,
+      "tokens_out": 44,
+      "text": null,
+      "calls": [
+        {
+          "id": "c50",
+          "tool": "bash",
+          "label": "bash git status",
+          "args": {
+            "command": "git status"
+          }
+        }
+      ]
+    },
+    {
+      "i": 104,
+      "t": 296.16,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.4984,
+      "tool_calls": 50,
+      "call": "c50",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "On branch master\nChanges not staged for commit:\n  (use \"git add <file>...\" to update what will be committed)\n  (use \"git restore <file>...\" to discard changes in working directory)\n\tmodified:   mdlite/escape.py\n\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\ttests/test_scheme_autolinks.py\n\nno changes added to commit (use \"git add\" and/or \"git commit -a\")\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 105,
+      "t": 296.17,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.511,
+      "tool_calls": 50,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 16638,
+      "tokens_out": 28,
+      "text": null,
+      "calls": [
+        {
+          "id": "c51",
+          "tool": "bash",
+          "label": "bash git diff",
+          "args": {
+            "command": "git diff"
+          }
+        }
+      ]
+    },
+    {
+      "i": 106,
+      "t": 299.64,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.511,
+      "tool_calls": 51,
+      "call": "c51",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "diff --git a/mdlite/escape.py b/mdlite/escape.py\nindex 81ea946..68e5b97 100644\n--- a/mdlite/escape.py\n+++ b/mdlite/escape.py\n@@ -16,7 +16,7 @@ _ATTR_TABLE = str.maketrans(\n # (\"java\\tscript:\"), so U+0000 to U+0020 and U+007F are deleted before the scheme is\n # read. Other characters, such as U+00A0, are kept and end the scheme.\n _IGNORED_IN_SCHEME = re.compile(r\"[\\x00-\\x20\\x7f]\")\n-_SCHEME = re.compile(r\"([A-Za-z][A-Za-z0-9]*):\")\n+_SCHEME = re.compile(r\"([A-Za-z][A-Za-z0-9+.-]*):\")\n \n SAFE_SCHEMES = frozenset({\"http\", \"https\", \"mailto\"})\n \n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 107,
+      "t": 299.65,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.5246,
+      "tool_calls": 51,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 16932,
+      "tokens_out": 239,
+      "text": null,
+      "calls": [
+        {
+          "id": "c52",
+          "tool": "set_model_response",
+          "label": "answer",
+          "args": {
+            "summary": "Updated `_SCHEME` in `mdlite/escape.py` to match `+`, `.`, and `-` characters after the leading letter, enabling autolinks with schemes like `git+https`, `x-man-page`, and `com.example.app` to be correctly recognized and rendered without angle brackets.",
+            "notes": "Fixed the URL scheme regex to permit '+', '.', and '-' characters after the initial ASCII letter as specified by rule R16. Added unit tests in tests/test_scheme_autolinks.py.",
+            "files_changed": [
+              "mdlite/escape.py"
+            ],
+            "tests_added": [
+              "tests/test_scheme_autolinks.py"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "i": 108,
+      "t": 304.52,
+      "kind": "claim",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.5246,
+      "tool_calls": 52,
+      "agent": "coder",
+      "value": {
+        "summary": "Updated `_SCHEME` in `mdlite/escape.py` to match `+`, `.`, and `-` characters after the leading letter, enabling autolinks with schemes like `git+https`, `x-man-page`, and `com.example.app` to be correctly recognized and rendered without angle brackets.",
+        "files_changed": [
+          "mdlite/escape.py"
+        ],
+        "tests_added": [
+          "tests/test_scheme_autolinks.py"
+        ],
+        "notes": "Fixed the URL scheme regex to permit '+', '.', and '-' characters after the initial ASCII letter as specified by rule R16. Added unit tests in tests/test_scheme_autolinks.py."
+      }
+    },
+    {
+      "i": 109,
+      "t": 304.64,
+      "kind": "node",
+      "node": "collect_diff",
+      "visit": 1,
+      "cost_usd": 0.5246,
+      "tool_calls": 52,
+      "from": "coder",
+      "via": null,
+      "message": "diff: 2 files, +39 -1"
+    },
+    {
+      "i": 110,
+      "t": 304.64,
+      "kind": "diff",
+      "node": "collect_diff",
+      "visit": 1,
+      "cost_usd": 0.5246,
+      "tool_calls": 52,
+      "value": {
+        "files": [
+          "mdlite/escape.py",
+          "tests/test_scheme_autolinks.py"
+        ],
+        "insertions": 39,
+        "deletions": 1,
+        "unified_diff": "diff --git a/mdlite/escape.py b/mdlite/escape.py\nindex 81ea946..68e5b97 100644\n--- a/mdlite/escape.py\n+++ b/mdlite/escape.py\n@@ -16,7 +16,7 @@ _ATTR_TABLE = str.maketrans(\n # (\"java\\tscript:\"), so U+0000 to U+0020 and U+007F are deleted before the scheme is\n # read. Other characters, such as U+00A0, are kept and end the scheme.\n _IGNORED_IN_SCHEME = re.compile(r\"[\\x00-\\x20\\x7f]\")\n-_SCHEME = re.compile(r\"([A-Za-z][A-Za-z0-9]*):\")\n+_SCHEME = re.compile(r\"([A-Za-z][A-Za-z0-9+.-]*):\")\n \n SAFE_SCHEMES = frozenset({\"http\", \"https\", \"mailto\"})\n \ndiff --git a/tests/test_scheme_autolinks.py b/tests/test_scheme_autolinks.py\nnew file mode 100644\nindex 0000000..7449a6f\n--- /dev/null\n+++ b/tests/test_scheme_autolinks.py\n@@ -0,0 +1,38 @@\n+\"\"\"Tests for URL schemes containing '+', '-', and '.' in autolinks.\"\"\"\n+\n+from mdlite import to_html\n+from mdlite.escape import is_safe_url, url_scheme\n+from mdlite.inline import parse_inline\n+from mdlite.nodes import Link, Text\n+\n+\n+def p(body: str) -> str:\n+    \"\"\"The HTML of a one-paragraph document, without the paragraph tags.\"\"\"\n+    html = to_html(body)\n+    assert html.startswith(\"<p>\") and html.endswith(\"</p>\\n\"), html\n+    return html[3:-5]\n+\n+\n+def test_url_scheme_with_plus_dash_dot():\n+    \"\"\"R16: schemes may contain letters, digits, '+', '.', and '-' after initial letter.\"\"\"\n+    assert url_scheme(\"git+https://github.com/acme/tool.git\") == \"git+https\"\n+    assert url_scheme(\"x-man-page://ls\") == \"x-man-page\"\n+    assert url_scheme(\"com.example.app:settings\") == \"com.example.app\"\n+    assert not is_safe_url(\"git+https://github.com/acme/tool.git\")\n+    assert not is_safe_url(\"x-man-page://ls\")\n+    assert not is_safe_url(\"com.example.app:settings\")\n+\n+\n+def test_autolinks_with_complex_schemes():\n+    \"\"\"R17: autolinks with schemes containing '+', '-', '.' are parsed and stripped of angle brackets.\"\"\"\n+    assert parse_inline(\"<git+https://github.com/acme/tool.git>\") == [\n+        Link(\n+            [Text(\"git+https://github.com/acme/tool.git\")],\n+            \"git+https://github.com/acme/tool.git\",\n+        )\n+    ]\n+    assert p(\"Or install from source: <git+https://github.com/acme/tool.git>\") == (\n+        \"Or install from source: git+https://github.com/acme/tool.git\"\n+    )\n+    assert p(\"<x-man-page://ls>\") == \"x-man-page://ls\"\n+    assert p(\"<com.example.app:settings>\") == \"com.example.app:settings\"\n",
+        "cut": false
+      }
+    },
+    {
+      "i": 111,
+      "t": 305.82,
+      "kind": "node",
+      "node": "run_tests",
+      "visit": 1,
+      "cost_usd": 0.5246,
+      "tool_calls": 52,
+      "from": "collect_diff",
+      "via": null,
+      "message": "tests: passed (exit 0)"
+    },
+    {
+      "i": 112,
+      "t": 305.82,
+      "kind": "tests",
+      "node": "run_tests",
+      "visit": 1,
+      "cost_usd": 0.5246,
+      "tool_calls": 52,
+      "value": {
+        "passed": true,
+        "exit_code": 0,
+        "failed_tests": [],
+        "output_tail": "........................................................................ [ 59%]\n..................................................                       [100%]\n122 passed in 0.81s",
+        "duration_s": 1.18
+      }
+    },
+    {
+      "i": 113,
+      "t": 305.84,
+      "kind": "node",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5246,
+      "tool_calls": 52,
+      "from": "run_tests",
+      "via": "pass",
+      "message": null
+    },
+    {
+      "i": 114,
+      "t": 305.84,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5264,
+      "tool_calls": 52,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 2161,
+      "tokens_out": 55,
+      "text": null,
+      "calls": [
+        {
+          "id": "c53",
+          "tool": "grep",
+          "label": "grep '_SCHEME' in mdlite",
+          "args": {
+            "path": "mdlite",
+            "pattern": "_SCHEME"
+          }
+        }
+      ]
+    },
+    {
+      "i": 115,
+      "t": 314.5,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5264,
+      "tool_calls": 53,
+      "call": "c53",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "mdlite/inline.py:38:_MIN_SCHEME = 2\nmdlite/inline.py:39:_MAX_SCHEME = 32\nmdlite/inline.py:215:            if scheme is not None and _MIN_SCHEME <= len(scheme) <= _MAX_SCHEME:\nmdlite/escape.py:18:_IGNORED_IN_SCHEME = re.compile(r\"[\\x00-\\x20\\x7f]\")\nmdlite/escape.py:19:_SCHEME = re.compile(r\"([A-Za-z][A-Za-z0-9+.-]*):\")\nmdlite/escape.py:21:SAFE_SCHEMES = frozenset({\"http\", \"https\", \"mailto\"})\nmdlite/escape.py:40:    match = _SCHEME.match(_IGNORED_IN_SCHEME.sub(\"\", url))\nmdlite/escape.py:47:    return scheme is None or scheme in SAFE_SCHEMES\n"
+      }
+    },
+    {
+      "i": 116,
+      "t": 314.51,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5285,
+      "tool_calls": 53,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 2447,
+      "tokens_out": 57,
+      "text": null,
+      "calls": [
+        {
+          "id": "c54",
+          "tool": "read_file",
+          "label": "read_file mdlite/escape.py",
+          "args": {
+            "path": "mdlite/escape.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 117,
+      "t": 316.27,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5285,
+      "tool_calls": 54,
+      "call": "c54",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "mdlite/escape.py",
+        "content": "\"\"\"HTML escaping and URL scheme checks.\n\nEvery character that reaches the output goes through `escape_text` or `escape_attr`,\nand every url goes through `is_safe_url` before it becomes an `href` or `src`. No\nother module escapes or checks anything, so a rule change is made here once.\n\"\"\"\n\nimport re\n\n_TEXT_TABLE = str.maketrans({\"&\": \"&amp;\", \"<\": \"&lt;\", \">\": \"&gt;\"})\n_ATTR_TABLE = str.maketrans(\n    {\"&\": \"&amp;\", \"<\": \"&lt;\", \">\": \"&gt;\", '\"': \"&quot;\", \"'\": \"&#39;\"}\n)\n\n# Browsers ignore ASCII whitespace and control characters inside a url scheme\n# (\"java\\tscript:\"), so U+0000 to U+0020 and U+007F are deleted before the scheme is\n# read. Other characters, such as U+00A0, are kept and end the scheme.\n_IGNORED_IN_SCHEME = re.compile(r\"[\\x00-\\x20\\x7f]\")\n_SCHEME = re.compile(r\"([A-Za-z][A-Za-z0-9+.-]*):\")\n\nSAFE_SCHEMES = frozenset({\"http\", \"https\", \"mailto\"})\n\n\ndef escape_text(text: str) -> str:\n    \"\"\"Escape `&`, `<` and `>` for use as element content.\"\"\"\n    return text.translate(_TEXT_TABLE)\n\n\ndef escape_attr(text: str) -> str:\n    \"\"\"Escape `&`, `<`, `>`, `\"` and `'` for use inside a quoted attribute value.\"\"\"\n    return text.translate(_ATTR_TABLE)\n\n\ndef url_scheme(url: str) -> str | None:\n    \"\"\"The lowercase scheme of `url`, or None when it has no scheme.\n\n    The characters U+0000 to U+0020 and U+007F are deleted first, so\n    `\" JaVa\\\\nScript:x\"` has the scheme `javascript`.\n    \"\"\"\n    match = _SCHEME.match(_IGNORED_IN_SCHEME.sub(\"\", url))\n    return match.group(1).lower() if match else None\n\n\ndef is_safe_url(url: str) -> bool:\n    \"\"\"True for urls without a scheme and for http, https and mailto urls.\"\"\"\n    scheme = url_scheme(url)\n    return scheme is None or scheme in SAFE_SCHEMES\n"
+      }
+    },
+    {
+      "i": 118,
+      "t": 316.28,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5309,
+      "tool_calls": 54,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 3076,
+      "tokens_out": 33,
+      "text": null,
+      "calls": [
+        {
+          "id": "c55",
+          "tool": "read_file",
+          "label": "read_file mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 119,
+      "t": 317.98,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5309,
+      "tool_calls": 55,
+      "call": "c55",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "mdlite/inline.py",
+        "content": "\"\"\"Inline parser: turns the raw text of one block into inline nodes.\n\n`parse_inline` scans left to right. Code spans, backslash escapes, links, images and\nautolinks are recognised as the scanner meets them; runs of `*` and `_` are kept as\ndelimiter markers and paired afterwards (`_pair_emphasis`). Because the scanner\nconsumes a whole code span at once, delimiters inside a code span can never pair with\ndelimiters outside it.\n\n`plain_text` flattens parsed inlines back to text; the renderer uses it for image alt\ntext and the table of contents and the slug builder use it for headings.\n\nThe rules are numbered R11 to R17 in the README.\n\"\"\"\n\nimport re\nimport string\nfrom dataclasses import dataclass\n\nfrom mdlite.escape import url_scheme\nfrom mdlite.nodes import (\n    Code,\n    Emphasis,\n    Image,\n    Inline,\n    LineBreak,\n    Link,\n    Strong,\n    Text,\n)\n\n_ESCAPABLE = frozenset(string.punctuation)\n_ESCAPE = re.compile(r\"\\\\([!-/:-@\\[-`{-~])\")\n_BACKTICK_RUN = re.compile(r\"`+\")\n_AUTOLINK_FORBIDDEN = re.compile(r\"[\\s<]\")\n_EMAIL = re.compile(r\"^[^\\s<>@]+@[^\\s<>@]+$\")\nMAX_IMAGE_DEPTH = 10\nMAX_EMPHASIS_DEPTH = 20\n_MIN_SCHEME = 2\n_MAX_SCHEME = 32\n\n\n@dataclass\nclass _Delimiter:\n    \"\"\"A run of `*` or `_` waiting to be paired (rule R14).\"\"\"\n\n    char: str\n    count: int\n    can_open: bool\n    can_close: bool\n\n\n_Node = Inline | _Delimiter\n\n\ndef parse_inline(\n    text: str, *, allow_links: bool = True, image_depth: int = 0\n) -> list[Inline]:\n    \"\"\"Parse inline markup in `text`.\n\n    With `allow_links=False` a `[` or `<` never starts a link or autolink; this is\n    how the label of a link is parsed, since links do not nest (rules R15, R17).\n    `image_depth` is how many image labels enclose `text`; at `MAX_IMAGE_DEPTH` a\n    further `![` is literal (rule R22).\n    \"\"\"\n    return _Scanner(text, allow_links, image_depth).scan()\n\n\ndef plain_text(nodes: list[Inline]) -> str:\n    \"\"\"The text of `nodes` without markup: code content, link text, image labels.\"\"\"\n    parts: list[str] = []\n    for node in nodes:\n        match node:\n            case Text(value) | Code(value):\n                parts.append(value)\n            case Emphasis(children) | Strong(children):\n                parts.append(plain_text(children))\n            case Link(children) | Image(children):\n                parts.append(plain_text(children))\n            case LineBreak():\n                parts.append(\"\\n\")\n    return \"\".join(parts)\n\n\ndef unescape(text: str) -> str:\n    \"\"\"Resolve backslash escapes (rule R11).\"\"\"\n    return _ESCAPE.sub(r\"\\1\", text)\n\n\nclass _Scanner:\n    \"\"\"One pass over the text of a block.\"\"\"\n\n    def __init__(self, text: str, allow_links: bool, image_depth: int) -> None:\n        self.text = text\n        self.allow_links = allow_links\n        self.image_depth = image_depth\n        self.pos = 0\n        self.nodes: list[_Node] = []\n        self.buffer: list[str] = []\n\n    def scan(self) -> list[Inline]:\n        while self.pos < len(self.text):\n            char = self.text[self.pos]\n   \n[... 6,232 characters cut ...]\nat]\n    assert isinstance(closer, _Delimiter)\n    for i in range(closer_at - 1, -1, -1):\n        node = nodes[i]\n        if isinstance(node, _Delimiter) and node.char == closer.char and node.can_open:\n            return i\n    return None\n\n\ndef _finish(nodes: list[_Node]) -> list[Inline]:\n    \"\"\"Turn unpaired delimiter runs into text and merge neighbouring text nodes.\"\"\"\n    result: list[Inline] = []\n    for node in nodes:\n        piece = Text(node.char * node.count) if isinstance(node, _Delimiter) else node\n        if isinstance(piece, Text):\n            if not piece.value:\n                continue\n            if result and isinstance(result[-1], Text):\n                result[-1] = Text(result[-1].value + piece.value)\n                continue\n        result.append(piece)\n    return result\n"
+      }
+    },
+    {
+      "i": 120,
+      "t": 317.99,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5356,
+      "tool_calls": 55,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 5991,
+      "tokens_out": 55,
+      "text": null,
+      "calls": [
+        {
+          "id": "c56",
+          "tool": "grep",
+          "label": "grep 'def _angle' in mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py",
+            "pattern": "def _angle"
+          }
+        }
+      ]
+    },
+    {
+      "i": 121,
+      "t": 320.06,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5356,
+      "tool_calls": 56,
+      "call": "c56",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "209:    def _angle(self) -> None:\n"
+      }
+    },
+    {
+      "i": 122,
+      "t": 320.07,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5403,
+      "tool_calls": 56,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 6056,
+      "tokens_out": 40,
+      "text": null,
+      "calls": [
+        {
+          "id": "c57",
+          "tool": "read_file",
+          "label": "read_file mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 123,
+      "t": 322.11,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5403,
+      "tool_calls": 57,
+      "call": "c57",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "mdlite/inline.py",
+        "content": "\"\"\"Inline parser: turns the raw text of one block into inline nodes.\n\n`parse_inline` scans left to right. Code spans, backslash escapes, links, images and\nautolinks are recognised as the scanner meets them; runs of `*` and `_` are kept as\ndelimiter markers and paired afterwards (`_pair_emphasis`). Because the scanner\nconsumes a whole code span at once, delimiters inside a code span can never pair with\ndelimiters outside it.\n\n`plain_text` flattens parsed inlines back to text; the renderer uses it for image alt\ntext and the table of contents and the slug builder use it for headings.\n\nThe rules are numbered R11 to R17 in the README.\n\"\"\"\n\nimport re\nimport string\nfrom dataclasses import dataclass\n\nfrom mdlite.escape import url_scheme\nfrom mdlite.nodes import (\n    Code,\n    Emphasis,\n    Image,\n    Inline,\n    LineBreak,\n    Link,\n    Strong,\n    Text,\n)\n\n_ESCAPABLE = frozenset(string.punctuation)\n_ESCAPE = re.compile(r\"\\\\([!-/:-@\\[-`{-~])\")\n_BACKTICK_RUN = re.compile(r\"`+\")\n_AUTOLINK_FORBIDDEN = re.compile(r\"[\\s<]\")\n_EMAIL = re.compile(r\"^[^\\s<>@]+@[^\\s<>@]+$\")\nMAX_IMAGE_DEPTH = 10\nMAX_EMPHASIS_DEPTH = 20\n_MIN_SCHEME = 2\n_MAX_SCHEME = 32\n\n\n@dataclass\nclass _Delimiter:\n    \"\"\"A run of `*` or `_` waiting to be paired (rule R14).\"\"\"\n\n    char: str\n    count: int\n    can_open: bool\n    can_close: bool\n\n\n_Node = Inline | _Delimiter\n\n\ndef parse_inline(\n    text: str, *, allow_links: bool = True, image_depth: int = 0\n) -> list[Inline]:\n    \"\"\"Parse inline markup in `text`.\n\n    With `allow_links=False` a `[` or `<` never starts a link or autolink; this is\n    how the label of a link is parsed, since links do not nest (rules R15, R17).\n    `image_depth` is how many image labels enclose `text`; at `MAX_IMAGE_DEPTH` a\n    further `![` is literal (rule R22).\n    \"\"\"\n    return _Scanner(text, allow_links, image_depth).scan()\n\n\ndef plain_text(nodes: list[Inline]) -> str:\n    \"\"\"The text of `nodes` without markup: code content, link text, image labels.\"\"\"\n    parts: list[str] = []\n    for node in nodes:\n        match node:\n            case Text(value) | Code(value):\n                parts.append(value)\n            case Emphasis(children) | Strong(children):\n                parts.append(plain_text(children))\n            case Link(children) | Image(children):\n                parts.append(plain_text(children))\n            case LineBreak():\n                parts.append(\"\\n\")\n    return \"\".join(parts)\n\n\ndef unescape(text: str) -> str:\n    \"\"\"Resolve backslash escapes (rule R11).\"\"\"\n    return _ESCAPE.sub(r\"\\1\", text)\n\n\nclass _Scanner:\n    \"\"\"One pass over the text of a block.\"\"\"\n\n    def __init__(self, text: str, allow_links: bool, image_depth: int) -> None:\n        self.text = text\n        self.allow_links = allow_links\n        self.image_depth = image_depth\n        self.pos = 0\n        self.nodes: list[_Node] = []\n        self.buffer: list[str] = []\n\n    def scan(self) -> list[Inline]:\n        while self.pos < len(self.text):\n            char = self.text[self.pos]\n   \n[... 6,232 characters cut ...]\nat]\n    assert isinstance(closer, _Delimiter)\n    for i in range(closer_at - 1, -1, -1):\n        node = nodes[i]\n        if isinstance(node, _Delimiter) and node.char == closer.char and node.can_open:\n            return i\n    return None\n\n\ndef _finish(nodes: list[_Node]) -> list[Inline]:\n    \"\"\"Turn unpaired delimiter runs into text and merge neighbouring text nodes.\"\"\"\n    result: list[Inline] = []\n    for node in nodes:\n        piece = Text(node.char * node.count) if isinstance(node, _Delimiter) else node\n        if isinstance(piece, Text):\n            if not piece.value:\n                continue\n            if result and isinstance(result[-1], Text):\n                result[-1] = Text(result[-1].value + piece.value)\n                continue\n        result.append(piece)\n    return result\n"
+      }
+    },
+    {
+      "i": 124,
+      "t": 322.12,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5473,
+      "tool_calls": 57,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 8978,
+      "tokens_out": 80,
+      "text": null,
+      "calls": [
+        {
+          "id": "c58",
+          "tool": "grep",
+          "label": "grep 'def _angle' in mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py",
+            "pattern": "def _angle"
+          }
+        }
+      ]
+    },
+    {
+      "i": 125,
+      "t": 324.83,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5473,
+      "tool_calls": 58,
+      "call": "c58",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "209:    def _angle(self) -> None:\n"
+      }
+    },
+    {
+      "i": 126,
+      "t": 324.84,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5543,
+      "tool_calls": 58,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 9068,
+      "tokens_out": 51,
+      "text": null,
+      "calls": [
+        {
+          "id": "c59",
+          "tool": "grep",
+          "label": "grep 'def _angle\\(self\\).*' in mdlite/inline.py",
+          "args": {
+            "pattern": "def _angle\\(self\\).*",
+            "path": "mdlite/inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 127,
+      "t": 326.96,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5543,
+      "tool_calls": 59,
+      "call": "c59",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "209:    def _angle(self) -> None:\n"
+      }
+    },
+    {
+      "i": 128,
+      "t": 326.97,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5614,
+      "tool_calls": 59,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 9129,
+      "tokens_out": 52,
+      "text": null,
+      "calls": [
+        {
+          "id": "c60",
+          "tool": "grep",
+          "label": "grep '.*_MIN_SCHEME.*' in mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py",
+            "pattern": ".*_MIN_SCHEME.*"
+          }
+        }
+      ]
+    },
+    {
+      "i": 129,
+      "t": 329.17,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5614,
+      "tool_calls": 60,
+      "call": "c60",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "38:_MIN_SCHEME = 2\n215:            if scheme is not None and _MIN_SCHEME <= len(scheme) <= _MAX_SCHEME:\n"
+      }
+    },
+    {
+      "i": 130,
+      "t": 329.18,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5686,
+      "tool_calls": 60,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 9216,
+      "tokens_out": 89,
+      "text": null,
+      "calls": [
+        {
+          "id": "c61",
+          "tool": "grep",
+          "label": "grep 'def _angle[\\s\\S]{1,500}' in mdlite/inline.py",
+          "args": {
+            "pattern": "def _angle[\\s\\S]{1,500}",
+            "path": "mdlite/inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 131,
+      "t": 331.59,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5686,
+      "tool_calls": 61,
+      "call": "c61",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "209:    def _angle(self) -> None:\n"
+      }
+    },
+    {
+      "i": 132,
+      "t": 331.6,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5758,
+      "tool_calls": 61,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 9315,
+      "tokens_out": 40,
+      "text": null,
+      "calls": [
+        {
+          "id": "c62",
+          "tool": "grep",
+          "label": "grep 'R16|R17' in README.md",
+          "args": {
+            "pattern": "R16|R17",
+            "path": "README.md"
+          }
+        }
+      ]
+    },
+    {
+      "i": 133,
+      "t": 333.68,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5758,
+      "tool_calls": 62,
+      "call": "c62",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "113:are not processed inside code spans, code blocks, info strings or autolinks (R17).\n149:**R16. URL safety.** A url has a scheme when, after deleting the characters U+0000 to\n156:**R17. Autolinks.** `<scheme:rest>`, where the scheme is 2 to 32 characters (R16's\n160:address. R16 applies: an autolink with an unsafe scheme renders as its text.\n"
+      }
+    },
+    {
+      "i": 134,
+      "t": 333.68,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5831,
+      "tool_calls": 62,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 9466,
+      "tokens_out": 59,
+      "text": null,
+      "calls": [
+        {
+          "id": "c63",
+          "tool": "grep",
+          "label": "grep 'R16[\\s\\S]{1,1000}R17' in README.md",
+          "args": {
+            "path": "README.md",
+            "pattern": "R16[\\s\\S]{1,1000}R17"
+          }
+        }
+      ]
+    },
+    {
+      "i": 135,
+      "t": 335.96,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5831,
+      "tool_calls": 63,
+      "call": "c63",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": ""
+      }
+    },
+    {
+      "i": 136,
+      "t": 335.97,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5904,
+      "tool_calls": 63,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 9520,
+      "tokens_out": 52,
+      "text": null,
+      "calls": [
+        {
+          "id": "c64",
+          "tool": "read_file",
+          "label": "read_file README.md",
+          "args": {
+            "path": "README.md"
+          }
+        }
+      ]
+    },
+    {
+      "i": 137,
+      "t": 338.82,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.5904,
+      "tool_calls": 64,
+      "call": "c64",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "README.md",
+        "content": "# mdlite\n\nA small Markdown-to-HTML library with no dependencies. It supports a deliberately\nlimited dialect of Markdown, described by the rules below.\n\n    import mdlite\n\n    mdlite.to_html(\"# Hello *world*\")   # '<h1 id=\"hello-world\">Hello <em>world</em></h1>\\n'\n    mdlite.toc(\"# A\\n## B\")             # [(1, 'A', 'a'), (2, 'B', 'b')]\n\n    python -m mdlite notes.md           # prints the HTML (use `-` to read standard input)\n\n`to_html(text: str) -> str` and `toc(text: str) -> list[tuple[int, str, str]]`\n(level, plain text, slug) are the public API. The converter is a pure function of its\ninput: same text, same output.\n\n## Layout\n\n| Module | Job |\n|---|---|\n| `nodes.py` | AST dataclasses (block and inline nodes) |\n| `blocks.py` | Block parser: text to a `Document` of block nodes |\n| `inline.py` | Inline parser: one block's text to inline nodes; `plain_text` |\n| `render.py` | AST to HTML |\n| `escape.py` | HTML escaping and URL scheme checks (the only place that does either) |\n| `slug.py` | Heading slugs and duplicate handling |\n| `toc.py` | Table of contents |\n| `cli.py`, `__main__.py` | `python -m mdlite <file>` |\n\nThe renderer and the table of contents both call the inline parser for heading text\nand both take their slugs from `slug.Slugger`, so the ids in the HTML always match\nthe table of contents.\n\n## Rules\n\nEverything the library does is specified here. \"Line\" means a line after rule R1. In\nthe block rules (R1 to R9) \"whitespace\" and \"blank\" mean spaces and tabs only; other\ncharacters such as a no-break space are ordinary text there. Elsewhere \"space\" and\n\"whitespace\" mean any Unicode whitespace character (Python's `str.isspace`), unless a\nrule says otherwise (R5, R12, R13 and R15 name the exact characters they mean).\n\n**R1. Input normalisation.** `\\r\\n` and `\\r` become `\\n`. Tabs in the leading\nwhitespace of a line are expanded to 4-column tab stops; tabs elsewhere are left\nalone. A final newline ends the last line; it does not start another one. A blank line\nis one with only spaces and tabs. The empty document renders as the empty string.\n\n**R2. ATX headings.** A line of 1 to 6 `#`, indented by at most 3 spaces and followed\nby a space or a tab (or the end of the line), is a heading of that level. Its text is\nthe rest of the line, trimmed, minus an optional closing run of `#` that is preceded by\na space or tab (or is the whole text). Seven or more `#`, or anything else after them,\nmake a paragraph.\nThere are no setext headings. Output: `<hN id=\"slug\">...</hN>`.\n\n**R3. Paragraphs.** Consecutive non-blank lines form one paragraph, unless a line\nstarts another block (R2, R4, R5, R6, R7; any list marker interrupts a paragraph).\nLeading whitespace of each line and trailing whitespace of the paragraph are removed;\nlines are joined by `\\n`. There are no indented code blocks: a line indented by 4 or\nmore spaces is ordinary paragraph text. Output: `<p>...</p>`.\n\n**R4. Thematic breaks.** A line of three or more `-`, `*` or `_` (one kind only, spaces\na\n[... 6,232 characters cut ...]\nthose slugs.\nThe plain text is the same text R18 starts from.\n\n**R21. Command line.** `python -m mdlite FILE` reads FILE as UTF-8 (`-` is standard\ninput), writes the HTML to standard output as UTF-8 and exits 0. An unreadable or\nundecodable file prints `mdlite: ...` to standard error and exits 1. Wrong arguments\nexit 2.\n\n**R22. Nesting limits.** Every input renders; none raises. Block quotes nest at most 20\nlevels: a `>` line at that depth is ordinary text. It starts no block and interrupts no\nparagraph or list item, so it continues them (and is escaped as `&gt;`). Image labels nest at most 10 levels: a deeper `![` is literal text. Emphasis and\nstrong nest at most 20 levels: a closing run that would pair at a deeper level becomes\nliteral text for good (it cannot open a later pair either).\n"
+      }
+    },
+    {
+      "i": 138,
+      "t": 338.83,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.6016,
+      "tool_calls": 64,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 12344,
+      "tokens_out": 518,
+      "text": null,
+      "calls": [
+        {
+          "id": "c65",
+          "tool": "grep",
+          "label": "grep 'def _angle[\\s\\S]*?def ' in mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py",
+            "pattern": "def _angle[\\s\\S]*?def "
+          }
+        }
+      ]
+    },
+    {
+      "i": 139,
+      "t": 344.02,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.6016,
+      "tool_calls": 65,
+      "call": "c65",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": ""
+      }
+    },
+    {
+      "i": 140,
+      "t": 344.03,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.6115,
+      "tool_calls": 65,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 12857,
+      "tokens_out": 74,
+      "text": null,
+      "calls": [
+        {
+          "id": "c66",
+          "tool": "grep",
+          "label": "grep 'self\\._angle' in mdlite/inline.py",
+          "args": {
+            "pattern": "self\\._angle",
+            "path": "mdlite/inline.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 141,
+      "t": 346.81,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.6115,
+      "tool_calls": 66,
+      "call": "c66",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "120:                self._angle()\n"
+      }
+    },
+    {
+      "i": 142,
+      "t": 346.81,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.6215,
+      "tool_calls": 66,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 12936,
+      "tokens_out": 61,
+      "text": null,
+      "calls": [
+        {
+          "id": "c67",
+          "tool": "grep",
+          "label": "grep 'scheme' in mdlite/inline.py",
+          "args": {
+            "path": "mdlite/inline.py",
+            "pattern": "scheme"
+          }
+        }
+      ]
+    },
+    {
+      "i": 143,
+      "t": 349.37,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.6215,
+      "tool_calls": 67,
+      "call": "c67",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "19:from mdlite.escape import url_scheme\n214:            scheme = url_scheme(candidate)\n215:            if scheme is not None and _MIN_SCHEME <= len(scheme) <= _MAX_SCHEME:\n"
+      }
+    },
+    {
+      "i": 144,
+      "t": 349.38,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.6316,
+      "tool_calls": 67,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 13048,
+      "tokens_out": 82,
+      "text": null,
+      "calls": [
+        {
+          "id": "c68",
+          "tool": "read_file",
+          "label": "read_file mdlite/render.py",
+          "args": {
+            "path": "mdlite/render.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 145,
+      "t": 352.23,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.6316,
+      "tool_calls": 68,
+      "call": "c68",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "mdlite/render.py",
+        "content": "\"\"\"Renderer: turns a parsed `Document` into HTML.\n\nBlock nodes become lines of HTML that each end in a newline. Running text is parsed\nwith `mdlite.inline.parse_inline` here, at render time. All escaping and url checks\nare delegated to `mdlite.escape`; heading ids come from `mdlite.slug.Slugger`.\n\"\"\"\n\nimport re\n\nfrom mdlite.escape import escape_attr, escape_text, is_safe_url\nfrom mdlite.inline import parse_inline, plain_text\nfrom mdlite.nodes import (\n    Block,\n    BlockQuote,\n    Code,\n    CodeBlock,\n    Document,\n    Emphasis,\n    Heading,\n    Image,\n    Inline,\n    LineBreak,\n    Link,\n    ListBlock,\n    ListItem,\n    Paragraph,\n    Strong,\n    Text,\n    ThematicBreak,\n)\nfrom mdlite.slug import Slugger\n\n\ndef render_document(document: Document) -> str:\n    \"\"\"Render a whole document (rules R2 to R10, R20).\"\"\"\n    return _Renderer().blocks(document.children)\n\n\ndef render_inline(nodes: list[Inline]) -> str:\n    \"\"\"Render inline nodes to HTML (rules R10 to R17).\"\"\"\n    return \"\".join(_inline(node) for node in nodes)\n\n\ndef _inline(node: Inline) -> str:\n    match node:\n        case Text(value):\n            return escape_text(value)\n        case Emphasis(children):\n            return f\"<em>{render_inline(children)}</em>\"\n        case Strong(children):\n            return f\"<strong>{render_inline(children)}</strong>\"\n        case Code(value):\n            return f\"<code>{escape_text(value)}</code>\"\n        case LineBreak():\n            return \"<br>\\n\"\n        case Link(children, url, title):\n            return _link(children, url, title)\n        case Image(children, url, title):\n            return _image(children, url, title)\n    raise TypeError(f\"not an inline node: {node!r}\")\n\n\ndef _title_attr(title: str | None) -> str:\n    return \"\" if title is None else f' title=\"{escape_attr(title)}\"'\n\n\ndef _link(children: list[Inline], url: str, title: str | None) -> str:\n    \"\"\"A link; an unsafe url leaves just the text (rule R16).\"\"\"\n    inner = render_inline(children)\n    if not is_safe_url(url):\n        return inner\n    return f'<a href=\"{escape_attr(url)}\"{_title_attr(title)}>{inner}</a>'\n\n\ndef _image(children: list[Inline], url: str, title: str | None) -> str:\n    \"\"\"An image; an unsafe url leaves just the alt text (rule R16).\"\"\"\n    alt = plain_text(children)\n    if not is_safe_url(url):\n        return escape_text(alt)\n    return (\n        f'<img src=\"{escape_attr(url)}\" alt=\"{escape_attr(alt)}\"{_title_attr(title)}>'\n    )\n\n\nclass _Renderer:\n    \"\"\"Renders blocks; owns the slug state, so make one per document.\"\"\"\n\n    def __init__(self) -> None:\n        self.slugger = Slugger()\n\n    def blocks(self, blocks: list[Block]) -> str:\n        return \"\".join(self.block(block) for block in blocks)\n\n    def block(self, block: Block) -> str:\n        match block:\n            case Heading(level, text):\n                return self.heading(level, text)\n            case Paragraph(text):\n                return f\"<p>{render_inline(parse_inline(text))}</p>\\n\"\n            cas\n[... 698 characters cut ...]\ntr) -> str:\n        words = re.split(r\"[ \\t]+\", info) if info else []\n        css_class = f' class=\"language-{escape_attr(words[0])}\"' if words else \"\"\n        body = escape_text(code)\n        return f\"<pre><code{css_class}>{body}</code></pre>\\n\"\n\n    def list_block(self, block: ListBlock) -> str:\n        tag = \"ol\" if block.ordered else \"ul\"\n        start = f' start=\"{block.start}\"' if block.ordered and block.start != 1 else \"\"\n        items = \"\".join(self.list_item(item) for item in block.items)\n        return f\"<{tag}{start}>\\n{items}</{tag}>\\n\"\n\n    def list_item(self, item: ListItem) -> str:\n        text = render_inline(parse_inline(item.text))\n        if item.sublist is None:\n            return f\"<li>{text}</li>\\n\"\n        return f\"<li>{text}\\n{self.list_block(item.sublist)}</li>\\n\"\n"
+      }
+    },
+    {
+      "i": 146,
+      "t": 352.23,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.645,
+      "tool_calls": 68,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 14470,
+      "tokens_out": 690,
+      "text": null,
+      "calls": [
+        {
+          "id": "c69",
+          "tool": "grep",
+          "label": "grep 'url_scheme' in .",
+          "args": {
+            "path": ".",
+            "pattern": "url_scheme"
+          }
+        }
+      ]
+    },
+    {
+      "i": 147,
+      "t": 359.09,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.645,
+      "tool_calls": 69,
+      "call": "c69",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "mdlite/escape.py:34:def url_scheme(url: str) -> str | None:\nmdlite/escape.py:46:    scheme = url_scheme(url)\nmdlite/inline.py:19:from mdlite.escape import url_scheme\nmdlite/inline.py:214:            scheme = url_scheme(candidate)\ntests/test_slugs_and_toc.py:5:from mdlite.escape import escape_attr, escape_text, is_safe_url, url_scheme\ntests/test_slugs_and_toc.py:106:def test_url_scheme_detection():\ntests/test_slugs_and_toc.py:108:    assert url_scheme(\"HTTP://x\") == \"http\"\ntests/test_slugs_and_toc.py:109:    assert url_scheme(\" java\\tscript:x\") == \"javascript\"\ntests/test_slugs_and_toc.py:110:    assert url_scheme(\"/a:b\") is None\ntests/test_slugs_and_toc.py:111:    assert url_scheme(\"a/b:c\") is None\ntests/test_slugs_and_toc.py:112:    assert url_scheme(\"1http://x\") is None\ntests/test_slugs_and_toc.py:113:    assert url_scheme(\"\") is None\ntests/test_slugs_and_toc.py:135:    assert url_scheme(\"java\\u2000script:x\") is None\ntests/test_slugs_and_toc.py:136:    assert url_scheme(\"java\\u00a0script:x\") is None\ntests/test_slugs_and_toc.py:137:    assert url_scheme(\"java\\x00\\x7fscript:x\") == \"javascript\"\ntests/test_scheme_autolinks.py:4:from mdlite.escape import is_safe_url, url_scheme\ntests/test_scheme_autolinks.py:16:def test_url_scheme_with_plus_dash_dot():\ntests/test_scheme_autolinks.py:18:    assert url_scheme(\"git+https://github.com/acme/tool.git\") == \"git+https\"\ntests/test_scheme_autolinks.py:19:    assert url_scheme(\"x-man-page://ls\") == \"x-man-page\"\ntests/test_scheme_autolinks.py:20:    assert url_scheme(\"com.example.app:settings\") == \"com.example.app\"\n"
+      }
+    },
+    {
+      "i": 148,
+      "t": 359.1,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.6595,
+      "tool_calls": 69,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 15788,
+      "tokens_out": 708,
+      "text": null,
+      "calls": [
+        {
+          "id": "c70",
+          "tool": "set_model_response",
+          "label": "answer",
+          "args": {
+            "verdict": "approve",
+            "comments": [],
+            "must_fix": []
+          }
+        }
+      ]
+    },
+    {
+      "i": 149,
+      "t": 365.23,
+      "kind": "review",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.6595,
+      "tool_calls": 70,
+      "value": {
+        "verdict": "approve",
+        "comments": [],
+        "must_fix": []
+      }
+    },
+    {
+      "i": 150,
+      "t": 365.24,
+      "kind": "node",
+      "node": "route_review",
+      "visit": 1,
+      "cost_usd": 0.6595,
+      "tool_calls": 70,
+      "from": "reviewer",
+      "via": null,
+      "message": null
+    },
+    {
+      "i": 151,
+      "t": 365.25,
+      "kind": "node",
+      "node": "deliver_patch",
+      "visit": 1,
+      "cost_usd": 0.6595,
+      "tool_calls": 70,
+      "from": "route_review",
+      "via": "approve",
+      "message": "patch written to patch.diff"
+    },
+    {
+      "i": 152,
+      "t": 365.37,
+      "kind": "outcome",
+      "node": "deliver_patch",
+      "visit": 1,
+      "cost_usd": 0.6595,
+      "tool_calls": 70
+    }
+  ]
+}

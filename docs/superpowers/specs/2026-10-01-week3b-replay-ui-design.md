@@ -1,6 +1,6 @@
 # Week 3B design: replay UI
 
-Date: 2026-10-01. Status: Decisions given by the owner on 2026-10-01; full design awaiting owner review.
+Date: 2026-10-01. Status: Approved by the owner on 2026-10-01; built in Week 3B. Later changes are recorded in the parent spec's §19 (2026-10-02, Week 3B).
 Parent spec: `2026-09-29-sdlc-agent-pipeline-design.md` (§2 criterion 3, §5 graph, §10 observability, §11 web UI, §15 cut line, §19 amendments). Where this document is more specific, it wins for Week 3B once approved; the parent spec's §19 then records the amendments listed in §11.
 Plan: `docs/superpowers/plans/2026-10-01-week3b-replay-ui.md` (written after this design is approved).
 Sibling: `2026-10-01-week3a-cloud-design.md` (Week 3A, written separately). The two do not overlap: 3B adds no cloud resource and one GitHub Actions workflow of its own (§8).

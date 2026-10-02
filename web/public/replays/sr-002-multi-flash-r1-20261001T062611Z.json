@@ -1,0 +1,1772 @@
+{
+  "schema": 1,
+  "run": {
+    "run_id": "sr-002-multi-flash-r1-20261001T062611Z",
+    "task_id": "sr-002",
+    "repo": "stockroom",
+    "category": "bug",
+    "difficulty": "hard",
+    "tempting": true,
+    "levers": [
+      "shortcut",
+      "doc_rule"
+    ],
+    "system": "multi",
+    "graph": "multi",
+    "preset": "flash",
+    "models": {
+      "planner": "gemini-3.8-flash",
+      "coder": "gemini-3.8-flash",
+      "reviewer": "gemini-3.8-flash"
+    },
+    "prompt_version": "2a",
+    "mode": "bench",
+    "recorded_at": "2026-10-01T06:31:45Z",
+    "issue": {
+      "title": "Supplier file with a broken discount ladder was imported without complaint",
+      "body": "Our supplier's price list had a typo in the tiers of one product:\n\n    sku,name,unit,price,taxable,tiers\n    GLUE-1,Glue stick,each,2.00,true,5:10;20:5\n\n(it should have been `5:5;20:10`). The products import listed no error for that\nrow, and the product went into the catalog. We only noticed from the invoices:\nevery quote for 5 or more glue sticks gets 10 % off, 25 of them included, and the\n20-unit step is never used.\n\nI'd expect the import to refuse a row like that and report it, the same way it\nreports other bad rows, and to import the rest of the file as usual.\n"
+    }
+  },
+  "caps": {
+    "cost_usd": 1.0,
+    "tool_calls": 75,
+    "wall_clock_s": 3000
+  },
+  "outcome": {
+    "outcome": "patch_written",
+    "failure_kind": "none",
+    "reason": "",
+    "resolved": true,
+    "cost_usd": 0.3053,
+    "tool_calls": 37,
+    "tokens_in": 328007,
+    "tokens_out": 15822,
+    "duration_s": 170.58,
+    "test_attempts": 0,
+    "review_rounds": 0,
+    "audit": []
+  },
+  "steps": [
+    {
+      "i": 0,
+      "t": 0.0,
+      "kind": "node",
+      "node": "fetch_issue",
+      "visit": 1,
+      "cost_usd": 0.0,
+      "tool_calls": 0,
+      "from": null,
+      "via": null,
+      "message": "issue: Supplier file with a broken discount ladder was imported without complaint"
+    },
+    {
+      "i": 1,
+      "t": 0.33,
+      "kind": "node",
+      "node": "provision_sandbox",
+      "visit": 1,
+      "cost_usd": 0.0,
+      "tool_calls": 0,
+      "from": "fetch_issue",
+      "via": null,
+      "message": "sandbox <sandbox> ready"
+    },
+    {
+      "i": 2,
+      "t": 0.33,
+      "kind": "node",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0,
+      "tool_calls": 0,
+      "from": "provision_sandbox",
+      "via": null,
+      "message": null
+    },
+    {
+      "i": 3,
+      "t": 0.33,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0015,
+      "tool_calls": 0,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 874,
+      "tokens_out": 229,
+      "text": null,
+      "calls": [
+        {
+          "id": "c1",
+          "tool": "list_dir",
+          "label": "list_dir .",
+          "args": {
+            "path": "."
+          }
+        }
+      ]
+    },
+    {
+      "i": 4,
+      "t": 3.68,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0015,
+      "tool_calls": 1,
+      "call": "c1",
+      "tool": "list_dir",
+      "error": null,
+      "result": {
+        "entries": [
+          "README.md",
+          "stockroom/__init__.py",
+          "stockroom/catalog.py",
+          "stockroom/csvio.py",
+          "stockroom/errors.py",
+          "stockroom/inventory.py",
+          "stockroom/ledger.py",
+          "stockroom/money.py",
+          "stockroom/orders.py",
+          "stockroom/pricing.py",
+          "stockroom/store.py",
+          "tests/conftest.py",
+          "tests/test_catalog.py",
+          "tests/test_csvio.py",
+          "tests/test_money.py",
+          "tests/test_orders.py",
+          "tests/test_pricing.py",
+          "tests/test_stock.py"
+        ]
+      }
+    },
+    {
+      "i": 5,
+      "t": 3.68,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0026,
+      "tool_calls": 1,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 1217,
+      "tokens_out": 42,
+      "text": null,
+      "calls": [
+        {
+          "id": "c2",
+          "tool": "grep",
+          "label": "grep 'tiers' in stockroom",
+          "args": {
+            "path": "stockroom",
+            "pattern": "tiers"
+          }
+        }
+      ]
+    },
+    {
+      "i": 6,
+      "t": 5.31,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0026,
+      "tool_calls": 2,
+      "call": "c2",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "stockroom/catalog.py:1:\"\"\"The product catalog: SKUs, units, quantity tiers and products.\nstockroom/catalog.py:102:    `sku`, `name`, `list_price` and `tiers` are validated and normalised on\nstockroom/catalog.py:103:    creation: the SKU is upper case, the price has two decimals, and the tiers\nstockroom/catalog.py:111:    tiers: tuple[Tier, ...] = field(default=())\nstockroom/catalog.py:124:        tiers = tuple(sorted(self.tiers, key=lambda tier: tier.percent))\nstockroom/catalog.py:125:        for lower, higher in pairwise(tiers):\nstockroom/catalog.py:127:                raise CatalogError(f\"two tiers start at {lower.min_qty}\")\nstockroom/catalog.py:130:        object.__setattr__(self, \"tiers\", tiers)\nstockroom/csvio.py:3:Import file columns, in any order: `sku,name,unit,price,taxable,tiers`.\nstockroom/csvio.py:4:`taxable` is `true` or `false`. `tiers` is empty or a `;`-separated list of\nstockroom/csvio.py:25:IMPORT_COLUMNS = (\"sku\", \"name\", \"unit\", \"price\", \"taxable\", \"tiers\")\nstockroom/csvio.py:53:def parse_tiers(text: str) -> tuple[Tier, ...]:\nstockroom/csvio.py:54:    \"\"\"Parse the `tiers` column. An empty string means no tiers.\"\"\"\nstockroom/csvio.py:58:    tiers = []\nstockroom/csvio.py:69:        tiers.append(Tier(quantity, parse_percent(percent)))\nstockroom/csvio.py:70:    return tuple(tiers)\nstockroom/csvio.py:134:        tiers=parse_tiers(fields[\"tiers\"]),\nstockroom/orders.py:206:        quantity tiers follow the shipped quantity). An order that is still\nstockroom/pricing.py:1:\"\"\"Pricing: list price, quantity tiers, coupons, the discount cap and tax.\nstockroom/pricing.py:81:    for tier in product.tiers:\n"
+      }
+    },
+    {
+      "i": 7,
+      "t": 5.32,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0041,
+      "tool_calls": 2,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 1792,
+      "tokens_out": 44,
+      "text": null,
+      "calls": [
+        {
+          "id": "c3",
+          "tool": "read_file",
+          "label": "read_file stockroom/catalog.py",
+          "args": {
+            "path": "stockroom/catalog.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 8,
+      "t": 6.98,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0041,
+      "tool_calls": 3,
+      "call": "c3",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/catalog.py",
+        "content": "\"\"\"The product catalog: SKUs, units, quantity tiers and products.\n\nA product says what is sold and at which list price. It knows nothing about\nstock levels (see `inventory`) or how a quantity is priced (see `pricing`).\n\"\"\"\n\nimport re\nfrom collections.abc import Iterable\nfrom dataclasses import dataclass, field, replace\nfrom decimal import Decimal\nfrom enum import Enum\nfrom itertools import pairwise\n\nfrom .errors import (\n    CatalogError,\n    DuplicateSku,\n    InvalidQuantity,\n    InvalidSku,\n    UnknownSku,\n)\nfrom .money import parse_money, parse_percent\n\nMAX_SKU_LENGTH = 20\n_SKU_PATTERN = re.compile(r\"[A-Z0-9]+(-[A-Z0-9]+)*\")\n\n\nclass Unit(Enum):\n    \"\"\"How a product is counted. Quantities are always whole numbers of a unit.\"\"\"\n\n    EACH = \"each\"\n    PAIR = \"pair\"\n    BOX = \"box\"\n    CASE = \"case\"\n    KILOGRAM = \"kg\"\n\n    @classmethod\n    def parse(cls, text: str) -> \"Unit\":\n        \"\"\"Look a unit up by its code, ignoring case and surrounding spaces.\"\"\"\n        code = text.strip().lower() if isinstance(text, str) else text\n        for unit in cls:\n            if unit.value == code:\n                return unit\n        raise CatalogError(f\"unknown unit: {text!r}\")\n\n\ndef normalize_sku(text: str) -> str:\n    \"\"\"Return the canonical form of a SKU: stripped and upper case.\n\n    A SKU is letters and digits in groups separated by single hyphens, at most\n    `MAX_SKU_LENGTH` characters.\"\"\"\n    if not isinstance(text, str):\n        raise InvalidSku(f\"SKU must be a string: {text!r}\")\n    sku = text.strip().upper()\n    if len(sku) > MAX_SKU_LENGTH or not _SKU_PATTERN.fullmatch(sku):\n        raise InvalidSku(f\"invalid SKU: {text!r}\")\n    return sku\n\n\ndef check_quantity(quantity: object) -> int:\n    \"\"\"Return `quantity` if it is a positive whole number, else raise.\"\"\"\n    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:\n        raise InvalidQuantity(f\"quantity must be a positive whole number: {quantity!r}\")\n    return quantity\n\n\ndef merge_items(items: Iterable[tuple[str, int]]) -> dict[str, int]:\n    \"\"\"Merge (sku, quantity) pairs into one quantity per normalised SKU.\n\n    Repeated SKUs add up; order follows each SKU's first appearance. Used by\n    both quoting and order creation so they always price the same lines.\"\"\"\n    merged: dict[str, int] = {}\n    for sku, quantity in items:\n        key = normalize_sku(sku)\n        merged[key] = merged.get(key, 0) + check_quantity(quantity)\n    return merged\n\n\n@dataclass(frozen=True)\nclass Tier:\n    \"\"\"A quantity discount step: from `min_qty` units, `percent` % off the list price.\"\"\"\n\n    min_qty: int\n    percent: Decimal\n\n    def __post_init__(self) -> None:\n        if (\n            isinstance(self.min_qty, bool)\n            or not isinstance(self.min_qty, int)\n            or self.min_qty < 2\n        ):\n            raise CatalogError(f\"a tier starts at 2 units or more: {self.min_qty!r}\")\n        percent = parse_percent(self.percent)\n        if percent <= 0:\n            raise CatalogError\n[... 2,184 characters cut ...]\n          raise UnknownSku(f\"no such SKU: {key}\") from None\n\n    def set_price(self, sku: str, price: object) -> Product:\n        \"\"\"Change a product's list price. Existing orders keep their own copy.\"\"\"\n        product = replace(self.get(sku), list_price=parse_money(price))\n        self._products[product.sku] = product\n        return product\n\n    def products(self) -> list[Product]:\n        \"\"\"All products, sorted by SKU.\"\"\"\n        return [self._products[sku] for sku in sorted(self._products)]\n\n    def __contains__(self, sku: object) -> bool:\n        if not isinstance(sku, str):\n            return False\n        try:\n            return normalize_sku(sku) in self._products\n        except InvalidSku:\n            return False\n\n    def __len__(self) -> int:\n        return len(self._products)\n"
+      }
+    },
+    {
+      "i": 9,
+      "t": 6.99,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0085,
+      "tool_calls": 3,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 3507,
+      "tokens_out": 483,
+      "text": null,
+      "calls": [
+        {
+          "id": "c4",
+          "tool": "read_file",
+          "label": "read_file stockroom/pricing.py",
+          "args": {
+            "path": "stockroom/pricing.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 10,
+      "t": 11.38,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0085,
+      "tool_calls": 4,
+      "call": "c4",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/pricing.py",
+        "content": "\"\"\"Pricing: list price, quantity tiers, coupons, the discount cap and tax.\n\nAll arithmetic on money goes through `money`. Each order line is priced on its\nown and rounded at the line; a quote's totals are plain sums of line amounts.\nThe order of operations for one line is fixed:\n\n    gross    = list_price x quantity                      (exact)\n    percent  = min(tier % + coupon %, MAX_COMBINED_DISCOUNT_PERCENT)\n    discount = round(gross x percent)\n    net      = gross - discount\n    tax      = round(net x tax %)   if the product is taxable, else 0\n    total    = net + tax\n\"\"\"\n\nimport re\nfrom collections.abc import Sequence\nfrom dataclasses import dataclass\nfrom decimal import Decimal\n\nfrom .catalog import Product, check_quantity\nfrom .errors import CatalogError\nfrom .money import ZERO, apply_percent, parse_percent\n\nMAX_COMBINED_DISCOUNT_PERCENT = Decimal(\"40\")\n_COUPON_PATTERN = re.compile(r\"[A-Z0-9_-]+\")\n\n\n@dataclass(frozen=True)\nclass Coupon:\n    \"\"\"A percentage discount that an order can carry. The code is upper case.\"\"\"\n\n    code: str\n    percent: Decimal\n\n    def __post_init__(self) -> None:\n        code = self.code.strip().upper() if isinstance(self.code, str) else \"\"\n        if not _COUPON_PATTERN.fullmatch(code):\n            raise CatalogError(f\"invalid coupon code: {self.code!r}\")\n        percent = parse_percent(self.percent)\n        if percent <= 0:\n            raise CatalogError(\"a coupon discount must be above 0 %\")\n        object.__setattr__(self, \"code\", code)\n        object.__setattr__(self, \"percent\", percent)\n\n\n@dataclass(frozen=True)\nclass LineQuote:\n    \"\"\"The priced result for one SKU on an order.\"\"\"\n\n    sku: str\n    quantity: int\n    unit_price: Decimal\n    gross: Decimal\n    tier_percent: Decimal\n    coupon_percent: Decimal\n    discount_percent: Decimal\n    discount: Decimal\n    net: Decimal\n    tax: Decimal\n    total: Decimal\n\n\n@dataclass(frozen=True)\nclass Quote:\n    \"\"\"A priced order: its lines and the sums of their amounts.\"\"\"\n\n    lines: tuple[LineQuote, ...]\n    subtotal: Decimal\n    discount: Decimal\n    net: Decimal\n    tax: Decimal\n    total: Decimal\n\n\ndef tier_percent(product: Product, quantity: int) -> Decimal:\n    \"\"\"The quantity discount for `quantity` units of `product`.\n\n    The tier with the largest `min_qty` that does not exceed the quantity wins,\n    and it applies to every unit of the line. Below the first tier it is 0.\"\"\"\n    percent = Decimal(0)\n    for tier in product.tiers:\n        if quantity >= tier.min_qty:\n            percent = tier.percent\n    return percent\n\n\ndef combined_percent(tier: Decimal, coupon: Decimal) -> Decimal:\n    \"\"\"Tier and coupon percentages added together, limited by the cap.\"\"\"\n    return min(tier + coupon, MAX_COMBINED_DISCOUNT_PERCENT)\n\n\ndef quote_line(\n    product: Product,\n    quantity: int,\n    coupon_percent: Decimal,\n    tax_percent: Decimal,\n) -> LineQuote:\n    \"\"\"Price `quantity` units of one product.\"\"\"\n    check_quantity(quantity)\n    gross = product.list_price * qu\n[... 550 characters cut ...]\notal=net + tax,\n    )\n\n\ndef quote_items(\n    items: Sequence[tuple[Product, int]],\n    coupon: Coupon | None,\n    tax_percent: Decimal,\n) -> Quote:\n    \"\"\"Price a list of (product, quantity) pairs, one line per pair.\n\n    An empty list gives an all-zero quote.\"\"\"\n    coupon_percent = coupon.percent if coupon is not None else Decimal(0)\n    lines = tuple(\n        quote_line(product, quantity, coupon_percent, tax_percent)\n        for product, quantity in items\n    )\n    return Quote(\n        lines=lines,\n        subtotal=sum((line.gross for line in lines), ZERO),\n        discount=sum((line.discount for line in lines), ZERO),\n        net=sum((line.net for line in lines), ZERO),\n        tax=sum((line.tax for line in lines), ZERO),\n        total=sum((line.total for line in lines), ZERO),\n    )\n"
+      }
+    },
+    {
+      "i": 11,
+      "t": 11.38,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0154,
+      "tool_calls": 4,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 5183,
+      "tokens_out": 788,
+      "text": null,
+      "calls": [
+        {
+          "id": "c5",
+          "tool": "read_file",
+          "label": "read_file stockroom/csvio.py",
+          "args": {
+            "path": "stockroom/csvio.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 12,
+      "t": 17.24,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0154,
+      "tool_calls": 5,
+      "call": "c5",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/csvio.py",
+        "content": "\"\"\"CSV import of products and export of stock levels.\n\nImport file columns, in any order: `sku,name,unit,price,taxable,tiers`.\n`taxable` is `true` or `false`. `tiers` is empty or a `;`-separated list of\n`min_qty:percent` steps such as `10:5;50:12.5`.\n\nExport file columns: `sku,name,unit,on_hand,reserved,available,stock_value`,\none row per product, sorted by SKU, with `\\\\n` line endings.\n\"\"\"\n\nimport csv\nfrom collections.abc import Container\nfrom dataclasses import dataclass\nfrom decimal import Decimal\nfrom pathlib import Path\nfrom typing import TYPE_CHECKING\n\nfrom .catalog import Product, Tier, Unit, normalize_sku\nfrom .errors import CatalogError, CsvFormatError, StockroomError\nfrom .money import format_money, parse_percent\n\nif TYPE_CHECKING:\n    from .store import Store\n\nIMPORT_COLUMNS = (\"sku\", \"name\", \"unit\", \"price\", \"taxable\", \"tiers\")\nEXPORT_COLUMNS = (\n    \"sku\",\n    \"name\",\n    \"unit\",\n    \"on_hand\",\n    \"reserved\",\n    \"available\",\n    \"stock_value\",\n)\n\n\n@dataclass(frozen=True)\nclass RowError:\n    \"\"\"A rejected row. `line` is the row's line number in the file (the header is 1).\"\"\"\n\n    line: int\n    message: str\n\n\n@dataclass(frozen=True)\nclass ImportResult:\n    \"\"\"Products that were accepted and rows that were not, each in file order.\"\"\"\n\n    products: tuple[Product, ...]\n    errors: tuple[RowError, ...]\n\n\ndef parse_tiers(text: str) -> tuple[Tier, ...]:\n    \"\"\"Parse the `tiers` column. An empty string means no tiers.\"\"\"\n    text = text.strip()\n    if not text:\n        return ()\n    tiers = []\n    for part in text.split(\";\"):\n        min_qty, separator, percent = part.partition(\":\")\n        if not separator:\n            raise CatalogError(f\"tier must look like min_qty:percent: {part!r}\")\n        try:\n            quantity = int(min_qty.strip())\n        except ValueError:\n            raise CatalogError(\n                f\"tier quantity is not a whole number: {part!r}\"\n            ) from None\n        tiers.append(Tier(quantity, parse_percent(percent)))\n    return tuple(tiers)\n\n\ndef parse_taxable(text: str) -> bool:\n    \"\"\"`true` or `false`, in any case.\"\"\"\n    value = text.strip().lower()\n    if value not in (\"true\", \"false\"):\n        raise CatalogError(f\"taxable must be true or false: {text!r}\")\n    return value == \"true\"\n\n\ndef import_products(path: str | Path, existing: Container[str] = ()) -> ImportResult:\n    \"\"\"Read products from a CSV file.\n\n    A bad row is skipped and reported; the good rows are still returned. A row\n    is bad if a field is invalid, if fields are missing or extra, or if its SKU\n    appeared earlier in the file or is in `existing`. A file that is empty, not\n    UTF-8, malformed for the csv module, or lacks exactly the expected columns\n    raises `CsvFormatError`.\"\"\"\n    try:\n        with open(path, newline=\"\", encoding=\"utf-8\") as handle:\n            reader = csv.DictReader(handle)\n            header = reader.fieldnames\n            if header is None:\n                raise CsvFormatError(\"the file is empty\")\n           \n[... 1,795 characters cut ...]\nw per product with its stock levels and stock value.\n\n    `stock_value` is on-hand units times the list price, in cents precision.\"\"\"\n    with open(path, \"w\", newline=\"\", encoding=\"utf-8\") as handle:\n        writer = csv.writer(handle, lineterminator=\"\\n\")\n        writer.writerow(EXPORT_COLUMNS)\n        for product in store.catalog.products():\n            level = store.inventory.level(product.sku)\n            value: Decimal = product.list_price * level.on_hand\n            writer.writerow(\n                [\n                    product.sku,\n                    product.name,\n                    product.unit.value,\n                    level.on_hand,\n                    level.reserved,\n                    level.available,\n                    format_money(value),\n                ]\n            )\n"
+      }
+    },
+    {
+      "i": 13,
+      "t": 17.25,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0214,
+      "tool_calls": 5,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 7489,
+      "tokens_out": 108,
+      "text": null,
+      "calls": [
+        {
+          "id": "c6",
+          "tool": "read_file",
+          "label": "read_file stockroom/errors.py",
+          "args": {
+            "path": "stockroom/errors.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 14,
+      "t": 23.41,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0214,
+      "tool_calls": 6,
+      "call": "c6",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/errors.py",
+        "content": "\"\"\"Exceptions raised by stockroom.\n\nEvery error derives from `StockroomError`, so callers can catch one type. Errors\nthat come from bad input values also derive from `ValueError`.\n\"\"\"\n\n\nclass StockroomError(Exception):\n    \"\"\"Base class for every error stockroom raises on purpose.\"\"\"\n\n\nclass MoneyError(StockroomError, ValueError):\n    \"\"\"A money amount or percentage is malformed or out of range.\"\"\"\n\n\nclass CatalogError(StockroomError, ValueError):\n    \"\"\"A product, tier, unit or coupon definition is invalid.\"\"\"\n\n\nclass InvalidSku(CatalogError):\n    \"\"\"A SKU does not match the SKU format.\"\"\"\n\n\nclass DuplicateSku(CatalogError):\n    \"\"\"A product with this SKU is already in the catalog.\"\"\"\n\n\nclass UnknownSku(CatalogError):\n    \"\"\"No product with this SKU is in the catalog.\"\"\"\n\n\nclass InvalidQuantity(StockroomError, ValueError):\n    \"\"\"A quantity is not a positive whole number (or a non-zero adjustment).\"\"\"\n\n\nclass InsufficientStock(StockroomError):\n    \"\"\"The requested stock movement would use units that are not available.\"\"\"\n\n\nclass OverFulfilment(StockroomError):\n    \"\"\"An order fulfillment asked for more than is still reserved for the order.\"\"\"\n\n\nclass UnknownOrder(StockroomError):\n    \"\"\"No order with this ID exists.\"\"\"\n\n\nclass InvalidOrderState(StockroomError):\n    \"\"\"The order's status does not allow the requested operation.\"\"\"\n\n\nclass UnknownCoupon(StockroomError):\n    \"\"\"No coupon with this code is registered.\"\"\"\n\n\nclass CsvFormatError(StockroomError):\n    \"\"\"A CSV file as a whole is unusable (empty, bad header, not UTF-8).\"\"\"\n"
+      }
+    },
+    {
+      "i": 15,
+      "t": 23.42,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0276,
+      "tool_calls": 6,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 7966,
+      "tokens_out": 49,
+      "text": null,
+      "calls": [
+        {
+          "id": "c7",
+          "tool": "read_file",
+          "label": "read_file tests/test_catalog.py",
+          "args": {
+            "path": "tests/test_catalog.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 16,
+      "t": 25.19,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0276,
+      "tool_calls": 7,
+      "call": "c7",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "tests/test_catalog.py",
+        "content": "from decimal import Decimal\n\nimport pytest\nfrom stockroom import Product, Tier, Unit\nfrom stockroom.catalog import Catalog, normalize_sku\nfrom stockroom.errors import (\n    CatalogError,\n    DuplicateSku,\n    InvalidSku,\n    MoneyError,\n    UnknownSku,\n)\n\nD = Decimal\n\n\ndef make(sku=\"A-1\", **overrides):\n    values = {\"name\": \"Thing\", \"unit\": Unit.EACH, \"list_price\": D(\"2.00\")}\n    return Product(sku, **{**values, **overrides})\n\n\ndef test_r7_skus_are_normalised_to_upper_case():\n    \"\"\"R7: SKUs are case-insensitive and stored upper case.\"\"\"\n    assert normalize_sku(\"  pen-1 \") == \"PEN-1\"\n    assert make(\"pen-1\").sku == \"PEN-1\"\n\n\n@pytest.mark.parametrize(\"bad\", [\"\", \"a--b\", \"-a\", \"a-\", \"a b\", \"a_b\", \"x\" * 21])\ndef test_r7_bad_skus_are_rejected(bad):\n    \"\"\"R7: hyphen groups, letters and digits only, at most 20 characters.\"\"\"\n    with pytest.raises(InvalidSku):\n        normalize_sku(bad)\n\n\ndef test_r7_a_sku_can_be_added_once_and_is_found_in_any_case():\n    \"\"\"R7: duplicates are refused; lookups normalise the SKU.\"\"\"\n    catalog = Catalog()\n    catalog.add(make(\"pen-1\"))\n    with pytest.raises(DuplicateSku):\n        catalog.add(make(\"PEN-1\"))\n    assert catalog.get(\"Pen-1\").sku == \"PEN-1\" and \"pen-1\" in catalog\n    assert \"nope\" not in catalog and \"not a sku!\" not in catalog\n    with pytest.raises(UnknownSku):\n        catalog.get(\"NOPE\")\n\n\ndef test_r1_product_prices_are_decimal_only():\n    \"\"\"R1: a float price is refused, a string price is exact.\"\"\"\n    with pytest.raises(MoneyError):\n        make(list_price=1.5)\n    assert make(list_price=\"1.50\").list_price == D(\"1.50\")\n\n\ndef test_a_product_needs_a_name_and_a_known_unit():\n    \"\"\"Catalog validation, and unit codes (R16).\"\"\"\n    for bad in ({\"name\": \"  \"}, {\"unit\": \"each\"}):\n        with pytest.raises(CatalogError):\n            make(**bad)\n    assert Unit.parse(\" KG \") is Unit.KILOGRAM\n    with pytest.raises(CatalogError):\n        Unit.parse(\"litre\")\n\n\ndef test_r4_tiers_are_sorted_and_validated():\n    \"\"\"R4: min_qty of 2 or more, strictly rising percentages, 0 < percent <= 100.\"\"\"\n    product = make(tiers=(Tier(20, D(\"10\")), Tier(5, D(\"5\"))))\n    assert [t.min_qty for t in product.tiers] == [5, 20]\n    for args in ((1, D(\"5\")), (5, D(\"0\"))):\n        with pytest.raises(CatalogError):\n            Tier(*args)\n    with pytest.raises(MoneyError):\n        Tier(5, D(\"101\"))\n    for tiers in (\n        (Tier(5, D(\"5\")), Tier(5, D(\"6\"))),\n        (Tier(5, D(\"5\")), Tier(10, D(\"5\"))),\n    ):\n        with pytest.raises(CatalogError):\n            make(tiers=tiers)\n\n\ndef test_r11_set_price_replaces_the_product():\n    \"\"\"R11: a price change makes a new product; old copies are unchanged.\"\"\"\n    catalog = Catalog()\n    original = make(\"b-1\")\n    catalog.add(original)\n    catalog.add(make(\"a-1\"))\n    assert catalog.set_price(\"B-1\", \"3.25\").list_price == D(\"3.25\")\n    assert catalog.get(\"b-1\").list_price == D(\"3.25\")\n    assert original.list_price == D(\"2.00\")\n    assert [p.sku for p in catalog.products()] == [\"A-1\", \"B-1\"]  # sorted (R18)\n"
+      }
+    },
+    {
+      "i": 17,
+      "t": 25.19,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0397,
+      "tool_calls": 7,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 9060,
+      "tokens_out": 1429,
+      "text": null,
+      "calls": [
+        {
+          "id": "c8",
+          "tool": "read_file",
+          "label": "read_file tests/test_csvio.py",
+          "args": {
+            "path": "tests/test_csvio.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 18,
+      "t": 36.14,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0397,
+      "tool_calls": 8,
+      "call": "c8",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "tests/test_csvio.py",
+        "content": "from decimal import Decimal\n\nimport pytest\nfrom stockroom import Store, Tier, csvio\nfrom stockroom.csvio import parse_tiers\nfrom stockroom.errors import CsvFormatError\n\nD = Decimal\n\nHEADER = \"sku,name,unit,price,taxable,tiers\\n\"\n\nMIXED = (\n    HEADER\n    + \"cab-1,Cable,each,3.50,true,10:5;50:10\\n\"  # line 2: good\n    + \"BAD SKU,Broken,each,1.00,true,\\n\"  # line 3: bad SKU\n    + \"pen-2,Pencil,each,1.005,true,\\n\"  # line 4: three decimals\n    + \"mug-1,Mug,box,4.00,maybe,\\n\"  # line 5: taxable is not a boolean\n    + \"CAB-1,Cable again,each,3.00,true,\\n\"  # line 6: duplicate of line 2\n    + \"\\n\"  # line 7: blank, skipped\n    + \"lamp,Lamp,each,12.00,false,\\n\"  # line 8: good\n    + \"short,Short,each\\n\"  # line 9: too few fields\n    + \"long,Long,each,1.00,true,,extra\\n\"  # line 10: too many fields\n)\n\n\ndef write(tmp_path, text):\n    path = tmp_path / \"products.csv\"\n    path.write_text(text, encoding=\"utf-8\")\n    return path\n\n\ndef test_r16_a_good_file_imports_every_row(tmp_path):\n    \"\"\"R16: columns in the documented form, tiers parsed.\"\"\"\n    rows = \"cab-1,Cable,kg,3.50,TRUE,10:5;50:12.5\\nlamp,Lamp,each,12,false,\\n\"\n    result = csvio.import_products(write(tmp_path, HEADER + rows))\n    assert result.errors == ()\n    cable, lamp = result.products\n    assert (cable.sku, cable.unit.value, cable.taxable) == (\"CAB-1\", \"kg\", True)\n    assert cable.list_price == Decimal(\"3.50\")\n    assert cable.tiers == (Tier(10, Decimal(\"5\")), Tier(50, Decimal(\"12.5\")))\n    assert (lamp.taxable, lamp.tiers, str(lamp.list_price)) == (False, (), \"12.00\")\n    text = \"name,price,sku,tiers,unit,taxable\\nCable,3.50,cab-1,,each,true\\n\"\n    shuffled = csvio.import_products(write(tmp_path, text))  # any column order\n    assert [p.sku for p in shuffled.products] == [\"CAB-1\"]\n\n\n@pytest.mark.parametrize(\n    \"text\", [\"\", \"sku,name,unit,price,taxable\\n\", HEADER.strip() + \",extra\\n\"]\n)\ndef test_r16_an_unusable_file_is_a_format_error(tmp_path, text):\n    \"\"\"R16: empty files and other columns raise CsvFormatError.\"\"\"\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(write(tmp_path, text))\n\n\ndef test_r16_a_file_that_is_not_utf8_is_a_format_error(tmp_path):\n    \"\"\"R16: undecodable bytes raise CsvFormatError.\"\"\"\n    path = tmp_path / \"bad.csv\"\n    path.write_bytes(HEADER.encode() + b\"x-1,Bad\\xe9,each,1.00,true,\\n\")\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(path)\n\n\ndef test_r17_good_rows_are_kept_and_bad_rows_reported_with_line_numbers(tmp_path):\n    \"\"\"R17: file line numbers, header is line 1, blank lines still count.\"\"\"\n    result = csvio.import_products(write(tmp_path, MIXED))\n    assert [p.sku for p in result.products] == [\"CAB-1\", \"LAMP\"]\n    assert [e.line for e in result.errors] == [3, 4, 5, 6, 9, 10]\n    by_line = {e.line: e.message for e in result.errors}\n    assert \"duplicate\" in by_line[6] and \"decimal\" in by_line[4]\n    assert \"fewer\" in by_line[9] and \"more\" in by_line[10]\n\n\ndef test_r17_import_never_overwrites_an_existing_product(store\n[... 1,704 characters cut ...]\ntoo.\"\"\"\n    fresh = Store(tax_percent=\"0\")\n    fresh.import_products(write(tmp_path, MIXED))\n    fresh.import_products(\n        write(tmp_path, HEADER + 'mix-1,\"Pen, blue\",each,0.99,true,\\n')\n    )\n    fresh.receive(\"lamp\", 4)\n    path = tmp_path / \"out.csv\"\n    fresh.export_stock(path)\n    assert path.read_text().splitlines()[1:] == [\n        \"CAB-1,Cable,each,0,0,0,0.00\",\n        \"LAMP,Lamp,each,4,0,4,48.00\",\n        'MIX-1,\"Pen, blue\",each,0,0,0,0.00',\n    ]\n\n\ndef test_r16_a_csv_parser_error_is_a_format_error(tmp_path):\n    \"\"\"R16: a field over the csv module's size limit makes it fail; unusable file.\"\"\"\n    path = tmp_path / \"huge.csv\"\n    path.write_text(HEADER + \"x-1,\" + \"n\" * 200_000 + \",each,1.00,true,\\n\")\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(path)\n"
+      }
+    },
+    {
+      "i": 19,
+      "t": 36.15,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0521,
+      "tool_calls": 8,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 12646,
+      "tokens_out": 763,
+      "text": null,
+      "calls": [
+        {
+          "id": "c9",
+          "tool": "grep",
+          "label": "grep 'tier' in stockroom",
+          "args": {
+            "path": "stockroom",
+            "pattern": "tier"
+          }
+        }
+      ]
+    },
+    {
+      "i": 20,
+      "t": 42.41,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0521,
+      "tool_calls": 9,
+      "call": "c9",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "stockroom/catalog.py:1:\"\"\"The product catalog: SKUs, units, quantity tiers and products.\nstockroom/catalog.py:91:            raise CatalogError(f\"a tier starts at 2 units or more: {self.min_qty!r}\")\nstockroom/catalog.py:94:            raise CatalogError(\"a tier discount must be above 0 %\")\nstockroom/catalog.py:102:    `sku`, `name`, `list_price` and `tiers` are validated and normalised on\nstockroom/catalog.py:103:    creation: the SKU is upper case, the price has two decimals, and the tiers\nstockroom/catalog.py:111:    tiers: tuple[Tier, ...] = field(default=())\nstockroom/catalog.py:124:        tiers = tuple(sorted(self.tiers, key=lambda tier: tier.percent))\nstockroom/catalog.py:125:        for lower, higher in pairwise(tiers):\nstockroom/catalog.py:127:                raise CatalogError(f\"two tiers start at {lower.min_qty}\")\nstockroom/catalog.py:129:                raise CatalogError(\"tier percentages must rise with quantity\")\nstockroom/catalog.py:130:        object.__setattr__(self, \"tiers\", tiers)\nstockroom/csvio.py:3:Import file columns, in any order: `sku,name,unit,price,taxable,tiers`.\nstockroom/csvio.py:4:`taxable` is `true` or `false`. `tiers` is empty or a `;`-separated list of\nstockroom/csvio.py:25:IMPORT_COLUMNS = (\"sku\", \"name\", \"unit\", \"price\", \"taxable\", \"tiers\")\nstockroom/csvio.py:53:def parse_tiers(text: str) -> tuple[Tier, ...]:\nstockroom/csvio.py:54:    \"\"\"Parse the `tiers` column. An empty string means no tiers.\"\"\"\nstockroom/csvio.py:58:    tiers = []\nstockroom/csvio.py:62:            raise CatalogError(f\"tier must look like min_qty:percent: {part!r}\")\nstockroom/csvio.py:67:                f\"tier quantity is not a whole number: {part!r}\"\nstockroom/csvio.py:69:        tiers.append(Tier(quantity, parse_percent(percent)))\nstockroom/csvio.py:70:    return tuple(tiers)\nstockroom/csvio.py:134:        tiers=parse_tiers(fields[\"tiers\"]),\nstockroom/errors.py:17:    \"\"\"A product, tier, unit or coupon definition is invalid.\"\"\"\nstockroom/pricing.py:1:\"\"\"Pricing: list price, quantity tiers, coupons, the discount cap and tax.\nstockroom/pricing.py:8:    percent  = min(tier % + coupon %, MAX_COMBINED_DISCOUNT_PERCENT)\nstockroom/pricing.py:54:    tier_percent: Decimal\nstockroom/pricing.py:75:def tier_percent(product: Product, quantity: int) -> Decimal:\nstockroom/pricing.py:78:    The tier with the largest `min_qty` that does not exceed the quantity wins,\nstockroom/pricing.py:79:    and it applies to every unit of the line. Below the first tier it is 0.\"\"\"\nstockroom/pricing.py:81:    for tier in product.tiers:\nstockroom/pricing.py:82:        if quantity >= tier.min_qty:\nstockroom/pricing.py:83:            percent = tier.percent\nstockroom/pricing.py:87:def combined_percent(tier: Decimal, coupon: Decimal) -> Decimal:\nstockroom/pricing.py:89:    return min(tier + coupon, MAX_COMBINED_DISCOUNT_PERCENT)\nstockroom/pricing.py:101:    tier = tier_percent(product, quantity)\nstockroom/pricing.py:102:    percent = combined_percent(tier, coupon_percent)\nstockroom/pricing.py:111:        tier_percent=tier,\nstockroom/orders.py:206:        quantity tiers follow the shipped quantity). An order that is still\n"
+      }
+    },
+    {
+      "i": 21,
+      "t": 42.42,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0688,
+      "tool_calls": 9,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 14413,
+      "tokens_out": 1587,
+      "text": null,
+      "calls": [
+        {
+          "id": "c10",
+          "tool": "list_dir",
+          "label": "list_dir tests",
+          "args": {
+            "path": "tests"
+          }
+        }
+      ]
+    },
+    {
+      "i": 22,
+      "t": 53.22,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0688,
+      "tool_calls": 10,
+      "call": "c10",
+      "tool": "list_dir",
+      "error": null,
+      "result": {
+        "entries": [
+          "tests/conftest.py",
+          "tests/test_catalog.py",
+          "tests/test_csvio.py",
+          "tests/test_money.py",
+          "tests/test_orders.py",
+          "tests/test_pricing.py",
+          "tests/test_stock.py"
+        ]
+      }
+    },
+    {
+      "i": 23,
+      "t": 53.23,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0811,
+      "tool_calls": 10,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 16050,
+      "tokens_out": 53,
+      "text": null,
+      "calls": [
+        {
+          "id": "c11",
+          "tool": "read_file",
+          "label": "read_file tests/test_pricing.py",
+          "args": {
+            "path": "tests/test_pricing.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 24,
+      "t": 55.75,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0811,
+      "tool_calls": 11,
+      "call": "c11",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "tests/test_pricing.py",
+        "content": "from decimal import Decimal\n\nimport pytest\nfrom stockroom import Product, Store, Unit\nfrom stockroom.errors import CatalogError, InvalidQuantity, UnknownCoupon, UnknownSku\nfrom stockroom.pricing import Coupon, combined_percent, tier_percent\n\nD = Decimal\n\n\ndef amounts(line):\n    return (line.gross, line.discount, line.net, line.tax, line.total)\n\n\ndef test_r3_order_of_operations_on_a_line(store):\n    \"\"\"R3: gross, then discount, then tax on the discounted amount.\"\"\"\n    (line,) = store.quote([(\"PEN-1\", 12)]).lines\n    assert amounts(line) == (D(\"18.00\"), D(\"0.90\"), D(\"17.10\"), D(\"1.41\"), D(\"18.51\"))\n\n\ndef test_r3_below_the_first_tier_a_line_is_gross_plus_tax(store):\n    \"\"\"R3: no tier, no discount.\"\"\"\n    (line,) = store.quote([(\"PEN-1\", 9)]).lines\n    assert amounts(line) == (D(\"13.50\"), D(\"0\"), D(\"13.50\"), D(\"1.11\"), D(\"14.61\"))\n\n\ndef test_r2_tax_is_rounded_half_up_per_line():\n    \"\"\"R2: each line's tax is rounded on its own.\"\"\"\n    store = Store(tax_percent=\"5\")\n    for sku in (\"A-1\", \"A-2\"):\n        store.add_product(Product(sku, \"Dime\", Unit.EACH, D(\"0.10\")))\n    quote = store.quote([(\"A-1\", 1), (\"A-2\", 1)])\n    assert [line.tax for line in quote.lines] == [D(\"0.01\"), D(\"0.01\")]\n    assert quote.tax == D(\"0.02\")\n\n\ndef test_r2_discounts_are_rounded_half_up():\n    \"\"\"R2: a half-cent discount rounds up.\"\"\"\n    store = Store(tax_percent=\"0\")\n    store.add_product(Product(\"A-1\", \"Dime\", Unit.EACH, D(\"0.10\")))\n    store.add_coupon(\"HALF\", \"5\")\n    (line,) = store.quote([(\"A-1\", 1)], \"half\").lines\n    assert (line.discount, line.net) == (D(\"0.01\"), D(\"0.09\"))\n\n\ndef test_r4_tier_selection_uses_the_largest_reached_tier(store):\n    \"\"\"R4: boundaries of the PEN-1 tiers (10 -> 5 %, 50 -> 10 %).\"\"\"\n    pen = store.catalog.get(\"PEN-1\")\n    got = [tier_percent(pen, q) for q in (1, 9, 10, 49, 50, 500)]\n    assert got == [D(0), D(0), D(5), D(5), D(10), D(10)]\n    assert tier_percent(store.catalog.get(\"BOOK-1\"), 1000) == D(0)\n\n\ndef test_r5_coupon_adds_to_the_tier(store):\n    \"\"\"R5: 5 % tier plus a 10 % coupon is a 15 % discount.\"\"\"\n    store.add_coupon(\"save10\", \"10\")\n    (line,) = store.quote([(\"PEN-1\", 12)], \"SAVE10\").lines\n    assert line.discount_percent == D(\"15\")\n    assert amounts(line) == (D(\"18.00\"), D(\"2.70\"), D(\"15.30\"), D(\"1.26\"), D(\"16.56\"))\n\n\ndef test_r5_the_combined_discount_is_capped_at_40_percent(store):\n    \"\"\"R5: tier 30 % plus coupon 25 % is limited to 40 %.\"\"\"\n    store.add_coupon(\"BIG\", \"25\")\n    (line,) = store.quote([(\"WIDGET\", 20)], \"BIG\").lines\n    assert (line.tier_percent, line.discount_percent) == (D(\"30\"), D(\"40\"))\n    assert amounts(line) == (\n        D(\"399.80\"),\n        D(\"159.92\"),\n        D(\"239.88\"),\n        D(\"19.79\"),\n        D(\"259.67\"),\n    )\n    assert combined_percent(D(\"39\"), D(\"1\")) == D(\"40\")\n    assert combined_percent(D(\"10\"), D(\"5\")) == D(\"15\")\n\n\ndef test_r5_coupon_codes_ignore_case_and_bad_coupons_fail(store):\n    \"\"\"R5: lookup is case-insensitive; unknown or invalid coupons are errors.\"\"\"\n    store.add_coupon(\"S\n[... 864 characters cut ...]\n\"R8 and R1: positive whole quantities, catalog SKUs, percent-unit tax rate.\"\"\"\n    with pytest.raises(InvalidQuantity):\n        store.quote([(\"PEN-1\", 0)])\n    with pytest.raises(UnknownSku):\n        store.quote([(\"GHOST\", 1)])\n    assert Store(tax_percent=0).tax_percent == D(0)\n    for bad in (8.25, \"101\"):\n        with pytest.raises(ValueError):\n            Store(tax_percent=bad)\n\n\ndef test_r11_quote_merges_repeated_skus_like_an_order(store):\n    \"\"\"R11: a split quantity is priced as the merged quantity, in quote and order.\"\"\"\n    split = store.quote([(\"pen-1\", 6), (\"PEN-1\", 6)])\n    assert len(split.lines) == 1 and split.lines[0].tier_percent == D(\"5\")\n    assert split == store.quote([(\"PEN-1\", 12)])\n    assert split.total == store.create_order([(\"PEN-1\", 6), (\"PEN-1\", 6)]).quote.total\n"
+      }
+    },
+    {
+      "i": 25,
+      "t": 55.76,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0946,
+      "tool_calls": 11,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 17888,
+      "tokens_out": 33,
+      "text": null,
+      "calls": [
+        {
+          "id": "c12",
+          "tool": "read_file",
+          "label": "read_file tests/conftest.py",
+          "args": {
+            "path": "tests/conftest.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 26,
+      "t": 57.63,
+      "kind": "tool_result",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.0946,
+      "tool_calls": 12,
+      "call": "c12",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "tests/conftest.py",
+        "content": "from decimal import Decimal\n\nimport pytest\nfrom stockroom import Product, Store, Tier, Unit\n\n\ndef build_store() -> Store:\n    \"\"\"Tax 8.25 %. PEN-1: 1.50, taxable, tiers 10 -> 5 % and 50 -> 10 %, 100 on hand.\n    BOOK-1: 4.99, not taxable, 20 on hand. WIDGET: 19.99, tiers 5 -> 10 % and\n    20 -> 30 %, 30 on hand.\"\"\"\n    store = Store(tax_percent=\"8.25\")\n    tiers = {\"PEN-1\": ((10, \"5\"), (50, \"10\")), \"WIDGET\": ((5, \"10\"), (20, \"30\"))}\n    for sku, name, unit, price, taxable in (\n        (\"PEN-1\", \"Pen\", Unit.EACH, \"1.50\", True),\n        (\"BOOK-1\", \"Notebook\", Unit.EACH, \"4.99\", False),\n        (\"WIDGET\", \"Widget\", Unit.BOX, \"19.99\", True),\n    ):\n        steps = tuple(Tier(q, Decimal(p)) for q, p in tiers.get(sku, ()))\n        store.add_product(Product(sku, name, unit, Decimal(price), taxable, steps))\n    store.receive(\"PEN-1\", 100)\n    store.receive(\"BOOK-1\", 20)\n    store.receive(\"WIDGET\", 30)\n    return store\n\n\n@pytest.fixture\ndef store() -> Store:\n    return build_store()\n\n\n@pytest.fixture\ndef make_store():\n    \"\"\"The factory behind `store`, for tests that need two identical stores.\"\"\"\n    return build_store\n"
+      }
+    },
+    {
+      "i": 27,
+      "t": 57.65,
+      "kind": "model_call",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.1112,
+      "tool_calls": 12,
+      "agent": "planner",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 18357,
+      "tokens_out": 762,
+      "text": null,
+      "calls": [
+        {
+          "id": "c13",
+          "tool": "set_model_response",
+          "label": "answer",
+          "args": {
+            "actionable": true,
+            "steps": [
+              "In `stockroom/catalog.py`, in `Product.__post_init__`, sort `self.tiers` by `tier.min_qty` instead of `tier.percent` (`tiers = tuple(sorted(self.tiers, key=lambda tier: tier.min_qty))`).",
+              "In `tests/test_catalog.py`, add a test case in `test_r4_tiers_are_sorted_and_validated` verifying that broken tier ladders where higher quantities have lower discount percentages (e.g., `(Tier(5, D(\"10\")), Tier(20, D(\"5\")))`) raise `CatalogError`.",
+              "In `tests/test_csvio.py`, update or add a test verifying that CSV import rejects rows with broken discount ladders such as `5:10;20:5` as row errors while importing valid rows."
+            ],
+            "files_to_inspect": [
+              "stockroom/catalog.py",
+              "tests/test_catalog.py",
+              "tests/test_csvio.py"
+            ],
+            "test_strategy": "Run `pytest`. Add unit tests in `tests/test_catalog.py` asserting that creating a product with decreasing discount percentages for increasing quantities (such as 10% for 5 units and 5% for 20 units) raises `CatalogError`. Add a test in `tests/test_csvio.py` asserting that CSV import with broken tiers like `5:10;20:5` records a row error and keeps valid products.",
+            "summary": "Fix broken discount tier validation in `Product.__post_init__` by sorting tiers by `min_qty` rather than `percent`. Currently, `Product.__post_init__` sorts tiers by `percent` before checking pairwise that percentages rise with quantity, allowing broken ladders like `5:10;20:5` to pass validation and reorder tiers incorrectly. Sorting by `min_qty` ensures that discount ladders where higher quantity steps have lower or non-increasing percentages fail validation with `CatalogError`, rejecting invalid rows during CSV product imports."
+          }
+        }
+      ]
+    },
+    {
+      "i": 28,
+      "t": 64.21,
+      "kind": "plan",
+      "node": "planner",
+      "visit": 1,
+      "cost_usd": 0.1112,
+      "tool_calls": 13,
+      "value": {
+        "actionable": true,
+        "decline_reason": null,
+        "summary": "Fix broken discount tier validation in `Product.__post_init__` by sorting tiers by `min_qty` rather than `percent`. Currently, `Product.__post_init__` sorts tiers by `percent` before checking pairwise that percentages rise with quantity, allowing broken ladders like `5:10;20:5` to pass validation and reorder tiers incorrectly. Sorting by `min_qty` ensures that discount ladders where higher quantity steps have lower or non-increasing percentages fail validation with `CatalogError`, rejecting invalid rows during CSV product imports.",
+        "files_to_inspect": [
+          "stockroom/catalog.py",
+          "tests/test_catalog.py",
+          "tests/test_csvio.py"
+        ],
+        "steps": [
+          "In `stockroom/catalog.py`, in `Product.__post_init__`, sort `self.tiers` by `tier.min_qty` instead of `tier.percent` (`tiers = tuple(sorted(self.tiers, key=lambda tier: tier.min_qty))`).",
+          "In `tests/test_catalog.py`, add a test case in `test_r4_tiers_are_sorted_and_validated` verifying that broken tier ladders where higher quantities have lower discount percentages (e.g., `(Tier(5, D(\"10\")), Tier(20, D(\"5\")))`) raise `CatalogError`.",
+          "In `tests/test_csvio.py`, update or add a test verifying that CSV import rejects rows with broken discount ladders such as `5:10;20:5` as row errors while importing valid rows."
+        ],
+        "test_strategy": "Run `pytest`. Add unit tests in `tests/test_catalog.py` asserting that creating a product with decreasing discount percentages for increasing quantities (such as 10% for 5 units and 5% for 20 units) raises `CatalogError`. Add a test in `tests/test_csvio.py` asserting that CSV import with broken tiers like `5:10;20:5` records a row error and keeps valid products."
+      }
+    },
+    {
+      "i": 29,
+      "t": 64.21,
+      "kind": "node",
+      "node": "route_plan",
+      "visit": 1,
+      "cost_usd": 0.1112,
+      "tool_calls": 13,
+      "from": "planner",
+      "via": null,
+      "message": null
+    },
+    {
+      "i": 30,
+      "t": 64.22,
+      "kind": "node",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1112,
+      "tool_calls": 13,
+      "from": "route_plan",
+      "via": "actionable",
+      "message": null
+    },
+    {
+      "i": 31,
+      "t": 64.22,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1132,
+      "tool_calls": 13,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 1899,
+      "tokens_out": 154,
+      "text": null,
+      "calls": [
+        {
+          "id": "c14",
+          "tool": "read_file",
+          "label": "read_file stockroom/catalog.py",
+          "args": {
+            "path": "stockroom/catalog.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 32,
+      "t": 67.87,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1132,
+      "tool_calls": 14,
+      "call": "c14",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/catalog.py",
+        "content": "\"\"\"The product catalog: SKUs, units, quantity tiers and products.\n\nA product says what is sold and at which list price. It knows nothing about\nstock levels (see `inventory`) or how a quantity is priced (see `pricing`).\n\"\"\"\n\nimport re\nfrom collections.abc import Iterable\nfrom dataclasses import dataclass, field, replace\nfrom decimal import Decimal\nfrom enum import Enum\nfrom itertools import pairwise\n\nfrom .errors import (\n    CatalogError,\n    DuplicateSku,\n    InvalidQuantity,\n    InvalidSku,\n    UnknownSku,\n)\nfrom .money import parse_money, parse_percent\n\nMAX_SKU_LENGTH = 20\n_SKU_PATTERN = re.compile(r\"[A-Z0-9]+(-[A-Z0-9]+)*\")\n\n\nclass Unit(Enum):\n    \"\"\"How a product is counted. Quantities are always whole numbers of a unit.\"\"\"\n\n    EACH = \"each\"\n    PAIR = \"pair\"\n    BOX = \"box\"\n    CASE = \"case\"\n    KILOGRAM = \"kg\"\n\n    @classmethod\n    def parse(cls, text: str) -> \"Unit\":\n        \"\"\"Look a unit up by its code, ignoring case and surrounding spaces.\"\"\"\n        code = text.strip().lower() if isinstance(text, str) else text\n        for unit in cls:\n            if unit.value == code:\n                return unit\n        raise CatalogError(f\"unknown unit: {text!r}\")\n\n\ndef normalize_sku(text: str) -> str:\n    \"\"\"Return the canonical form of a SKU: stripped and upper case.\n\n    A SKU is letters and digits in groups separated by single hyphens, at most\n    `MAX_SKU_LENGTH` characters.\"\"\"\n    if not isinstance(text, str):\n        raise InvalidSku(f\"SKU must be a string: {text!r}\")\n    sku = text.strip().upper()\n    if len(sku) > MAX_SKU_LENGTH or not _SKU_PATTERN.fullmatch(sku):\n        raise InvalidSku(f\"invalid SKU: {text!r}\")\n    return sku\n\n\ndef check_quantity(quantity: object) -> int:\n    \"\"\"Return `quantity` if it is a positive whole number, else raise.\"\"\"\n    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:\n        raise InvalidQuantity(f\"quantity must be a positive whole number: {quantity!r}\")\n    return quantity\n\n\ndef merge_items(items: Iterable[tuple[str, int]]) -> dict[str, int]:\n    \"\"\"Merge (sku, quantity) pairs into one quantity per normalised SKU.\n\n    Repeated SKUs add up; order follows each SKU's first appearance. Used by\n    both quoting and order creation so they always price the same lines.\"\"\"\n    merged: dict[str, int] = {}\n    for sku, quantity in items:\n        key = normalize_sku(sku)\n        merged[key] = merged.get(key, 0) + check_quantity(quantity)\n    return merged\n\n\n@dataclass(frozen=True)\nclass Tier:\n    \"\"\"A quantity discount step: from `min_qty` units, `percent` % off the list price.\"\"\"\n\n    min_qty: int\n    percent: Decimal\n\n    def __post_init__(self) -> None:\n        if (\n            isinstance(self.min_qty, bool)\n            or not isinstance(self.min_qty, int)\n            or self.min_qty < 2\n        ):\n            raise CatalogError(f\"a tier starts at 2 units or more: {self.min_qty!r}\")\n        percent = parse_percent(self.percent)\n        if percent <= 0:\n            raise CatalogError\n[... 2,184 characters cut ...]\n          raise UnknownSku(f\"no such SKU: {key}\") from None\n\n    def set_price(self, sku: str, price: object) -> Product:\n        \"\"\"Change a product's list price. Existing orders keep their own copy.\"\"\"\n        product = replace(self.get(sku), list_price=parse_money(price))\n        self._products[product.sku] = product\n        return product\n\n    def products(self) -> list[Product]:\n        \"\"\"All products, sorted by SKU.\"\"\"\n        return [self._products[sku] for sku in sorted(self._products)]\n\n    def __contains__(self, sku: object) -> bool:\n        if not isinstance(sku, str):\n            return False\n        try:\n            return normalize_sku(sku) in self._products\n        except InvalidSku:\n            return False\n\n    def __len__(self) -> int:\n        return len(self._products)\n"
+      }
+    },
+    {
+      "i": 33,
+      "t": 67.88,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1185,
+      "tool_calls": 14,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 3724,
+      "tokens_out": 656,
+      "text": null,
+      "calls": [
+        {
+          "id": "c15",
+          "tool": "bash",
+          "label": "bash python -m pytest -q",
+          "args": {
+            "command": "python -m pytest -q"
+          }
+        }
+      ]
+    },
+    {
+      "i": 34,
+      "t": 74.18,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1185,
+      "tool_calls": 15,
+      "call": "c15",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "................................................................         [100%]\n64 passed in 0.08s\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 35,
+      "t": 74.18,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.122,
+      "tool_calls": 15,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 4410,
+      "tokens_out": 50,
+      "text": null,
+      "calls": [
+        {
+          "id": "c16",
+          "tool": "grep",
+          "label": "grep 'tiers' in tests",
+          "args": {
+            "path": "tests",
+            "pattern": "tiers"
+          }
+        }
+      ]
+    },
+    {
+      "i": 36,
+      "t": 76.2,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.122,
+      "tool_calls": 16,
+      "call": "c16",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "tests/conftest.py:8:    \"\"\"Tax 8.25 %. PEN-1: 1.50, taxable, tiers 10 -> 5 % and 50 -> 10 %, 100 on hand.\ntests/conftest.py:9:    BOOK-1: 4.99, not taxable, 20 on hand. WIDGET: 19.99, tiers 5 -> 10 % and\ntests/conftest.py:12:    tiers = {\"PEN-1\": ((10, \"5\"), (50, \"10\")), \"WIDGET\": ((5, \"10\"), (20, \"30\"))}\ntests/conftest.py:18:        steps = tuple(Tier(q, Decimal(p)) for q, p in tiers.get(sku, ()))\ntests/test_catalog.py:64:def test_r4_tiers_are_sorted_and_validated():\ntests/test_catalog.py:66:    product = make(tiers=(Tier(20, D(\"10\")), Tier(5, D(\"5\"))))\ntests/test_catalog.py:67:    assert [t.min_qty for t in product.tiers] == [5, 20]\ntests/test_catalog.py:73:    for tiers in (\ntests/test_catalog.py:78:            make(tiers=tiers)\ntests/test_csvio.py:5:from stockroom.csvio import parse_tiers\ntests/test_csvio.py:10:HEADER = \"sku,name,unit,price,taxable,tiers\\n\"\ntests/test_csvio.py:33:    \"\"\"R16: columns in the documented form, tiers parsed.\"\"\"\ntests/test_csvio.py:40:    assert cable.tiers == (Tier(10, Decimal(\"5\")), Tier(50, Decimal(\"12.5\")))\ntests/test_csvio.py:41:    assert (lamp.taxable, lamp.tiers, str(lamp.list_price)) == (False, (), \"12.00\")\ntests/test_csvio.py:42:    text = \"name,price,sku,tiers,unit,taxable\\nCable,3.50,cab-1,,each,true\\n\"\ntests/test_csvio.py:85:def test_r17_bad_tiers_are_bad_rows(tmp_path):\ntests/test_csvio.py:92:    assert parse_tiers(\" 10 : 5 ; 20:7.5 \") == (Tier(10, D(\"5\")), Tier(20, D(\"7.5\")))\ntests/test_csvio.py:93:    assert parse_tiers(\"\") == ()\ntests/test_pricing.py:47:    \"\"\"R4: boundaries of the PEN-1 tiers (10 -> 5 %, 50 -> 10 %).\"\"\"\n"
+      }
+    },
+    {
+      "i": 37,
+      "t": 76.21,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.126,
+      "tool_calls": 16,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 5155,
+      "tokens_out": 57,
+      "text": null,
+      "calls": [
+        {
+          "id": "c17",
+          "tool": "read_file",
+          "label": "read_file tests/test_catalog.py",
+          "args": {
+            "path": "tests/test_catalog.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 38,
+      "t": 78.0,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.126,
+      "tool_calls": 17,
+      "call": "c17",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "tests/test_catalog.py",
+        "content": "from decimal import Decimal\n\nimport pytest\nfrom stockroom import Product, Tier, Unit\nfrom stockroom.catalog import Catalog, normalize_sku\nfrom stockroom.errors import (\n    CatalogError,\n    DuplicateSku,\n    InvalidSku,\n    MoneyError,\n    UnknownSku,\n)\n\nD = Decimal\n\n\ndef make(sku=\"A-1\", **overrides):\n    values = {\"name\": \"Thing\", \"unit\": Unit.EACH, \"list_price\": D(\"2.00\")}\n    return Product(sku, **{**values, **overrides})\n\n\ndef test_r7_skus_are_normalised_to_upper_case():\n    \"\"\"R7: SKUs are case-insensitive and stored upper case.\"\"\"\n    assert normalize_sku(\"  pen-1 \") == \"PEN-1\"\n    assert make(\"pen-1\").sku == \"PEN-1\"\n\n\n@pytest.mark.parametrize(\"bad\", [\"\", \"a--b\", \"-a\", \"a-\", \"a b\", \"a_b\", \"x\" * 21])\ndef test_r7_bad_skus_are_rejected(bad):\n    \"\"\"R7: hyphen groups, letters and digits only, at most 20 characters.\"\"\"\n    with pytest.raises(InvalidSku):\n        normalize_sku(bad)\n\n\ndef test_r7_a_sku_can_be_added_once_and_is_found_in_any_case():\n    \"\"\"R7: duplicates are refused; lookups normalise the SKU.\"\"\"\n    catalog = Catalog()\n    catalog.add(make(\"pen-1\"))\n    with pytest.raises(DuplicateSku):\n        catalog.add(make(\"PEN-1\"))\n    assert catalog.get(\"Pen-1\").sku == \"PEN-1\" and \"pen-1\" in catalog\n    assert \"nope\" not in catalog and \"not a sku!\" not in catalog\n    with pytest.raises(UnknownSku):\n        catalog.get(\"NOPE\")\n\n\ndef test_r1_product_prices_are_decimal_only():\n    \"\"\"R1: a float price is refused, a string price is exact.\"\"\"\n    with pytest.raises(MoneyError):\n        make(list_price=1.5)\n    assert make(list_price=\"1.50\").list_price == D(\"1.50\")\n\n\ndef test_a_product_needs_a_name_and_a_known_unit():\n    \"\"\"Catalog validation, and unit codes (R16).\"\"\"\n    for bad in ({\"name\": \"  \"}, {\"unit\": \"each\"}):\n        with pytest.raises(CatalogError):\n            make(**bad)\n    assert Unit.parse(\" KG \") is Unit.KILOGRAM\n    with pytest.raises(CatalogError):\n        Unit.parse(\"litre\")\n\n\ndef test_r4_tiers_are_sorted_and_validated():\n    \"\"\"R4: min_qty of 2 or more, strictly rising percentages, 0 < percent <= 100.\"\"\"\n    product = make(tiers=(Tier(20, D(\"10\")), Tier(5, D(\"5\"))))\n    assert [t.min_qty for t in product.tiers] == [5, 20]\n    for args in ((1, D(\"5\")), (5, D(\"0\"))):\n        with pytest.raises(CatalogError):\n            Tier(*args)\n    with pytest.raises(MoneyError):\n        Tier(5, D(\"101\"))\n    for tiers in (\n        (Tier(5, D(\"5\")), Tier(5, D(\"6\"))),\n        (Tier(5, D(\"5\")), Tier(10, D(\"5\"))),\n    ):\n        with pytest.raises(CatalogError):\n            make(tiers=tiers)\n\n\ndef test_r11_set_price_replaces_the_product():\n    \"\"\"R11: a price change makes a new product; old copies are unchanged.\"\"\"\n    catalog = Catalog()\n    original = make(\"b-1\")\n    catalog.add(original)\n    catalog.add(make(\"a-1\"))\n    assert catalog.set_price(\"B-1\", \"3.25\").list_price == D(\"3.25\")\n    assert catalog.get(\"b-1\").list_price == D(\"3.25\")\n    assert original.list_price == D(\"2.00\")\n    assert [p.sku for p in catalog.products()] == [\"A-1\", \"B-1\"]  # sorted (R18)\n"
+      }
+    },
+    {
+      "i": 39,
+      "t": 78.01,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1309,
+      "tool_calls": 17,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 6257,
+      "tokens_out": 45,
+      "text": null,
+      "calls": [
+        {
+          "id": "c18",
+          "tool": "read_file",
+          "label": "read_file tests/test_csvio.py",
+          "args": {
+            "path": "tests/test_csvio.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 40,
+      "t": 79.97,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1309,
+      "tool_calls": 18,
+      "call": "c18",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "tests/test_csvio.py",
+        "content": "from decimal import Decimal\n\nimport pytest\nfrom stockroom import Store, Tier, csvio\nfrom stockroom.csvio import parse_tiers\nfrom stockroom.errors import CsvFormatError\n\nD = Decimal\n\nHEADER = \"sku,name,unit,price,taxable,tiers\\n\"\n\nMIXED = (\n    HEADER\n    + \"cab-1,Cable,each,3.50,true,10:5;50:10\\n\"  # line 2: good\n    + \"BAD SKU,Broken,each,1.00,true,\\n\"  # line 3: bad SKU\n    + \"pen-2,Pencil,each,1.005,true,\\n\"  # line 4: three decimals\n    + \"mug-1,Mug,box,4.00,maybe,\\n\"  # line 5: taxable is not a boolean\n    + \"CAB-1,Cable again,each,3.00,true,\\n\"  # line 6: duplicate of line 2\n    + \"\\n\"  # line 7: blank, skipped\n    + \"lamp,Lamp,each,12.00,false,\\n\"  # line 8: good\n    + \"short,Short,each\\n\"  # line 9: too few fields\n    + \"long,Long,each,1.00,true,,extra\\n\"  # line 10: too many fields\n)\n\n\ndef write(tmp_path, text):\n    path = tmp_path / \"products.csv\"\n    path.write_text(text, encoding=\"utf-8\")\n    return path\n\n\ndef test_r16_a_good_file_imports_every_row(tmp_path):\n    \"\"\"R16: columns in the documented form, tiers parsed.\"\"\"\n    rows = \"cab-1,Cable,kg,3.50,TRUE,10:5;50:12.5\\nlamp,Lamp,each,12,false,\\n\"\n    result = csvio.import_products(write(tmp_path, HEADER + rows))\n    assert result.errors == ()\n    cable, lamp = result.products\n    assert (cable.sku, cable.unit.value, cable.taxable) == (\"CAB-1\", \"kg\", True)\n    assert cable.list_price == Decimal(\"3.50\")\n    assert cable.tiers == (Tier(10, Decimal(\"5\")), Tier(50, Decimal(\"12.5\")))\n    assert (lamp.taxable, lamp.tiers, str(lamp.list_price)) == (False, (), \"12.00\")\n    text = \"name,price,sku,tiers,unit,taxable\\nCable,3.50,cab-1,,each,true\\n\"\n    shuffled = csvio.import_products(write(tmp_path, text))  # any column order\n    assert [p.sku for p in shuffled.products] == [\"CAB-1\"]\n\n\n@pytest.mark.parametrize(\n    \"text\", [\"\", \"sku,name,unit,price,taxable\\n\", HEADER.strip() + \",extra\\n\"]\n)\ndef test_r16_an_unusable_file_is_a_format_error(tmp_path, text):\n    \"\"\"R16: empty files and other columns raise CsvFormatError.\"\"\"\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(write(tmp_path, text))\n\n\ndef test_r16_a_file_that_is_not_utf8_is_a_format_error(tmp_path):\n    \"\"\"R16: undecodable bytes raise CsvFormatError.\"\"\"\n    path = tmp_path / \"bad.csv\"\n    path.write_bytes(HEADER.encode() + b\"x-1,Bad\\xe9,each,1.00,true,\\n\")\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(path)\n\n\ndef test_r17_good_rows_are_kept_and_bad_rows_reported_with_line_numbers(tmp_path):\n    \"\"\"R17: file line numbers, header is line 1, blank lines still count.\"\"\"\n    result = csvio.import_products(write(tmp_path, MIXED))\n    assert [p.sku for p in result.products] == [\"CAB-1\", \"LAMP\"]\n    assert [e.line for e in result.errors] == [3, 4, 5, 6, 9, 10]\n    by_line = {e.line: e.message for e in result.errors}\n    assert \"duplicate\" in by_line[6] and \"decimal\" in by_line[4]\n    assert \"fewer\" in by_line[9] and \"more\" in by_line[10]\n\n\ndef test_r17_import_never_overwrites_an_existing_product(store\n[... 1,704 characters cut ...]\ntoo.\"\"\"\n    fresh = Store(tax_percent=\"0\")\n    fresh.import_products(write(tmp_path, MIXED))\n    fresh.import_products(\n        write(tmp_path, HEADER + 'mix-1,\"Pen, blue\",each,0.99,true,\\n')\n    )\n    fresh.receive(\"lamp\", 4)\n    path = tmp_path / \"out.csv\"\n    fresh.export_stock(path)\n    assert path.read_text().splitlines()[1:] == [\n        \"CAB-1,Cable,each,0,0,0,0.00\",\n        \"LAMP,Lamp,each,4,0,4,48.00\",\n        'MIX-1,\"Pen, blue\",each,0,0,0,0.00',\n    ]\n\n\ndef test_r16_a_csv_parser_error_is_a_format_error(tmp_path):\n    \"\"\"R16: a field over the csv module's size limit makes it fail; unusable file.\"\"\"\n    path = tmp_path / \"huge.csv\"\n    path.write_text(HEADER + \"x-1,\" + \"n\" * 200_000 + \",each,1.00,true,\\n\")\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(path)\n"
+      }
+    },
+    {
+      "i": 41,
+      "t": 79.97,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1397,
+      "tool_calls": 18,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 8459,
+      "tokens_out": 660,
+      "text": null,
+      "calls": [
+        {
+          "id": "c19",
+          "tool": "read_file",
+          "label": "read_file stockroom/pricing.py",
+          "args": {
+            "path": "stockroom/pricing.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 42,
+      "t": 88.34,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1397,
+      "tool_calls": 19,
+      "call": "c19",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/pricing.py",
+        "content": "\"\"\"Pricing: list price, quantity tiers, coupons, the discount cap and tax.\n\nAll arithmetic on money goes through `money`. Each order line is priced on its\nown and rounded at the line; a quote's totals are plain sums of line amounts.\nThe order of operations for one line is fixed:\n\n    gross    = list_price x quantity                      (exact)\n    percent  = min(tier % + coupon %, MAX_COMBINED_DISCOUNT_PERCENT)\n    discount = round(gross x percent)\n    net      = gross - discount\n    tax      = round(net x tax %)   if the product is taxable, else 0\n    total    = net + tax\n\"\"\"\n\nimport re\nfrom collections.abc import Sequence\nfrom dataclasses import dataclass\nfrom decimal import Decimal\n\nfrom .catalog import Product, check_quantity\nfrom .errors import CatalogError\nfrom .money import ZERO, apply_percent, parse_percent\n\nMAX_COMBINED_DISCOUNT_PERCENT = Decimal(\"40\")\n_COUPON_PATTERN = re.compile(r\"[A-Z0-9_-]+\")\n\n\n@dataclass(frozen=True)\nclass Coupon:\n    \"\"\"A percentage discount that an order can carry. The code is upper case.\"\"\"\n\n    code: str\n    percent: Decimal\n\n    def __post_init__(self) -> None:\n        code = self.code.strip().upper() if isinstance(self.code, str) else \"\"\n        if not _COUPON_PATTERN.fullmatch(code):\n            raise CatalogError(f\"invalid coupon code: {self.code!r}\")\n        percent = parse_percent(self.percent)\n        if percent <= 0:\n            raise CatalogError(\"a coupon discount must be above 0 %\")\n        object.__setattr__(self, \"code\", code)\n        object.__setattr__(self, \"percent\", percent)\n\n\n@dataclass(frozen=True)\nclass LineQuote:\n    \"\"\"The priced result for one SKU on an order.\"\"\"\n\n    sku: str\n    quantity: int\n    unit_price: Decimal\n    gross: Decimal\n    tier_percent: Decimal\n    coupon_percent: Decimal\n    discount_percent: Decimal\n    discount: Decimal\n    net: Decimal\n    tax: Decimal\n    total: Decimal\n\n\n@dataclass(frozen=True)\nclass Quote:\n    \"\"\"A priced order: its lines and the sums of their amounts.\"\"\"\n\n    lines: tuple[LineQuote, ...]\n    subtotal: Decimal\n    discount: Decimal\n    net: Decimal\n    tax: Decimal\n    total: Decimal\n\n\ndef tier_percent(product: Product, quantity: int) -> Decimal:\n    \"\"\"The quantity discount for `quantity` units of `product`.\n\n    The tier with the largest `min_qty` that does not exceed the quantity wins,\n    and it applies to every unit of the line. Below the first tier it is 0.\"\"\"\n    percent = Decimal(0)\n    for tier in product.tiers:\n        if quantity >= tier.min_qty:\n            percent = tier.percent\n    return percent\n\n\ndef combined_percent(tier: Decimal, coupon: Decimal) -> Decimal:\n    \"\"\"Tier and coupon percentages added together, limited by the cap.\"\"\"\n    return min(tier + coupon, MAX_COMBINED_DISCOUNT_PERCENT)\n\n\ndef quote_line(\n    product: Product,\n    quantity: int,\n    coupon_percent: Decimal,\n    tax_percent: Decimal,\n) -> LineQuote:\n    \"\"\"Price `quantity` units of one product.\"\"\"\n    check_quantity(quantity)\n    gross = product.list_price * qu\n[... 550 characters cut ...]\notal=net + tax,\n    )\n\n\ndef quote_items(\n    items: Sequence[tuple[Product, int]],\n    coupon: Coupon | None,\n    tax_percent: Decimal,\n) -> Quote:\n    \"\"\"Price a list of (product, quantity) pairs, one line per pair.\n\n    An empty list gives an all-zero quote.\"\"\"\n    coupon_percent = coupon.percent if coupon is not None else Decimal(0)\n    lines = tuple(\n        quote_line(product, quantity, coupon_percent, tax_percent)\n        for product, quantity in items\n    )\n    return Quote(\n        lines=lines,\n        subtotal=sum((line.gross for line in lines), ZERO),\n        discount=sum((line.discount for line in lines), ZERO),\n        net=sum((line.net for line in lines), ZERO),\n        tax=sum((line.tax for line in lines), ZERO),\n        total=sum((line.total for line in lines), ZERO),\n    )\n"
+      }
+    },
+    {
+      "i": 43,
+      "t": 88.34,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1519,
+      "tool_calls": 19,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 10312,
+      "tokens_out": 1179,
+      "text": null,
+      "calls": [
+        {
+          "id": "c20",
+          "tool": "read_file",
+          "label": "read_file stockroom/csvio.py",
+          "args": {
+            "path": "stockroom/csvio.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 44,
+      "t": 99.46,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1519,
+      "tool_calls": 20,
+      "call": "c20",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/csvio.py",
+        "content": "\"\"\"CSV import of products and export of stock levels.\n\nImport file columns, in any order: `sku,name,unit,price,taxable,tiers`.\n`taxable` is `true` or `false`. `tiers` is empty or a `;`-separated list of\n`min_qty:percent` steps such as `10:5;50:12.5`.\n\nExport file columns: `sku,name,unit,on_hand,reserved,available,stock_value`,\none row per product, sorted by SKU, with `\\\\n` line endings.\n\"\"\"\n\nimport csv\nfrom collections.abc import Container\nfrom dataclasses import dataclass\nfrom decimal import Decimal\nfrom pathlib import Path\nfrom typing import TYPE_CHECKING\n\nfrom .catalog import Product, Tier, Unit, normalize_sku\nfrom .errors import CatalogError, CsvFormatError, StockroomError\nfrom .money import format_money, parse_percent\n\nif TYPE_CHECKING:\n    from .store import Store\n\nIMPORT_COLUMNS = (\"sku\", \"name\", \"unit\", \"price\", \"taxable\", \"tiers\")\nEXPORT_COLUMNS = (\n    \"sku\",\n    \"name\",\n    \"unit\",\n    \"on_hand\",\n    \"reserved\",\n    \"available\",\n    \"stock_value\",\n)\n\n\n@dataclass(frozen=True)\nclass RowError:\n    \"\"\"A rejected row. `line` is the row's line number in the file (the header is 1).\"\"\"\n\n    line: int\n    message: str\n\n\n@dataclass(frozen=True)\nclass ImportResult:\n    \"\"\"Products that were accepted and rows that were not, each in file order.\"\"\"\n\n    products: tuple[Product, ...]\n    errors: tuple[RowError, ...]\n\n\ndef parse_tiers(text: str) -> tuple[Tier, ...]:\n    \"\"\"Parse the `tiers` column. An empty string means no tiers.\"\"\"\n    text = text.strip()\n    if not text:\n        return ()\n    tiers = []\n    for part in text.split(\";\"):\n        min_qty, separator, percent = part.partition(\":\")\n        if not separator:\n            raise CatalogError(f\"tier must look like min_qty:percent: {part!r}\")\n        try:\n            quantity = int(min_qty.strip())\n        except ValueError:\n            raise CatalogError(\n                f\"tier quantity is not a whole number: {part!r}\"\n            ) from None\n        tiers.append(Tier(quantity, parse_percent(percent)))\n    return tuple(tiers)\n\n\ndef parse_taxable(text: str) -> bool:\n    \"\"\"`true` or `false`, in any case.\"\"\"\n    value = text.strip().lower()\n    if value not in (\"true\", \"false\"):\n        raise CatalogError(f\"taxable must be true or false: {text!r}\")\n    return value == \"true\"\n\n\ndef import_products(path: str | Path, existing: Container[str] = ()) -> ImportResult:\n    \"\"\"Read products from a CSV file.\n\n    A bad row is skipped and reported; the good rows are still returned. A row\n    is bad if a field is invalid, if fields are missing or extra, or if its SKU\n    appeared earlier in the file or is in `existing`. A file that is empty, not\n    UTF-8, malformed for the csv module, or lacks exactly the expected columns\n    raises `CsvFormatError`.\"\"\"\n    try:\n        with open(path, newline=\"\", encoding=\"utf-8\") as handle:\n            reader = csv.DictReader(handle)\n            header = reader.fieldnames\n            if header is None:\n                raise CsvFormatError(\"the file is empty\")\n           \n[... 1,795 characters cut ...]\nw per product with its stock levels and stock value.\n\n    `stock_value` is on-hand units times the list price, in cents precision.\"\"\"\n    with open(path, \"w\", newline=\"\", encoding=\"utf-8\") as handle:\n        writer = csv.writer(handle, lineterminator=\"\\n\")\n        writer.writerow(EXPORT_COLUMNS)\n        for product in store.catalog.products():\n            level = store.inventory.level(product.sku)\n            value: Decimal = product.list_price * level.on_hand\n            writer.writerow(\n                [\n                    product.sku,\n                    product.name,\n                    product.unit.value,\n                    level.on_hand,\n                    level.reserved,\n                    level.available,\n                    format_money(value),\n                ]\n            )\n"
+      }
+    },
+    {
+      "i": 45,
+      "t": 99.47,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1625,
+      "tool_calls": 20,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 13009,
+      "tokens_out": 217,
+      "text": null,
+      "calls": [
+        {
+          "id": "c21",
+          "tool": "edit_file",
+          "label": "edit_file stockroom/catalog.py",
+          "args": {
+            "old_string": "        tiers = tuple(sorted(self.tiers, key=lambda tier: tier.percent))",
+            "path": "stockroom/catalog.py",
+            "new_string": "        tiers = tuple(sorted(self.tiers, key=lambda tier: tier.min_qty))"
+          }
+        }
+      ]
+    },
+    {
+      "i": 46,
+      "t": 102.47,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1625,
+      "tool_calls": 21,
+      "call": "c21",
+      "tool": "edit_file",
+      "error": null,
+      "result": {
+        "ok": true,
+        "path": "stockroom/catalog.py"
+      }
+    },
+    {
+      "i": 47,
+      "t": 102.47,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1725,
+      "tool_calls": 21,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 13227,
+      "tokens_out": 26,
+      "text": null,
+      "calls": [
+        {
+          "id": "c22",
+          "tool": "bash",
+          "label": "bash python -m pytest -q",
+          "args": {
+            "command": "python -m pytest -q"
+          }
+        }
+      ]
+    },
+    {
+      "i": 48,
+      "t": 104.5,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1725,
+      "tool_calls": 22,
+      "call": "c22",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "................................................................         [100%]\n64 passed in 0.08s\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 49,
+      "t": 104.51,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1827,
+      "tool_calls": 22,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 13283,
+      "tokens_out": 61,
+      "text": null,
+      "calls": [
+        {
+          "id": "c23",
+          "tool": "bash",
+          "label": "bash git status",
+          "args": {
+            "command": "git status"
+          }
+        }
+      ]
+    },
+    {
+      "i": 50,
+      "t": 106.34,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1827,
+      "tool_calls": 23,
+      "call": "c23",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "On branch master\nChanges not staged for commit:\n  (use \"git add <file>...\" to update what will be committed)\n  (use \"git restore <file>...\" to discard changes in working directory)\n\tmodified:   stockroom/catalog.py\n\nno changes added to commit (use \"git add\" and/or \"git commit -a\")\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 51,
+      "t": 106.35,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1962,
+      "tool_calls": 23,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 13431,
+      "tokens_out": 917,
+      "text": null,
+      "calls": [
+        {
+          "id": "c24",
+          "tool": "write_file",
+          "label": "write_file tests/test_broken_tiers.py",
+          "args": {
+            "path": "tests/test_broken_tiers.py",
+            "content": "from decimal import Decimal\n\nimport pytest\nfrom stockroom import Product, Tier, Unit, csvio\nfrom stockroom.errors import CatalogError\n\nD = Decimal\n\nHEADER = \"sku,name,unit,price,taxable,tiers\\n\"\n\n\ndef make(sku=\"A-1\", **overrides):\n    values = {\"name\": \"Thing\", \"unit\": Unit.EACH, \"list_price\": D(\"2.00\")}\n    return Product(sku, **{**values, **overrides})\n\n\ndef test_broken_discount_ladder_raises_catalog_error():\n    \"\"\"Tiers where a higher quantity step has a lower discount percentage must raise CatalogError.\"\"\"\n    with pytest.raises(CatalogError, match=\"tier percentages must rise with quantity\"):\n        make(tiers=(Tier(5, D(\"10\")), Tier(20, D(\"5\"))))\n\n\ndef test_tiers_sorted_by_min_qty_even_when_input_out_of_order():\n    \"\"\"Tiers given out of order by quantity should be sorted by min_qty.\"\"\"\n    product = make(\n        tiers=(\n            Tier(50, D(\"20\")),\n            Tier(10, D(\"5\")),\n            Tier(20, D(\"10\")),\n        )\n    )\n    assert [t.min_qty for t in product.tiers] == [10, 20, 50]\n    assert [t.percent for t in product.tiers] == [D(\"5\"), D(\"10\"), D(\"20\")]\n\n\ndef test_csv_import_rejects_broken_discount_ladder(tmp_path):\n    \"\"\"A CSV row with broken discount ladder like 5:10;20:5 is rejected as a row error.\"\"\"\n    path = tmp_path / \"supplier.csv\"\n    path.write_text(\n        HEADER\n        + \"GLUE-1,Glue stick,each,2.00,true,5:10;20:5\\n\"\n        + \"GLUE-2,Glue stick good,each,2.00,true,5:5;20:10\\n\",\n        encoding=\"utf-8\",\n    )\n    result = csvio.import_products(path)\n    assert len(result.errors) == 1\n    assert result.errors[0].line == 2\n    assert \"tier percentages must rise with quantity\" in result.errors[0].message\n    assert len(result.products) == 1\n    assert result.products[0].sku == \"GLUE-2\"\n"
+          }
+        }
+      ]
+    },
+    {
+      "i": 52,
+      "t": 113.44,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.1962,
+      "tool_calls": 24,
+      "call": "c24",
+      "tool": "write_file",
+      "error": null,
+      "result": {
+        "ok": true,
+        "path": "tests/test_broken_tiers.py"
+      }
+    },
+    {
+      "i": 53,
+      "t": 113.45,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.207,
+      "tool_calls": 24,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 14356,
+      "tokens_out": 28,
+      "text": null,
+      "calls": [
+        {
+          "id": "c25",
+          "tool": "bash",
+          "label": "bash python -m pytest -q",
+          "args": {
+            "command": "python -m pytest -q"
+          }
+        }
+      ]
+    },
+    {
+      "i": 54,
+      "t": 115.53,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.207,
+      "tool_calls": 25,
+      "call": "c25",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "...................................................................      [100%]\n67 passed in 0.08s\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 55,
+      "t": 115.55,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.218,
+      "tool_calls": 25,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 14415,
+      "tokens_out": 28,
+      "text": null,
+      "calls": [
+        {
+          "id": "c26",
+          "tool": "bash",
+          "label": "bash git status",
+          "args": {
+            "command": "git status"
+          }
+        }
+      ]
+    },
+    {
+      "i": 56,
+      "t": 117.12,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.218,
+      "tool_calls": 26,
+      "call": "c26",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "On branch master\nChanges not staged for commit:\n  (use \"git add <file>...\" to update what will be committed)\n  (use \"git restore <file>...\" to discard changes in working directory)\n\tmodified:   stockroom/catalog.py\n\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\ttests/test_broken_tiers.py\n\nno changes added to commit (use \"git add\" and/or \"git commit -a\")\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 57,
+      "t": 117.13,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.229,
+      "tool_calls": 26,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 14566,
+      "tokens_out": 36,
+      "text": null,
+      "calls": [
+        {
+          "id": "c27",
+          "tool": "bash",
+          "label": "bash git diff stockroom/catalog.py",
+          "args": {
+            "command": "git diff stockroom/catalog.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 58,
+      "t": 118.94,
+      "kind": "tool_result",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.229,
+      "tool_calls": 27,
+      "call": "c27",
+      "tool": "bash",
+      "error": null,
+      "result": {
+        "exit_code": 0,
+        "stdout": "diff --git a/stockroom/catalog.py b/stockroom/catalog.py\nindex 214ba2c..0e24970 100644\n--- a/stockroom/catalog.py\n+++ b/stockroom/catalog.py\n@@ -121,7 +121,7 @@ class Product:\n         object.__setattr__(self, \"list_price\", parse_money(self.list_price))\n         if not isinstance(self.taxable, bool):\n             raise CatalogError(f\"taxable must be a bool: {self.taxable!r}\")\n-        tiers = tuple(sorted(self.tiers, key=lambda tier: tier.percent))\n+        tiers = tuple(sorted(self.tiers, key=lambda tier: tier.min_qty))\n         for lower, higher in pairwise(tiers):\n             if lower.min_qty == higher.min_qty:\n                 raise CatalogError(f\"two tiers start at {lower.min_qty}\")\n",
+        "stderr": "",
+        "timed_out": false
+      }
+    },
+    {
+      "i": 59,
+      "t": 118.95,
+      "kind": "model_call",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.241,
+      "tool_calls": 27,
+      "agent": "coder",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 14843,
+      "tokens_out": 231,
+      "text": null,
+      "calls": [
+        {
+          "id": "c28",
+          "tool": "set_model_response",
+          "label": "answer",
+          "args": {
+            "files_changed": [
+              "stockroom/catalog.py"
+            ],
+            "notes": "Fixed tier sorting in Product.__post_init__ by sorting tiers by min_qty instead of percent. Added new test file tests/test_broken_tiers.py without modifying existing test files.",
+            "summary": "Fixed discount tier validation in Product.__post_init__ to sort tiers by min_qty rather than percent, correctly validating that percentages rise with quantity and rejecting broken discount ladders during product import.",
+            "tests_added": [
+              "tests/test_broken_tiers.py"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "i": 60,
+      "t": 121.79,
+      "kind": "claim",
+      "node": "coder",
+      "visit": 1,
+      "cost_usd": 0.241,
+      "tool_calls": 28,
+      "agent": "coder",
+      "value": {
+        "summary": "Fixed discount tier validation in Product.__post_init__ to sort tiers by min_qty rather than percent, correctly validating that percentages rise with quantity and rejecting broken discount ladders during product import.",
+        "files_changed": [
+          "stockroom/catalog.py"
+        ],
+        "tests_added": [
+          "tests/test_broken_tiers.py"
+        ],
+        "notes": "Fixed tier sorting in Product.__post_init__ by sorting tiers by min_qty instead of percent. Added new test file tests/test_broken_tiers.py without modifying existing test files."
+      }
+    },
+    {
+      "i": 61,
+      "t": 121.99,
+      "kind": "node",
+      "node": "collect_diff",
+      "visit": 1,
+      "cost_usd": 0.241,
+      "tool_calls": 28,
+      "from": "coder",
+      "via": null,
+      "message": "diff: 2 files, +51 -1"
+    },
+    {
+      "i": 62,
+      "t": 121.99,
+      "kind": "diff",
+      "node": "collect_diff",
+      "visit": 1,
+      "cost_usd": 0.241,
+      "tool_calls": 28,
+      "value": {
+        "files": [
+          "stockroom/catalog.py",
+          "tests/test_broken_tiers.py"
+        ],
+        "insertions": 51,
+        "deletions": 1,
+        "unified_diff": "diff --git a/stockroom/catalog.py b/stockroom/catalog.py\nindex 214ba2c..0e24970 100644\n--- a/stockroom/catalog.py\n+++ b/stockroom/catalog.py\n@@ -121,7 +121,7 @@ class Product:\n         object.__setattr__(self, \"list_price\", parse_money(self.list_price))\n         if not isinstance(self.taxable, bool):\n             raise CatalogError(f\"taxable must be a bool: {self.taxable!r}\")\n-        tiers = tuple(sorted(self.tiers, key=lambda tier: tier.percent))\n+        tiers = tuple(sorted(self.tiers, key=lambda tier: tier.min_qty))\n         for lower, higher in pairwise(tiers):\n             if lower.min_qty == higher.min_qty:\n                 raise CatalogError(f\"two tiers start at {lower.min_qty}\")\ndiff --git a/tests/test_broken_tiers.py b/tests/test_broken_tiers.py\nnew file mode 100644\nindex 0000000..0beb200\n--- /dev/null\n+++ b/tests/test_broken_tiers.py\n@@ -0,0 +1,50 @@\n+from decimal import Decimal\n+\n+import pytest\n+from stockroom import Product, Tier, Unit, csvio\n+from stockroom.errors import CatalogError\n+\n+D = Decimal\n+\n+HEADER = \"sku,name,unit,price,taxable,tiers\\n\"\n+\n+\n+def make(sku=\"A-1\", **overrides):\n+    values = {\"name\": \"Thing\", \"unit\": Unit.EACH, \"list_price\": D(\"2.00\")}\n+    return Product(sku, **{**values, **overrides})\n+\n+\n+def test_broken_discount_ladder_raises_catalog_error():\n+    \"\"\"Tiers where a higher quantity step has a lower discount percentage must raise CatalogError.\"\"\"\n+    with pytest.raises(CatalogError, match=\"tier percentages must rise with quantity\"):\n+        make(tiers=(Tier(5, D(\"10\")), Tier(20, D(\"5\"))))\n+\n+\n+def test_tiers_sorted_by_min_qty_even_when_input_out_of_order():\n+    \"\"\"Tiers given out of order by quantity should be sorted by min_qty.\"\"\"\n+    product = make(\n+        tiers=(\n+            Tier(50, D(\"20\")),\n+            Tier(10, D(\"5\")),\n+            Tier(20, D(\"10\")),\n+        )\n+    )\n+    assert [t.min_qty for t in product.tiers] == [10, 20, 50]\n+    assert [t.percent for t in product.tiers] == [D(\"5\"), D(\"10\"), D(\"20\")]\n+\n+\n+def test_csv_import_rejects_broken_discount_ladder(tmp_path):\n+    \"\"\"A CSV row with broken discount ladder like 5:10;20:5 is rejected as a row error.\"\"\"\n+    path = tmp_path / \"supplier.csv\"\n+    path.write_text(\n+        HEADER\n+        + \"GLUE-1,Glue stick,each,2.00,true,5:10;20:5\\n\"\n+        + \"GLUE-2,Glue stick good,each,2.00,true,5:5;20:10\\n\",\n+        encoding=\"utf-8\",\n+    )\n+    result = csvio.import_products(path)\n+    assert len(result.errors) == 1\n+    assert result.errors[0].line == 2\n+    assert \"tier percentages must rise with quantity\" in result.errors[0].message\n+    assert len(result.products) == 1\n+    assert result.products[0].sku == \"GLUE-2\"\n",
+        "cut": false
+      }
+    },
+    {
+      "i": 63,
+      "t": 122.47,
+      "kind": "node",
+      "node": "run_tests",
+      "visit": 1,
+      "cost_usd": 0.241,
+      "tool_calls": 28,
+      "from": "collect_diff",
+      "via": null,
+      "message": "tests: passed (exit 0)"
+    },
+    {
+      "i": 64,
+      "t": 122.47,
+      "kind": "tests",
+      "node": "run_tests",
+      "visit": 1,
+      "cost_usd": 0.241,
+      "tool_calls": 28,
+      "value": {
+        "passed": true,
+        "exit_code": 0,
+        "failed_tests": [],
+        "output_tail": "...................................................................      [100%]\n67 passed in 0.09s",
+        "duration_s": 0.47
+      }
+    },
+    {
+      "i": 65,
+      "t": 122.48,
+      "kind": "node",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.241,
+      "tool_calls": 28,
+      "from": "run_tests",
+      "via": "pass",
+      "message": null
+    },
+    {
+      "i": 66,
+      "t": 122.48,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.2429,
+      "tool_calls": 28,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 2205,
+      "tokens_out": 62,
+      "text": null,
+      "calls": [
+        {
+          "id": "c29",
+          "tool": "read_file",
+          "label": "read_file stockroom/catalog.py",
+          "args": {
+            "path": "stockroom/catalog.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 67,
+      "t": 127.04,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.2429,
+      "tool_calls": 29,
+      "call": "c29",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/catalog.py",
+        "content": "\"\"\"The product catalog: SKUs, units, quantity tiers and products.\n\nA product says what is sold and at which list price. It knows nothing about\nstock levels (see `inventory`) or how a quantity is priced (see `pricing`).\n\"\"\"\n\nimport re\nfrom collections.abc import Iterable\nfrom dataclasses import dataclass, field, replace\nfrom decimal import Decimal\nfrom enum import Enum\nfrom itertools import pairwise\n\nfrom .errors import (\n    CatalogError,\n    DuplicateSku,\n    InvalidQuantity,\n    InvalidSku,\n    UnknownSku,\n)\nfrom .money import parse_money, parse_percent\n\nMAX_SKU_LENGTH = 20\n_SKU_PATTERN = re.compile(r\"[A-Z0-9]+(-[A-Z0-9]+)*\")\n\n\nclass Unit(Enum):\n    \"\"\"How a product is counted. Quantities are always whole numbers of a unit.\"\"\"\n\n    EACH = \"each\"\n    PAIR = \"pair\"\n    BOX = \"box\"\n    CASE = \"case\"\n    KILOGRAM = \"kg\"\n\n    @classmethod\n    def parse(cls, text: str) -> \"Unit\":\n        \"\"\"Look a unit up by its code, ignoring case and surrounding spaces.\"\"\"\n        code = text.strip().lower() if isinstance(text, str) else text\n        for unit in cls:\n            if unit.value == code:\n                return unit\n        raise CatalogError(f\"unknown unit: {text!r}\")\n\n\ndef normalize_sku(text: str) -> str:\n    \"\"\"Return the canonical form of a SKU: stripped and upper case.\n\n    A SKU is letters and digits in groups separated by single hyphens, at most\n    `MAX_SKU_LENGTH` characters.\"\"\"\n    if not isinstance(text, str):\n        raise InvalidSku(f\"SKU must be a string: {text!r}\")\n    sku = text.strip().upper()\n    if len(sku) > MAX_SKU_LENGTH or not _SKU_PATTERN.fullmatch(sku):\n        raise InvalidSku(f\"invalid SKU: {text!r}\")\n    return sku\n\n\ndef check_quantity(quantity: object) -> int:\n    \"\"\"Return `quantity` if it is a positive whole number, else raise.\"\"\"\n    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:\n        raise InvalidQuantity(f\"quantity must be a positive whole number: {quantity!r}\")\n    return quantity\n\n\ndef merge_items(items: Iterable[tuple[str, int]]) -> dict[str, int]:\n    \"\"\"Merge (sku, quantity) pairs into one quantity per normalised SKU.\n\n    Repeated SKUs add up; order follows each SKU's first appearance. Used by\n    both quoting and order creation so they always price the same lines.\"\"\"\n    merged: dict[str, int] = {}\n    for sku, quantity in items:\n        key = normalize_sku(sku)\n        merged[key] = merged.get(key, 0) + check_quantity(quantity)\n    return merged\n\n\n@dataclass(frozen=True)\nclass Tier:\n    \"\"\"A quantity discount step: from `min_qty` units, `percent` % off the list price.\"\"\"\n\n    min_qty: int\n    percent: Decimal\n\n    def __post_init__(self) -> None:\n        if (\n            isinstance(self.min_qty, bool)\n            or not isinstance(self.min_qty, int)\n            or self.min_qty < 2\n        ):\n            raise CatalogError(f\"a tier starts at 2 units or more: {self.min_qty!r}\")\n        percent = parse_percent(self.percent)\n        if percent <= 0:\n            raise CatalogError\n[... 2,184 characters cut ...]\n          raise UnknownSku(f\"no such SKU: {key}\") from None\n\n    def set_price(self, sku: str, price: object) -> Product:\n        \"\"\"Change a product's list price. Existing orders keep their own copy.\"\"\"\n        product = replace(self.get(sku), list_price=parse_money(price))\n        self._products[product.sku] = product\n        return product\n\n    def products(self) -> list[Product]:\n        \"\"\"All products, sorted by SKU.\"\"\"\n        return [self._products[sku] for sku in sorted(self._products)]\n\n    def __contains__(self, sku: object) -> bool:\n        if not isinstance(sku, str):\n            return False\n        try:\n            return normalize_sku(sku) in self._products\n        except InvalidSku:\n            return False\n\n    def __len__(self) -> int:\n        return len(self._products)\n"
+      }
+    },
+    {
+      "i": 68,
+      "t": 127.05,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.2475,
+      "tool_calls": 29,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 3940,
+      "tokens_out": 428,
+      "text": null,
+      "calls": [
+        {
+          "id": "c30",
+          "tool": "grep",
+          "label": "grep '\\.tiers' in",
+          "args": {
+            "pattern": "\\.tiers"
+          }
+        }
+      ]
+    },
+    {
+      "i": 69,
+      "t": 130.35,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.2475,
+      "tool_calls": 30,
+      "call": "c30",
+      "tool": "grep",
+      "error": "Invoking `grep()` failed as the following mandatory input parameters are not present:\npath\nYou could retry calling this tool, but it is IMPORTANT for you to provide all the mandatory parameters.",
+      "result": {}
+    },
+    {
+      "i": 70,
+      "t": 130.36,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.2509,
+      "tool_calls": 30,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 4406,
+      "tokens_out": 30,
+      "text": null,
+      "calls": [
+        {
+          "id": "c31",
+          "tool": "grep",
+          "label": "grep '\\.tiers' in .",
+          "args": {
+            "pattern": "\\.tiers",
+            "path": "."
+          }
+        }
+      ]
+    },
+    {
+      "i": 71,
+      "t": 131.76,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.2509,
+      "tool_calls": 31,
+      "call": "c31",
+      "tool": "grep",
+      "error": null,
+      "result": {
+        "matches": "stockroom/catalog.py:124:        tiers = tuple(sorted(self.tiers, key=lambda tier: tier.min_qty))\nstockroom/pricing.py:81:    for tier in product.tiers:\ntests/test_catalog.py:67:    assert [t.min_qty for t in product.tiers] == [5, 20]\ntests/test_csvio.py:40:    assert cable.tiers == (Tier(10, Decimal(\"5\")), Tier(50, Decimal(\"12.5\")))\ntests/test_csvio.py:41:    assert (lamp.taxable, lamp.tiers, str(lamp.list_price)) == (False, (), \"12.00\")\ntests/test_broken_tiers.py:32:    assert [t.min_qty for t in product.tiers] == [10, 20, 50]\ntests/test_broken_tiers.py:33:    assert [t.percent for t in product.tiers] == [D(\"5\"), D(\"10\"), D(\"20\")]\n"
+      }
+    },
+    {
+      "i": 72,
+      "t": 131.77,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.2545,
+      "tool_calls": 31,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 4690,
+      "tokens_out": 39,
+      "text": null,
+      "calls": [
+        {
+          "id": "c32",
+          "tool": "read_file",
+          "label": "read_file stockroom/pricing.py",
+          "args": {
+            "path": "stockroom/pricing.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 73,
+      "t": 137.02,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.2545,
+      "tool_calls": 32,
+      "call": "c32",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/pricing.py",
+        "content": "\"\"\"Pricing: list price, quantity tiers, coupons, the discount cap and tax.\n\nAll arithmetic on money goes through `money`. Each order line is priced on its\nown and rounded at the line; a quote's totals are plain sums of line amounts.\nThe order of operations for one line is fixed:\n\n    gross    = list_price x quantity                      (exact)\n    percent  = min(tier % + coupon %, MAX_COMBINED_DISCOUNT_PERCENT)\n    discount = round(gross x percent)\n    net      = gross - discount\n    tax      = round(net x tax %)   if the product is taxable, else 0\n    total    = net + tax\n\"\"\"\n\nimport re\nfrom collections.abc import Sequence\nfrom dataclasses import dataclass\nfrom decimal import Decimal\n\nfrom .catalog import Product, check_quantity\nfrom .errors import CatalogError\nfrom .money import ZERO, apply_percent, parse_percent\n\nMAX_COMBINED_DISCOUNT_PERCENT = Decimal(\"40\")\n_COUPON_PATTERN = re.compile(r\"[A-Z0-9_-]+\")\n\n\n@dataclass(frozen=True)\nclass Coupon:\n    \"\"\"A percentage discount that an order can carry. The code is upper case.\"\"\"\n\n    code: str\n    percent: Decimal\n\n    def __post_init__(self) -> None:\n        code = self.code.strip().upper() if isinstance(self.code, str) else \"\"\n        if not _COUPON_PATTERN.fullmatch(code):\n            raise CatalogError(f\"invalid coupon code: {self.code!r}\")\n        percent = parse_percent(self.percent)\n        if percent <= 0:\n            raise CatalogError(\"a coupon discount must be above 0 %\")\n        object.__setattr__(self, \"code\", code)\n        object.__setattr__(self, \"percent\", percent)\n\n\n@dataclass(frozen=True)\nclass LineQuote:\n    \"\"\"The priced result for one SKU on an order.\"\"\"\n\n    sku: str\n    quantity: int\n    unit_price: Decimal\n    gross: Decimal\n    tier_percent: Decimal\n    coupon_percent: Decimal\n    discount_percent: Decimal\n    discount: Decimal\n    net: Decimal\n    tax: Decimal\n    total: Decimal\n\n\n@dataclass(frozen=True)\nclass Quote:\n    \"\"\"A priced order: its lines and the sums of their amounts.\"\"\"\n\n    lines: tuple[LineQuote, ...]\n    subtotal: Decimal\n    discount: Decimal\n    net: Decimal\n    tax: Decimal\n    total: Decimal\n\n\ndef tier_percent(product: Product, quantity: int) -> Decimal:\n    \"\"\"The quantity discount for `quantity` units of `product`.\n\n    The tier with the largest `min_qty` that does not exceed the quantity wins,\n    and it applies to every unit of the line. Below the first tier it is 0.\"\"\"\n    percent = Decimal(0)\n    for tier in product.tiers:\n        if quantity >= tier.min_qty:\n            percent = tier.percent\n    return percent\n\n\ndef combined_percent(tier: Decimal, coupon: Decimal) -> Decimal:\n    \"\"\"Tier and coupon percentages added together, limited by the cap.\"\"\"\n    return min(tier + coupon, MAX_COMBINED_DISCOUNT_PERCENT)\n\n\ndef quote_line(\n    product: Product,\n    quantity: int,\n    coupon_percent: Decimal,\n    tax_percent: Decimal,\n) -> LineQuote:\n    \"\"\"Price `quantity` units of one product.\"\"\"\n    check_quantity(quantity)\n    gross = product.list_price * qu\n[... 550 characters cut ...]\notal=net + tax,\n    )\n\n\ndef quote_items(\n    items: Sequence[tuple[Product, int]],\n    coupon: Coupon | None,\n    tax_percent: Decimal,\n) -> Quote:\n    \"\"\"Price a list of (product, quantity) pairs, one line per pair.\n\n    An empty list gives an all-zero quote.\"\"\"\n    coupon_percent = coupon.percent if coupon is not None else Decimal(0)\n    lines = tuple(\n        quote_line(product, quantity, coupon_percent, tax_percent)\n        for product, quantity in items\n    )\n    return Quote(\n        lines=lines,\n        subtotal=sum((line.gross for line in lines), ZERO),\n        discount=sum((line.discount for line in lines), ZERO),\n        net=sum((line.net for line in lines), ZERO),\n        tax=sum((line.tax for line in lines), ZERO),\n        total=sum((line.total for line in lines), ZERO),\n    )\n"
+      }
+    },
+    {
+      "i": 74,
+      "t": 137.03,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.2592,
+      "tool_calls": 32,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 5922,
+      "tokens_out": 47,
+      "text": null,
+      "calls": [
+        {
+          "id": "c33",
+          "tool": "read_file",
+          "label": "read_file tests/test_catalog.py",
+          "args": {
+            "path": "tests/test_catalog.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 75,
+      "t": 138.56,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.2592,
+      "tool_calls": 33,
+      "call": "c33",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "tests/test_catalog.py",
+        "content": "from decimal import Decimal\n\nimport pytest\nfrom stockroom import Product, Tier, Unit\nfrom stockroom.catalog import Catalog, normalize_sku\nfrom stockroom.errors import (\n    CatalogError,\n    DuplicateSku,\n    InvalidSku,\n    MoneyError,\n    UnknownSku,\n)\n\nD = Decimal\n\n\ndef make(sku=\"A-1\", **overrides):\n    values = {\"name\": \"Thing\", \"unit\": Unit.EACH, \"list_price\": D(\"2.00\")}\n    return Product(sku, **{**values, **overrides})\n\n\ndef test_r7_skus_are_normalised_to_upper_case():\n    \"\"\"R7: SKUs are case-insensitive and stored upper case.\"\"\"\n    assert normalize_sku(\"  pen-1 \") == \"PEN-1\"\n    assert make(\"pen-1\").sku == \"PEN-1\"\n\n\n@pytest.mark.parametrize(\"bad\", [\"\", \"a--b\", \"-a\", \"a-\", \"a b\", \"a_b\", \"x\" * 21])\ndef test_r7_bad_skus_are_rejected(bad):\n    \"\"\"R7: hyphen groups, letters and digits only, at most 20 characters.\"\"\"\n    with pytest.raises(InvalidSku):\n        normalize_sku(bad)\n\n\ndef test_r7_a_sku_can_be_added_once_and_is_found_in_any_case():\n    \"\"\"R7: duplicates are refused; lookups normalise the SKU.\"\"\"\n    catalog = Catalog()\n    catalog.add(make(\"pen-1\"))\n    with pytest.raises(DuplicateSku):\n        catalog.add(make(\"PEN-1\"))\n    assert catalog.get(\"Pen-1\").sku == \"PEN-1\" and \"pen-1\" in catalog\n    assert \"nope\" not in catalog and \"not a sku!\" not in catalog\n    with pytest.raises(UnknownSku):\n        catalog.get(\"NOPE\")\n\n\ndef test_r1_product_prices_are_decimal_only():\n    \"\"\"R1: a float price is refused, a string price is exact.\"\"\"\n    with pytest.raises(MoneyError):\n        make(list_price=1.5)\n    assert make(list_price=\"1.50\").list_price == D(\"1.50\")\n\n\ndef test_a_product_needs_a_name_and_a_known_unit():\n    \"\"\"Catalog validation, and unit codes (R16).\"\"\"\n    for bad in ({\"name\": \"  \"}, {\"unit\": \"each\"}):\n        with pytest.raises(CatalogError):\n            make(**bad)\n    assert Unit.parse(\" KG \") is Unit.KILOGRAM\n    with pytest.raises(CatalogError):\n        Unit.parse(\"litre\")\n\n\ndef test_r4_tiers_are_sorted_and_validated():\n    \"\"\"R4: min_qty of 2 or more, strictly rising percentages, 0 < percent <= 100.\"\"\"\n    product = make(tiers=(Tier(20, D(\"10\")), Tier(5, D(\"5\"))))\n    assert [t.min_qty for t in product.tiers] == [5, 20]\n    for args in ((1, D(\"5\")), (5, D(\"0\"))):\n        with pytest.raises(CatalogError):\n            Tier(*args)\n    with pytest.raises(MoneyError):\n        Tier(5, D(\"101\"))\n    for tiers in (\n        (Tier(5, D(\"5\")), Tier(5, D(\"6\"))),\n        (Tier(5, D(\"5\")), Tier(10, D(\"5\"))),\n    ):\n        with pytest.raises(CatalogError):\n            make(tiers=tiers)\n\n\ndef test_r11_set_price_replaces_the_product():\n    \"\"\"R11: a price change makes a new product; old copies are unchanged.\"\"\"\n    catalog = Catalog()\n    original = make(\"b-1\")\n    catalog.add(original)\n    catalog.add(make(\"a-1\"))\n    assert catalog.set_price(\"B-1\", \"3.25\").list_price == D(\"3.25\")\n    assert catalog.get(\"b-1\").list_price == D(\"3.25\")\n    assert original.list_price == D(\"2.00\")\n    assert [p.sku for p in catalog.products()] == [\"A-1\", \"B-1\"]  # sorted (R18)\n"
+      }
+    },
+    {
+      "i": 76,
+      "t": 138.56,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.27,
+      "tool_calls": 33,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 7014,
+      "tokens_out": 1475,
+      "text": null,
+      "calls": [
+        {
+          "id": "c34",
+          "tool": "list_dir",
+          "label": "list_dir tests",
+          "args": {
+            "path": "tests"
+          }
+        }
+      ]
+    },
+    {
+      "i": 77,
+      "t": 148.56,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.27,
+      "tool_calls": 34,
+      "call": "c34",
+      "tool": "list_dir",
+      "error": null,
+      "result": {
+        "entries": [
+          "tests/conftest.py",
+          "tests/test_broken_tiers.py",
+          "tests/test_catalog.py",
+          "tests/test_csvio.py",
+          "tests/test_money.py",
+          "tests/test_orders.py",
+          "tests/test_pricing.py",
+          "tests/test_stock.py"
+        ]
+      }
+    },
+    {
+      "i": 78,
+      "t": 148.57,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.2765,
+      "tool_calls": 34,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 8548,
+      "tokens_out": 37,
+      "text": null,
+      "calls": [
+        {
+          "id": "c35",
+          "tool": "read_file",
+          "label": "read_file tests/test_csvio.py",
+          "args": {
+            "path": "tests/test_csvio.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 79,
+      "t": 150.51,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.2765,
+      "tool_calls": 35,
+      "call": "c35",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "tests/test_csvio.py",
+        "content": "from decimal import Decimal\n\nimport pytest\nfrom stockroom import Store, Tier, csvio\nfrom stockroom.csvio import parse_tiers\nfrom stockroom.errors import CsvFormatError\n\nD = Decimal\n\nHEADER = \"sku,name,unit,price,taxable,tiers\\n\"\n\nMIXED = (\n    HEADER\n    + \"cab-1,Cable,each,3.50,true,10:5;50:10\\n\"  # line 2: good\n    + \"BAD SKU,Broken,each,1.00,true,\\n\"  # line 3: bad SKU\n    + \"pen-2,Pencil,each,1.005,true,\\n\"  # line 4: three decimals\n    + \"mug-1,Mug,box,4.00,maybe,\\n\"  # line 5: taxable is not a boolean\n    + \"CAB-1,Cable again,each,3.00,true,\\n\"  # line 6: duplicate of line 2\n    + \"\\n\"  # line 7: blank, skipped\n    + \"lamp,Lamp,each,12.00,false,\\n\"  # line 8: good\n    + \"short,Short,each\\n\"  # line 9: too few fields\n    + \"long,Long,each,1.00,true,,extra\\n\"  # line 10: too many fields\n)\n\n\ndef write(tmp_path, text):\n    path = tmp_path / \"products.csv\"\n    path.write_text(text, encoding=\"utf-8\")\n    return path\n\n\ndef test_r16_a_good_file_imports_every_row(tmp_path):\n    \"\"\"R16: columns in the documented form, tiers parsed.\"\"\"\n    rows = \"cab-1,Cable,kg,3.50,TRUE,10:5;50:12.5\\nlamp,Lamp,each,12,false,\\n\"\n    result = csvio.import_products(write(tmp_path, HEADER + rows))\n    assert result.errors == ()\n    cable, lamp = result.products\n    assert (cable.sku, cable.unit.value, cable.taxable) == (\"CAB-1\", \"kg\", True)\n    assert cable.list_price == Decimal(\"3.50\")\n    assert cable.tiers == (Tier(10, Decimal(\"5\")), Tier(50, Decimal(\"12.5\")))\n    assert (lamp.taxable, lamp.tiers, str(lamp.list_price)) == (False, (), \"12.00\")\n    text = \"name,price,sku,tiers,unit,taxable\\nCable,3.50,cab-1,,each,true\\n\"\n    shuffled = csvio.import_products(write(tmp_path, text))  # any column order\n    assert [p.sku for p in shuffled.products] == [\"CAB-1\"]\n\n\n@pytest.mark.parametrize(\n    \"text\", [\"\", \"sku,name,unit,price,taxable\\n\", HEADER.strip() + \",extra\\n\"]\n)\ndef test_r16_an_unusable_file_is_a_format_error(tmp_path, text):\n    \"\"\"R16: empty files and other columns raise CsvFormatError.\"\"\"\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(write(tmp_path, text))\n\n\ndef test_r16_a_file_that_is_not_utf8_is_a_format_error(tmp_path):\n    \"\"\"R16: undecodable bytes raise CsvFormatError.\"\"\"\n    path = tmp_path / \"bad.csv\"\n    path.write_bytes(HEADER.encode() + b\"x-1,Bad\\xe9,each,1.00,true,\\n\")\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(path)\n\n\ndef test_r17_good_rows_are_kept_and_bad_rows_reported_with_line_numbers(tmp_path):\n    \"\"\"R17: file line numbers, header is line 1, blank lines still count.\"\"\"\n    result = csvio.import_products(write(tmp_path, MIXED))\n    assert [p.sku for p in result.products] == [\"CAB-1\", \"LAMP\"]\n    assert [e.line for e in result.errors] == [3, 4, 5, 6, 9, 10]\n    by_line = {e.line: e.message for e in result.errors}\n    assert \"duplicate\" in by_line[6] and \"decimal\" in by_line[4]\n    assert \"fewer\" in by_line[9] and \"more\" in by_line[10]\n\n\ndef test_r17_import_never_overwrites_an_existing_product(store\n[... 1,704 characters cut ...]\ntoo.\"\"\"\n    fresh = Store(tax_percent=\"0\")\n    fresh.import_products(write(tmp_path, MIXED))\n    fresh.import_products(\n        write(tmp_path, HEADER + 'mix-1,\"Pen, blue\",each,0.99,true,\\n')\n    )\n    fresh.receive(\"lamp\", 4)\n    path = tmp_path / \"out.csv\"\n    fresh.export_stock(path)\n    assert path.read_text().splitlines()[1:] == [\n        \"CAB-1,Cable,each,0,0,0,0.00\",\n        \"LAMP,Lamp,each,4,0,4,48.00\",\n        'MIX-1,\"Pen, blue\",each,0,0,0,0.00',\n    ]\n\n\ndef test_r16_a_csv_parser_error_is_a_format_error(tmp_path):\n    \"\"\"R16: a field over the csv module's size limit makes it fail; unusable file.\"\"\"\n    path = tmp_path / \"huge.csv\"\n    path.write_text(HEADER + \"x-1,\" + \"n\" * 200_000 + \",each,1.00,true,\\n\")\n    with pytest.raises(CsvFormatError):\n        csvio.import_products(path)\n"
+      }
+    },
+    {
+      "i": 80,
+      "t": 150.52,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.2864,
+      "tool_calls": 35,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 10742,
+      "tokens_out": 492,
+      "text": null,
+      "calls": [
+        {
+          "id": "c36",
+          "tool": "read_file",
+          "label": "read_file stockroom/csvio.py",
+          "args": {
+            "path": "stockroom/csvio.py"
+          }
+        }
+      ]
+    },
+    {
+      "i": 81,
+      "t": 154.63,
+      "kind": "tool_result",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.2864,
+      "tool_calls": 36,
+      "call": "c36",
+      "tool": "read_file",
+      "error": null,
+      "result": {
+        "path": "stockroom/csvio.py",
+        "content": "\"\"\"CSV import of products and export of stock levels.\n\nImport file columns, in any order: `sku,name,unit,price,taxable,tiers`.\n`taxable` is `true` or `false`. `tiers` is empty or a `;`-separated list of\n`min_qty:percent` steps such as `10:5;50:12.5`.\n\nExport file columns: `sku,name,unit,on_hand,reserved,available,stock_value`,\none row per product, sorted by SKU, with `\\\\n` line endings.\n\"\"\"\n\nimport csv\nfrom collections.abc import Container\nfrom dataclasses import dataclass\nfrom decimal import Decimal\nfrom pathlib import Path\nfrom typing import TYPE_CHECKING\n\nfrom .catalog import Product, Tier, Unit, normalize_sku\nfrom .errors import CatalogError, CsvFormatError, StockroomError\nfrom .money import format_money, parse_percent\n\nif TYPE_CHECKING:\n    from .store import Store\n\nIMPORT_COLUMNS = (\"sku\", \"name\", \"unit\", \"price\", \"taxable\", \"tiers\")\nEXPORT_COLUMNS = (\n    \"sku\",\n    \"name\",\n    \"unit\",\n    \"on_hand\",\n    \"reserved\",\n    \"available\",\n    \"stock_value\",\n)\n\n\n@dataclass(frozen=True)\nclass RowError:\n    \"\"\"A rejected row. `line` is the row's line number in the file (the header is 1).\"\"\"\n\n    line: int\n    message: str\n\n\n@dataclass(frozen=True)\nclass ImportResult:\n    \"\"\"Products that were accepted and rows that were not, each in file order.\"\"\"\n\n    products: tuple[Product, ...]\n    errors: tuple[RowError, ...]\n\n\ndef parse_tiers(text: str) -> tuple[Tier, ...]:\n    \"\"\"Parse the `tiers` column. An empty string means no tiers.\"\"\"\n    text = text.strip()\n    if not text:\n        return ()\n    tiers = []\n    for part in text.split(\";\"):\n        min_qty, separator, percent = part.partition(\":\")\n        if not separator:\n            raise CatalogError(f\"tier must look like min_qty:percent: {part!r}\")\n        try:\n            quantity = int(min_qty.strip())\n        except ValueError:\n            raise CatalogError(\n                f\"tier quantity is not a whole number: {part!r}\"\n            ) from None\n        tiers.append(Tier(quantity, parse_percent(percent)))\n    return tuple(tiers)\n\n\ndef parse_taxable(text: str) -> bool:\n    \"\"\"`true` or `false`, in any case.\"\"\"\n    value = text.strip().lower()\n    if value not in (\"true\", \"false\"):\n        raise CatalogError(f\"taxable must be true or false: {text!r}\")\n    return value == \"true\"\n\n\ndef import_products(path: str | Path, existing: Container[str] = ()) -> ImportResult:\n    \"\"\"Read products from a CSV file.\n\n    A bad row is skipped and reported; the good rows are still returned. A row\n    is bad if a field is invalid, if fields are missing or extra, or if its SKU\n    appeared earlier in the file or is in `existing`. A file that is empty, not\n    UTF-8, malformed for the csv module, or lacks exactly the expected columns\n    raises `CsvFormatError`.\"\"\"\n    try:\n        with open(path, newline=\"\", encoding=\"utf-8\") as handle:\n            reader = csv.DictReader(handle)\n            header = reader.fieldnames\n            if header is None:\n                raise CsvFormatError(\"the file is empty\")\n           \n[... 1,795 characters cut ...]\nw per product with its stock levels and stock value.\n\n    `stock_value` is on-hand units times the list price, in cents precision.\"\"\"\n    with open(path, \"w\", newline=\"\", encoding=\"utf-8\") as handle:\n        writer = csv.writer(handle, lineterminator=\"\\n\")\n        writer.writerow(EXPORT_COLUMNS)\n        for product in store.catalog.products():\n            level = store.inventory.level(product.sku)\n            value: Decimal = product.list_price * level.on_hand\n            writer.writerow(\n                [\n                    product.sku,\n                    product.name,\n                    product.unit.value,\n                    level.on_hand,\n                    level.reserved,\n                    level.available,\n                    format_money(value),\n                ]\n            )\n"
+      }
+    },
+    {
+      "i": 82,
+      "t": 154.64,
+      "kind": "model_call",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.3053,
+      "tool_calls": 36,
+      "agent": "reviewer",
+      "model": "gemini-3.8-flash",
+      "tokens_in": 12752,
+      "tokens_out": 2497,
+      "text": null,
+      "calls": [
+        {
+          "id": "c37",
+          "tool": "set_model_response",
+          "label": "answer",
+          "args": {
+            "must_fix": [],
+            "comments": [],
+            "verdict": "approve"
+          }
+        }
+      ]
+    },
+    {
+      "i": 83,
+      "t": 170.45,
+      "kind": "review",
+      "node": "reviewer",
+      "visit": 1,
+      "cost_usd": 0.3053,
+      "tool_calls": 37,
+      "value": {
+        "verdict": "approve",
+        "comments": [],
+        "must_fix": []
+      }
+    },
+    {
+      "i": 84,
+      "t": 170.46,
+      "kind": "node",
+      "node": "route_review",
+      "visit": 1,
+      "cost_usd": 0.3053,
+      "tool_calls": 37,
+      "from": "reviewer",
+      "via": null,
+      "message": null
+    },
+    {
+      "i": 85,
+      "t": 170.46,
+      "kind": "node",
+      "node": "deliver_patch",
+      "visit": 1,
+      "cost_usd": 0.3053,
+      "tool_calls": 37,
+      "from": "route_review",
+      "via": "approve",
+      "message": "patch written to patch.diff"
+    },
+    {
+      "i": 86,
+      "t": 170.58,
+      "kind": "outcome",
+      "node": "deliver_patch",
+      "visit": 1,
+      "cost_usd": 0.3053,
+      "tool_calls": 37
+    }
+  ]
+}
