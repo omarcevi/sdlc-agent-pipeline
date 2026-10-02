@@ -34,6 +34,12 @@ from tests.unit.test_pipeline import (
 NOTE = PROBE_NOTE
 
 
+@pytest.fixture(autouse=True)
+def _runs_in_tmp(tmp_path, monkeypatch):
+    """main() claims its run stamp under RUNS_DIR; keep that out of the real runs/."""
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+
+
 class RecordingLlm(FakeLlm):
     """Scripted model that keeps the text of every request it is sent."""
 

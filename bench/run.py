@@ -11,15 +11,15 @@ import argparse
 import asyncio
 import os
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from app.environment.factory import check_environment_config, environment_backend
+from app.nodes.finish import runs_dir
 from app.task_store import list_tasks, load_task, task_dir
 from app.tracing import enable_cloud_trace, flush_traces, trace_explorer_url
-from bench.matrix import plan_runs, run_matrix
+from bench.matrix import claim_stamp, plan_runs, run_matrix
 from bench.presets import PRESETS, solo_model_name
 from bench.validate import validate_task
 
@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
             return _fail("invalid tasks:\n  " + "\n  ".join(problems))
 
     tracing_on = enable_cloud_trace()
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    stamp = claim_stamp(runs_dir())
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     results_path = out / f"{stamp}-{args.system}-{args.preset}.json"

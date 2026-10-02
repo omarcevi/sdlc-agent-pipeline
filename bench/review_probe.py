@@ -16,7 +16,6 @@ import sys
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -24,10 +23,11 @@ from google.adk.events import Event
 
 from app.driver import RunCrashed, run_pipeline
 from app.environment.factory import check_environment_config
+from app.nodes.finish import runs_dir
 from app.review_probe import build_review_probe_workflow
 from app.schemas import ProbeRequest
 from app.tracing import enable_cloud_trace, flush_traces, trace_explorer_url
-from bench.matrix import RunSpec, _complete, _crash_row, run_matrix
+from bench.matrix import RunSpec, _complete, _crash_row, claim_stamp, run_matrix
 from bench.presets import PRESETS, role_models
 from bench.probes import ProbeSpec, dev_task, list_probes, load_probe, validate_probe
 
@@ -277,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
             return _fail("invalid probes:\n  " + "\n  ".join(problems))
 
     tracing_on = enable_cloud_trace()
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    stamp = claim_stamp(runs_dir())
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     results_path = out / f"{stamp}-review-probe-{args.preset}.json"

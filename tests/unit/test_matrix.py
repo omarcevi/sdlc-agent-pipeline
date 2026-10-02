@@ -546,3 +546,16 @@ async def test_rows_carry_repo_difficulty_and_split(tmp_path):
     assert [r["crashed"] for r in rows] == [False, True]
     for r in rows:
         assert (r["repo"], r["difficulty"], r["split"]) == ("mini", "easy", "dev")
+
+
+def test_claim_stamp_gives_runs_started_in_the_same_second_different_stamps(tmp_path):
+    # 2026-10-02: two bench.run started in the same second (Docker and cloud) got the
+    # same stamp, so their runs shared run ids and run directories.
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 10, 2, 5, 22, 58, tzinfo=UTC)
+    first = matrix.claim_stamp(tmp_path, now=lambda: now)
+    second = matrix.claim_stamp(tmp_path, now=lambda: now)
+    assert first == "20261002T052258Z"
+    assert second == "20261002T052259Z"
+    assert sorted(p.name for p in (tmp_path / ".stamps").iterdir()) == [first, second]

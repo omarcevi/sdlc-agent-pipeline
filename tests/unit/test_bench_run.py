@@ -12,6 +12,12 @@ from tests.fakes import make_bench_task
 from tests.unit.sandbox_fakes import CLOUD_ENV
 
 
+@pytest.fixture(autouse=True)
+def _runs_in_tmp(tmp_path, monkeypatch):
+    """main() claims its run stamp under RUNS_DIR; keep that out of the real runs/."""
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+
+
 def ok_row(spec: matrix.RunSpec) -> dict:
     return {
         "resolved": True,

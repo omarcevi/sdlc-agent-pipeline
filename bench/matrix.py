@@ -4,6 +4,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from google.adk.events import Event
@@ -53,6 +54,30 @@ class RunSpec:
             head += f"-{self.variant}"
         base = f"{head}-r{self.repeat}-{self.stamp}"
         return f"{base}-retry{self.attempt}" if self.attempt > 0 else base
+
+
+STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
+
+
+def claim_stamp(runs_dir: Path, *, now: Callable[[], datetime] | None = None) -> str:
+    """A UTC second-resolution stamp no other run on this machine has claimed.
+
+    Run ids end with the stamp, so two matrices started in the same second (one on
+    Docker, one on cloud sandboxes, say) would otherwise share run ids and write into
+    the same run directories. Each stamp is claimed by creating
+    `<runs_dir>/.stamps/<stamp>` exclusively; a taken second moves on to the next.
+    """
+    claims = runs_dir / ".stamps"
+    claims.mkdir(parents=True, exist_ok=True)
+    when = (now or (lambda: datetime.now(UTC)))()
+    for _ in range(3600):
+        stamp = when.strftime(STAMP_FORMAT)
+        try:
+            (claims / stamp).open("x").close()
+            return stamp
+        except FileExistsError:
+            when += timedelta(seconds=1)
+    raise RuntimeError("no free run stamp in the next hour")
 
 
 def plan_runs(
