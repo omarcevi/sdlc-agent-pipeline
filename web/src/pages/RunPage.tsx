@@ -20,6 +20,8 @@ import { SYSTEM_LABEL } from "./RunList";
 
 const TABS = ["Issue", "Plan", "Agent summary", "Diff", "Tests", "Review"] as const;
 type Tab = (typeof TABS)[number];
+const HASH_SETTLE_MS = 250;
+const tabId = (name: Tab) => `tab-${name.replace(/\s+/g, "-").toLowerCase()}`;
 
 export interface RunPageProps {
   entry: IndexEntry;
@@ -32,6 +34,7 @@ export interface RunPageProps {
 function inFormControl(target: EventTarget | null, key: string): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
+  if ((key === "ArrowLeft" || key === "ArrowRight") && target.closest("[role=tab]") !== null) return true;
   const tag = target.tagName;
   if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return true;
   return key === " " && target.closest("button,summary,a,[role=button]") !== null;
@@ -57,10 +60,38 @@ export function RunPage({ entry, replay, graphs, startT }: RunPageProps) {
     if (Number.isFinite(s) && (SPEEDS as readonly number[]).includes(s)) live.current.setSpeed(s);
   };
 
-  // While paused the address bar carries the time, so the link shares this moment.
+  // While paused the address bar carries the time, so the link shares this moment. Written at
+  // once on opening or pausing, and otherwise only when the time settles: browsers rate-limit
+  // replaceState, so scrubbing must not call it per frame. A failure is ignored.
+  const wasPaused = useRef(false);
   useEffect(() => {
-    if (!player.playing) window.history.replaceState(null, "", runHash(entry.run_id, t));
+    if (player.playing) {
+      wasPaused.current = false;
+      return;
+    }
+    const write = () => {
+      try {
+        window.history.replaceState(null, "", runHash(entry.run_id, t));
+      } catch {
+        // The address bar is a convenience; the page works without it.
+      }
+    };
+    if (!wasPaused.current) {
+      wasPaused.current = true;
+      write();
+      return;
+    }
+    const id = setTimeout(write, HASH_SETTLE_MS);
+    return () => clearTimeout(id);
   }, [player.playing, t, entry.run_id]);
+
+  // A hand-edited ?t= on the same run seeks there.
+  const lastStartT = useRef(startT);
+  useEffect(() => {
+    if (startT === lastStartT.current) return;
+    lastStartT.current = startT;
+    if (startT !== null && Number.isFinite(startT)) live.current.seek(startT);
+  }, [startT]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -159,6 +190,8 @@ export function RunPage({ entry, replay, graphs, startT }: RunPageProps) {
               key={name}
               type="button"
               role="tab"
+              id={tabId(name)}
+              aria-controls="run-tabpanel"
               aria-selected={tab === name}
               className={`rounded-t border px-3 py-1 text-sm ${tab === name ? "font-semibold" : ""}`}
               onClick={() => setTab(name)}
@@ -167,7 +200,7 @@ export function RunPage({ entry, replay, graphs, startT }: RunPageProps) {
             </button>
           ))}
         </div>
-        <div role="tabpanel" className="rounded-b border p-3">
+        <div role="tabpanel" id="run-tabpanel" aria-labelledby={tabId(tab)} className="rounded-b border p-3">
           {tab === "Issue" && <IssuePanel issue={replay.run.issue} />}
           {tab === "Plan" && <PlanPanel plans={state.plans} graphId={replay.run.graph} />}
           {tab === "Agent summary" && <ClaimPanel claims={state.claims} />}

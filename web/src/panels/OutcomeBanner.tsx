@@ -52,7 +52,7 @@ export function OutcomeBanner({ replay, visible }: { replay: Replay; visible: bo
   if (!visible) return null;
   const o = replay.outcome;
   return (
-    <section data-testid="outcome" className="rounded border p-3 space-y-1" aria-label="Outcome">
+    <section data-testid="outcome" role="status" className="rounded border p-3 space-y-1" aria-label="Outcome">
       <h2 className="text-base font-semibold m-0">{outcomeHeadline(replay)}</h2>
       <p className="m-0 text-sm">
         {`cost $${o.cost_usd.toFixed(4)} · ${o.tool_calls} tool calls · ${fmtClock(o.duration_s)} wall time · ${o.test_attempts} test attempts · ${o.review_rounds} review rounds`}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { loadIndex, loadReplay } from "./data";
 import graphsJson from "./graph/graphs.json";
 import { NotFound } from "./pages/NotFound";
@@ -72,5 +73,9 @@ export function App() {
     return <Message>{newer ? "This replay site needs a newer viewer" : "Could not load the replays"}</Message>;
   }
   if (route.name === "list") return <RunList index={index.value} />;
-  return <RunRoute key={route.runId} index={index.value} runId={route.runId} t={route.t} />;
+  return (
+    <ErrorBoundary key={route.runId}>
+      <RunRoute index={index.value} runId={route.runId} t={route.t} />
+    </ErrorBoundary>
+  );
 }
