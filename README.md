@@ -6,7 +6,7 @@ A multi-agent pipeline on Google ADK 2.x that turns a GitHub issue into a tested
 
 **Result:** on 15 benchmark tasks, three repeats each, a single agent matched the three-agent pipeline: 36 against 34 of 45 runs resolved (the gap is two runs where the model provider stalled), at $0.38 against $0.43 a run.
 
-![Demo: an issue becomes a pull request](docs/media/demo.gif)
+[![A replayed run: the three agents fix an issue in mdlite; the graph, the tool calls, the one-line fix and the result](docs/media/replay-md-001.png)](https://omarcevi.dev/sdlc-agent-pipeline/#/run/md-001-multi-flash-r1-20261001T062611Z)
 
 **[Watch seven recorded runs](https://omarcevi.dev/sdlc-agent-pipeline/)**, step by step: the agent graph, every tool call, the diff, the tests, the review and the cost, failures included. A static site with no backend.
 
