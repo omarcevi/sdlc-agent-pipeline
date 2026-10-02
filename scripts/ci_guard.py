@@ -21,8 +21,8 @@ from pathlib import Path
 SMOKE_TASKS = ("tc-001", "tc-003", "sr-001")
 EVAL_RUNS = 5
 LIMIT_USD = Decimal("25.00")
-DEV_ID = re.compile(r"[a-z]{2}-\d{3}")
-HELD_OUT = re.compile(r"-h\d\d", re.IGNORECASE)
+DEV_ID = re.compile(r"[a-z]{2}-[0-9]{3}")
+HELD_OUT = re.compile(r"-h[0-9][0-9]", re.IGNORECASE)
 
 
 class Refused(Exception):
@@ -35,7 +35,7 @@ class _Parser(argparse.ArgumentParser):
 
 
 def _parser() -> argparse.ArgumentParser:
-    p = _Parser(prog="ci_guard", add_help=False)
+    p = _Parser(prog="ci_guard", add_help=False, allow_abbrev=False)
     p.add_argument("--kind", required=True, choices=("smoke", "eval", "bench"))
     p.add_argument("--ref", required=True)
     p.add_argument("--system", choices=("multi", "single"))
@@ -92,9 +92,9 @@ def _plan(a: argparse.Namespace) -> tuple[list[str], str, str, int, int]:
     if a.tasks is not None and a.tasks.strip() != "":
         tasks = _listed_tasks(a.tasks, a.tasks_dir)
     else:
-        if a.tasks is not None and HELD_OUT.search(a.tasks):
-            raise Refused("held-out tasks never run in CI")
         tasks = _dev_tasks(a.tasks_dir)
+        if not tasks:
+            raise Refused("no dev tasks found")
     return tasks, system, preset, repeats, len(tasks) * repeats
 
 
@@ -108,7 +108,10 @@ def main(argv: list[str]) -> int:
             raise Refused("budget-usd must be a number") from None
         if not budget.is_finite() or budget <= 0:
             raise Refused("budget-usd must be a number")
-        cost = (budget * runs).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        try:
+            cost = (budget * runs).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except InvalidOperation:
+            raise Refused("budget-usd must be a number") from None
         if cost > LIMIT_USD and not a.accept_over_25:
             raise Refused(
                 f"worst case ${cost} is over $25; pass accept_over_25 to run it"

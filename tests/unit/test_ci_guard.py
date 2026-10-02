@@ -206,3 +206,34 @@ def test_refusal_prints_one_error_line_and_exits_2(tasks_dir, tmp_path):
     assert r.stdout == ""
     assert len(r.stderr.splitlines()) == 1
     assert r.stderr.startswith("error: ")
+
+
+def test_non_ascii_digits_are_not_dev_tasks(tasks_dir, tmp_path):
+    (tasks_dir / "tc-\u0660\u0660\u0663").mkdir()
+    out = tmp_path / "out"
+    r = bench(tasks_dir, output=out)
+    assert r.returncode == 0, r.stderr
+    assert "tasks=sr-001,tc-001,tc-002" in out.read_text().splitlines()
+    assert_refused(bench(tasks_dir, "--tasks", "tc-\u0660\u0660\u0663"), "bad task id")
+    assert_refused(bench(tasks_dir, "--tasks", "tc-h\u0660\u0661"), "bad task id")
+
+
+@pytest.mark.parametrize("budget", ["1e30", "nan", "inf", "-1", "0", "abc", "1e999999"])
+def test_bad_budgets_are_one_error_line(tasks_dir, budget):
+    assert_refused(
+        bench(tasks_dir, "--budget-usd", budget), "budget-usd must be a number"
+    )
+
+
+def test_abbreviated_flags_are_refused(tasks_dir):
+    r = bench(tasks_dir, "--repeat", "1")
+    assert r.returncode == 2
+    assert r.stdout == ""
+    assert len(r.stderr.splitlines()) == 1
+    assert r.stderr.startswith("error: ")
+
+
+def test_empty_dev_split_is_refused(tmp_path):
+    empty = tmp_path / "empty"
+    (empty / "tc-h01").mkdir(parents=True)
+    assert_refused(bench(empty), "no dev tasks found")
