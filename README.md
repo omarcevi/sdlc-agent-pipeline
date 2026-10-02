@@ -4,7 +4,7 @@ A multi-agent pipeline on Google ADK 2.x that turns a GitHub issue into a tested
 
 [![CI](https://github.com/omarcevi/sdlc-agent-pipeline/actions/workflows/ci.yaml/badge.svg)](https://github.com/omarcevi/sdlc-agent-pipeline/actions/workflows/ci.yaml)
 
-**Result:** on 15 benchmark tasks, three repeats each, a single agent matched the three-agent pipeline: 36 against 34 of 45 runs resolved, at $0.38 against $0.43 a run.
+**Result:** on 15 benchmark tasks, three repeats each, a single agent matched the three-agent pipeline: 36 against 34 of 45 runs resolved (the gap is two runs where the model provider stalled), at $0.38 against $0.43 a run.
 
 ![Demo: an issue becomes a pull request](docs/media/demo.gif)
 
