@@ -231,7 +231,8 @@ async def test_label_added_by_no_known_actor_is_refused(live):
     await assert_refused("issue is not labelled agent-ok by an allowed user")
 
 
-async def test_allowed_logins_match_case_insensitively(live):
+async def test_allowed_logins_match_case_insensitively(live, monkeypatch):
+    use_env(monkeypatch, FakeEnvironment())
     live.label_actor = "HELPER"
     record = await run_live(
         FakeLlm([json_out(Plan(actionable=False, decline_reason="x", summary="x"))])
@@ -265,7 +266,8 @@ async def test_a_missing_issue_is_a_refusal_but_a_missing_repo_is_a_github_refus
     assert [c[0] for c in live.calls] == ["default_branch"]
 
 
-async def test_a_repo_or_owner_named_pull_is_not_a_pull_request(live):
+async def test_a_repo_or_owner_named_pull_is_not_a_pull_request(live, monkeypatch):
+    use_env(monkeypatch, FakeEnvironment())
     live.issue = Issue(
         **{**live.issue.__dict__, "html_url": "https://github.com/acme/pull/issues/7"}
     )
