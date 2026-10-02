@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from app.environment.agent_runtime import AgentRuntimeEnvironment, SandboxSettings
 from app.environment.base import WORKDIR, InfraError
@@ -70,7 +71,10 @@ def _platform(settings: SandboxSettings):
     return _infra().SdkPlatform(settings.project, settings.location)
 
 
-@pytest.fixture
+# The sandbox's HTTP client binds its connections to the event loop that first
+# uses them. pyproject sets async fixtures to the session loop, but each test runs
+# in its own loop, so this fixture runs in the test's loop.
+@pytest_asyncio.fixture(loop_scope="function")
 async def started(cloud_settings):
     """Starts sandboxes with the configured settings (or changed ones) and closes
     every one of them at the end, whatever the test did."""

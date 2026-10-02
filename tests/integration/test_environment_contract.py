@@ -11,6 +11,7 @@ import shutil
 import time
 
 import pytest
+import pytest_asyncio
 
 from app.environment.agent_runtime import AgentRuntimeEnvironment, SandboxSettings
 from app.environment.base import WORKDIR, InfraError
@@ -23,11 +24,15 @@ _NO_DOCKER = pytest.mark.skipif(
 )
 
 
-@pytest.fixture(
+# The sandbox's HTTP client binds its connections to the event loop that first
+# uses them. pyproject sets async fixtures to the session loop, but each test runs
+# in its own loop, so this fixture runs in the test's loop.
+@pytest_asyncio.fixture(
+    loop_scope="function",
     params=[
         pytest.param("docker", marks=[pytest.mark.docker, _NO_DOCKER]),
         pytest.param("agent_runtime", marks=pytest.mark.cloud),
-    ]
+    ],
 )
 async def env(request, cloud_settings):
     if request.param == "docker":
