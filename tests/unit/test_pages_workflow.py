@@ -67,7 +67,9 @@ def test_the_leak_check_runs_before_the_upload():
     steps = _steps("build")
     leak = next(i for i, s in enumerate(steps) if "replay_check.py" in s.get("run", ""))
     upload = next(
-        i for i, s in enumerate(steps) if s.get("uses", "").startswith("actions/upload-pages-artifact@")
+        i
+        for i, s in enumerate(steps)
+        if s.get("uses", "").startswith("actions/upload-pages-artifact@")
     )
     assert leak < upload
 
@@ -84,7 +86,11 @@ def test_npm_ci_skips_install_scripts():
 
 def test_off_pull_requests_an_empty_redaction_secret_fails_before_the_leak_check():
     steps = _steps("build")
-    gate = next(i for i, s in enumerate(steps) if s.get("name") == "Require the redaction secret")
+    gate = next(
+        i
+        for i, s in enumerate(steps)
+        if s.get("name") == "Require the redaction secret"
+    )
     leak = next(i for i, s in enumerate(steps) if "replay_check.py" in s.get("run", ""))
     assert gate < leak
     assert steps[gate]["if"] == "github.event_name != 'pull_request'"
