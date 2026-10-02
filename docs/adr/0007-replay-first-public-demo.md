@@ -29,4 +29,4 @@ The public demo is a set of recorded runs replayed in a static site, not a live 
 - Times come from the event log, so a model call's latency and its tool run cannot be shown separately; the "How to read this" panel says so.
 - The exact project values are checked only where they are known: on the owner's machine, and in CI through the `REPLAY_REDACT` secret. Elsewhere the pattern rules still apply.
 - Live mode with Approve/Reject, a FastAPI proxy, IAP and persistent approval sessions are not built. Live demo runs can be added as replays once they exist, with the live graph and approval and pull request steps.
-- The site goes live only when the repository is on GitHub with Pages enabled, a step the owner approves separately.
+- The site goes live only when the repository is on GitHub with Pages enabled, a step the owner approves separately. (Status, 2026-10-02: live at https://omarcevi.dev/sdlc-agent-pipeline/.)

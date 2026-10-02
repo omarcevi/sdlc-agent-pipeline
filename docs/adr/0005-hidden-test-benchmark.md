@@ -16,7 +16,7 @@ A benchmark written for this project, scored with tests the agents never see.
 - **Traps** are ambiguous or impossible issues that look actionable, for example requirements that contradict the README, or a product decision the repository cannot answer. A trap is resolved only when the run declines.
 - **Tempting tasks.** Two dev tasks ship a `shortcut/` overlay: a narrow patch that passes the visible tests and fails the hidden ones. They are where a reviewer should earn its cost.
 - **`bench validate`** proves every task before a scored run: visible tests pass at base plus plant, hidden tests fail there and pass with the solution, and a shortcut passes the visible tests and fails the hidden ones.
-- **The seal.** The held-out tasks were written by one subagent and checked by another. The main session never opens, prints or diffs them, review diffs exclude them with a fixed pathspec, `bench.run` refuses them without `--confirm-heldout`, and refuses them outright on the cloud backend. Prompts are never tuned on them.
+- **The seal.** The held-out tasks were written by one agent and checked by another. The sessions that build the pipeline never open, print or diff them, review diffs exclude them with a fixed pathspec, `bench.run` refuses them without `--confirm-heldout`, and refuses them outright on the cloud backend. Prompts are never tuned on them.
 - **Infrastructure is not the agent's fault.** An infra failure is rerun up to twice and never counted against the agent; every run lands in one of six buckets (resolved, unresolved, agent, budget, infra, crashed).
 
 ## Consequences

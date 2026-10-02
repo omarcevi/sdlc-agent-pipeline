@@ -55,8 +55,12 @@ IDENTITIES = (
 
 def test_names_drawn_in_the_overview_exist_in_terraform():
     source = SOURCE.read_text()
+    # Only the applied roots; the scaffold's cicd/ root is never applied.
+    roots = ("single-project", "budget")
     terraform = "\n".join(
-        p.read_text() for p in (ROOT / "deployment" / "terraform").rglob("*.tf")
+        p.read_text()
+        for root in roots
+        for p in (ROOT / "deployment" / "terraform" / root).rglob("*.tf")
     )
     variables = (ROOT / "deployment/terraform/single-project/variables.tf").read_text()
     project = re.search(
@@ -116,6 +120,14 @@ def test_relative_links_resolve():
             if path and not (doc.parent / path).resolve().exists():
                 missing.append(f"{doc.relative_to(ROOT)} -> {target}")
     assert not missing, missing
+
+
+def test_readme_links_every_decision_record():
+    readme = (ROOT / "README.md").read_text()
+    records = sorted((ROOT / "docs" / "adr").glob("[0-9][0-9][0-9][0-9]-*.md"))
+    assert len(records) >= 7
+    for record in records:
+        assert f"(docs/adr/{record.name})" in readme, record.name
 
 
 def test_page_has_the_overview_and_the_four_views():
