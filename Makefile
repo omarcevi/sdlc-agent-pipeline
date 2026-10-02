@@ -50,7 +50,7 @@ SAME_PROJECT = root="$(1)"; \
 
 .DEFAULT_GOAL := help
 
-.PHONY: help sandbox-image test test-docker validate eval tf-fmt-check tf-backup \
+.PHONY: help sandbox-image test test-docker validate eval diagrams tf-fmt-check tf-backup \
 	require-project require-budget-try require-confirm require-budget-plan \
 	require-same-project-infra require-same-project-budget \
 	infra-plan infra-apply budget-plan budget-apply budget-guard-test \
@@ -58,7 +58,7 @@ SAME_PROJECT = root="$(1)"; \
 	smoke-deployed teardown-dry-run teardown teardown-budget
 
 help:
-	@echo "Local and free: sandbox-image test test-docker validate tf-fmt-check tf-backup deploy-stage deploy-check"
+	@echo "Local and free: sandbox-image test test-docker validate diagrams tf-fmt-check tf-backup deploy-stage deploy-check"
 	@echo "Read-only cloud (need GOOGLE_CLOUD_PROJECT): infra-plan budget-plan (also BUDGET_TRY) teardown-dry-run sweep-sandboxes"
 	@echo "Create, change, destroy or spend (owner approval, AGENTS.md hard rule 8):"
 	@echo "  infra-apply budget-apply budget-guard-test sandbox-cloud test-cloud deploy smoke-deployed"
@@ -106,6 +106,11 @@ test-docker: sandbox-image
 
 validate:
 	uv run python -m bench.validate
+
+# Needs Graphviz (brew install graphviz). Run it after any change to docs/architecture/overview.py.
+diagrams:
+	uv run --no-project --with "diagrams==0.25.1" python docs/architecture/overview.py
+	uv run python docs/architecture/agent_graph.py
 
 # terraform fmt runs per root; the cicd root is not touched.
 tf-fmt-check:

@@ -28,3 +28,18 @@ describe("layout", () => {
     });
   }
 });
+
+describe("fitting the graph", () => {
+  // React Flow's default minimum zoom (0.5) could not fit the multi-agent graph
+  // (about 1,870 px wide) into the run page's graph panel (about 660 px on a
+  // laptop), so `fitView` left `route_review` and `deliver_patch` off screen.
+  it("every graph fits a 400 px wide panel at the minimum zoom", async () => {
+    const { MIN_ZOOM } = await import("./GraphView");
+    const NODE_WIDTH = 200; // generous: the widest card plus margin
+    for (const id of ["multi", "single"] as GraphId[]) {
+      const xs = Object.values(LAYOUT[id]).map((p) => p.x);
+      const width = Math.max(...xs) - Math.min(...xs) + NODE_WIDTH;
+      expect(width * MIN_ZOOM, id).toBeLessThanOrEqual(400);
+    }
+  });
+});
