@@ -2,6 +2,8 @@
 
 A multi-agent pipeline on Google ADK 2.x that turns a GitHub issue into a tested pull request.
 
+**Watch it work:** [replays of seven real runs](https://omarcevi.dev/sdlc-agent-pipeline/), step by step: the pipeline graph, every tool call, the diff, the tests, the reviewer's verdict and the cost. A static site, no backend.
+
 Status: under construction. Design: `docs/superpowers/specs/2026-09-29-sdlc-agent-pipeline-design.md`.
 
 ## Results so far
@@ -21,7 +23,7 @@ Read this with its caveats:
 - **The rest of the gap is two stalled model calls.** Two multi-agent runs on easy tasks waited on a model reply that never came, and the wall-clock cap ended them. Without those two runs, the multi-agent pipeline resolves 34 of 43 (79%) against the single agent's 36 of 45 (80%). The harness now gives up on a stalled call after 8 minutes and retries it once, instead of waiting for the run's cap.
 - **The planner and the reviewer changed no outcome.** No test-fix or review loop was entered in 90 runs; the reviewer approved all 28 patches it saw. On two tasks built to tempt a narrow fix, both systems fixed the root cause in all 12 runs.
 - **The extra agents cost more.** On the resolved tasks that need a patch, the multi-agent pipeline used about 42 tool calls per run against 23, and $0.35 against $0.26.
-- **Fifteen tasks is a small sample.** One task is 6.7 points of resolve rate. Five more tasks are held out, sealed, and run once at the end of the project.
+- **Fifteen tasks is a small sample.** One task is 6.7 points of resolve rate. Five more tasks were written as a sealed held-out split: written by one agent, checked by another, and never opened by the main session. They have never been run; the owner dropped the held-out run for now (design spec §19), and they are published as they are.
 
 Report, including every failed run and what was checked by hand: [comparison](docs/results/2026-10-01-2b-comparison.md). How the run went, with costs: [run log](docs/results/2026-10-01-2b-run-log.md). How the tasks were checked before it: [pilot log](docs/results/2026-09-30-2b-pilot-log.md).
 
@@ -45,4 +47,4 @@ Read this with its caveats:
 
 Reports, including every failed run and what was checked by hand: [equal caps](docs/results/2026-09-30-equal-caps-comparison.md), [first run](docs/results/2026-09-30-week2a-comparison.md). How the runs went, step by step, with costs: [run log](docs/results/2026-09-30-week2a-run-log.md).
 
-Next: live mode on real GitHub issues with a human approval step, and quality evals for the plan and the pull request text.
+Since then: live mode on real GitHub issues with a human approval step, a cloud sandbox backend on Agent Runtime with a $500 budget hard stop, and the replay site above.
