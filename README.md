@@ -12,7 +12,7 @@ A multi-agent pipeline on Google ADK 2.x that turns a GitHub issue into a tested
 
 ## How it works
 
-[![Overview: the laptop, GitHub, the GCP project and Docker sandboxes, with the identity on each connection](docs/architecture/overview.svg)](https://raw.githubusercontent.com/omarcevi/sdlc-agent-pipeline/main/docs/architecture/overview.png)
+[![Overview: the laptop and GitHub above the GCP project, with its identities, Agent Runtime, observability and cost hard stop](docs/architecture/overview.svg)](https://raw.githubusercontent.com/omarcevi/sdlc-agent-pipeline/main/docs/architecture/overview.png)
 
 [Open the overview full size](https://raw.githubusercontent.com/omarcevi/sdlc-agent-pipeline/main/docs/architecture/overview.png).
 
