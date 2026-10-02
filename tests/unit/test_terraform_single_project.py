@@ -207,3 +207,20 @@ def test_engine_output_is_the_full_resource_name_with_the_project_number():
         "projects/${data.google_project.project.number}/locations/${var.region}"
         "/reasoningEngines/${google_vertex_ai_reasoning_engine.app.name}"
     )
+
+
+def test_terraform_leaves_what_the_deploy_and_the_log_sink_change():
+    # After the first deploy (2026-10-02) a plan wanted to strip the engine's
+    # class_methods (written by agents-cli deploy) and replace the logs table
+    # (whose schema the log sink extends), deleting its rows.
+    engine = _block(
+        _tf("service.tf"), 'resource "google_vertex_ai_reasoning_engine" "app"'
+    )
+    ignored = _block(engine, "lifecycle")
+    assert "spec[0].class_methods" in ignored
+    table = _block(
+        _tf("telemetry.tf"), 'resource "google_bigquery_table" "genai_logs_table"'
+    )
+    assert re.search(
+        r"ignore_changes\s*=\s*\[\s*schema\s*\]", _block(table, "lifecycle")
+    )

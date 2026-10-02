@@ -165,6 +165,12 @@ resource "google_bigquery_table" "genai_logs_table" {
   # avoid sink write failures for optional fields (e.g. trace, spanId, labels).
   schema = file("${path.module}/../shared/genai_logs_schema.json")
 
+  # The log sink adds columns as new log fields arrive; a schema diff would make
+  # Terraform replace the table and delete its rows.
+  lifecycle {
+    ignore_changes = [schema]
+  }
+
   depends_on = [google_bigquery_dataset.telemetry_dataset]
 }
 

@@ -124,11 +124,13 @@ resource "google_vertex_ai_reasoning_engine" "app" {
   # source_code_spec, so the placeholder must use it too — a container_spec
   # placeholder would be left alongside it and Agent Engine rejects the update.
   # Ignore the spec and deployment_spec so Terraform never reverts the deployed agent.
+  # The deploy also writes the agent's methods (class_methods).
   lifecycle {
     ignore_changes = [
       spec[0].container_spec,
       spec[0].source_code_spec,
       spec[0].deployment_spec,
+      spec[0].class_methods,
     ]
   }
 
