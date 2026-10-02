@@ -47,12 +47,19 @@ export function outcomeBadge(entry: IndexEntry): string {
   }
 }
 
-/** Renders nothing until `visible` (F16), so a hidden banner can never satisfy a test. */
+/**
+ * The live region is always rendered, so screen readers announce the banner when it
+ * appears inside it. The banner itself renders nothing until `visible` (F16), so a
+ * hidden banner can never satisfy a test.
+ */
 export function OutcomeBanner({ replay, visible }: { replay: Replay; visible: boolean }) {
-  if (!visible) return null;
+  return <div role="status">{visible ? <Banner replay={replay} /> : null}</div>;
+}
+
+function Banner({ replay }: { replay: Replay }) {
   const o = replay.outcome;
   return (
-    <section data-testid="outcome" role="status" className="rounded border p-3 space-y-1" aria-label="Outcome">
+    <section data-testid="outcome" className="rounded border p-3 space-y-1" aria-label="Outcome">
       <h2 className="text-base font-semibold m-0">{outcomeHeadline(replay)}</h2>
       <p className="m-0 text-sm">
         {`cost $${o.cost_usd.toFixed(4)} · ${o.tool_calls} tool calls · ${fmtClock(o.duration_s)} wall time · ${o.test_attempts} test attempts · ${o.review_rounds} review rounds`}

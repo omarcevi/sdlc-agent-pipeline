@@ -105,11 +105,13 @@ describe("OutcomeBanner", () => {
     }
   });
 
-  it("renders nothing until visible", () => {
-    const { container, rerender } = render(<OutcomeBanner replay={makeReplay()} visible={false} />);
-    expect(container.childElementCount).toBe(0);
+  it("renders only an empty live region until visible", () => {
+    const { rerender } = render(<OutcomeBanner replay={makeReplay()} visible={false} />);
+    const region = screen.getByRole("status");
+    expect(region.childElementCount).toBe(0);
+    expect(region.textContent).toBe("");
     rerender(<OutcomeBanner replay={makeReplay()} visible />);
-    expect(screen.getByTestId("outcome")).toBeTruthy();
+    expect(region.contains(screen.getByTestId("outcome"))).toBe(true);
   });
 
   it("shows the final numbers and audit flags", () => {

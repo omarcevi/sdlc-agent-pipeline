@@ -185,8 +185,15 @@ describe("RunPage", () => {
   });
 
   it("announces the outcome as a status", () => {
+    // The live region is in the page before the outcome, so screen readers announce
+    // the banner when it appears inside it.
+    show("multi", 16.5);
+    const region = screen.getByRole("status");
+    expect(screen.queryByTestId("outcome")).toBeNull();
+    cleanup();
     show("multi", 9999);
-    expect(screen.getByTestId("outcome").getAttribute("role")).toBe("status");
+    expect(screen.getByRole("status").contains(screen.getByTestId("outcome"))).toBe(true);
+    expect(region).toBeTruthy();
   });
 
   it("shows the outcome banner only at the end", () => {
