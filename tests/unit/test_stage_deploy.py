@@ -684,3 +684,49 @@ def test_tee_keeps_collecting_when_the_terminal_pipe_breaks(monkeypatch):
     done = sd.run_command([sys.executable, "-c", code], tee=True)
     assert done.returncode == 0
     assert done.stdout.endswith("END\n")
+
+
+def tf_context(repo, run, itp=None):
+    environ = {} if itp is None else {"ITP_TF_OUTPUTS": itp}
+    return sd.Context(repo, environ, run, lambda line: None, None)
+
+
+def test_outputs_come_from_itp_tf_outputs_without_terraform(tree):
+    run = FakeRun()
+    ctx = tf_context(tree, run, json.dumps(TF_OUTPUTS))
+    assert ctx.output("agent_runtime_resource_name") == ENGINE
+    assert ctx.output("sandbox_caller_email") == CALLER
+    assert ctx.output("sandbox_image_repository") == REPOSITORY
+    assert run.calls == []
+
+
+def test_itp_tf_outputs_missing_key_is_the_usual_error(tree):
+    run = FakeRun()
+    partial = {"sandbox_caller_email": CALLER, "sandbox_image_repository": ""}
+    ctx = tf_context(tree, run, json.dumps(partial))
+    for name in ("agent_runtime_resource_name", "sandbox_image_repository"):
+        with pytest.raises(sd.UsageError, match=f"terraform output {name} is missing"):
+            ctx.output(name)
+    assert run.calls == []
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "null", "[]", '{"agent_runtime_resource_name": 5}', "not json"],
+)
+def test_broken_itp_tf_outputs_is_refused(tree, value):
+    run = FakeRun()
+    ctx = tf_context(tree, run, value)
+    with pytest.raises(
+        sd.UsageError, match="ITP_TF_OUTPUTS must be a JSON object of strings"
+    ) as err:
+        ctx.output("sandbox_caller_email")
+    assert "not json" not in str(err.value)
+    assert run.calls == []
+
+
+def test_without_itp_tf_outputs_terraform_is_used(tree):
+    run = FakeRun()
+    ctx = tf_context(tree, run)
+    assert ctx.output("sandbox_caller_email") == CALLER
+    assert [c[0][0] for c in run.calls] == ["terraform"]
