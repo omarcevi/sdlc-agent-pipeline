@@ -21,6 +21,7 @@ from pathlib import Path
 SMOKE_TASKS = ("tc-001", "tc-003", "sr-001")
 EVAL_RUNS = 5
 LIMIT_USD = Decimal("25.00")
+MAX_RUNS = 60
 DEV_ID = re.compile(r"[a-z]{2}-[0-9]{3}")
 HELD_OUT = re.compile(r"-h[0-9][0-9]", re.IGNORECASE)
 
@@ -116,6 +117,8 @@ def main(argv: list[str]) -> int:
             raise Refused(
                 f"worst case ${cost} is over $25; pass accept_over_25 to run it"
             )
+        if runs > MAX_RUNS:
+            raise Refused(f"more than {MAX_RUNS} runs in one dispatch; split it")
     except Refused as e:
         print(f"error: {' '.join(str(e).split())}", file=sys.stderr)
         return 2

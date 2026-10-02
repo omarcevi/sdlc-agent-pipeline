@@ -237,3 +237,33 @@ def test_empty_dev_split_is_refused(tmp_path):
     empty = tmp_path / "empty"
     (empty / "tc-h01").mkdir(parents=True)
     assert_refused(bench(empty), "no dev tasks found")
+
+
+def _many(tmp_path, n):
+    d = tmp_path / "many"
+    d.mkdir()
+    for i in range(n):
+        (d / f"tc-{i + 1:03d}").mkdir()
+    return d
+
+
+def test_more_than_60_runs_is_refused_after_the_cost_rule(tmp_path):
+    ok = _many(tmp_path, 12)
+    r = bench(ok, "--repeats", "5", "--budget-usd", "0.10")
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "worst case: $6.00 for 60 runs\n"
+    big = tmp_path / "many2"
+    big.mkdir()
+    for i in range(13):
+        (big / f"tc-{i + 1:03d}").mkdir()
+    refused = "more than 60 runs in one dispatch; split it"
+    assert_refused(bench(big, "--repeats", "5", "--budget-usd", "0.10"), refused)
+    assert_refused(
+        bench(big, "--repeats", "5", "--budget-usd", "0.10", "--accept-over-25"),
+        refused,
+    )
+    # The cost rule is checked first.
+    assert_refused(
+        bench(big, "--repeats", "5"),
+        "worst case $65.00 is over $25; pass accept_over_25 to run it",
+    )
