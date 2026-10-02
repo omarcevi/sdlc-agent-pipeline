@@ -179,28 +179,6 @@ def test_userinfo_is_read_only_without_an_operator_member():
     )
 
 
-# Task 11 deletes the import blocks, and with them this test.
-def test_sandbox_imports_exist():
-    text = _tf("sandbox.tf")
-    expected = {
-        "google_artifact_registry_repository.sandbox": (
-            "projects/${var.project_id}/locations/${var.region}/repositories/issue-to-pr"
-        ),
-        "google_service_account.sandbox_caller": (
-            "projects/${var.project_id}/serviceAccounts/"
-            "sandbox-caller@${var.project_id}.iam.gserviceaccount.com"
-        ),
-    }
-    found = {}
-    for m in re.finditer(r"^import\s*\{", text, re.M):
-        body = _block(text[m.start() :], "import")
-        to = re.search(r"to\s*=\s*([\w.]+)", body)
-        ident = re.search(r'id\s*=\s*"([^"]*)"', body)
-        assert to and ident, "import block needs to and id"
-        found[to.group(1)] = ident.group(1)
-    assert found == expected, "import blocks do not match the expected to/id pairs"
-
-
 def test_new_apis_are_enabled():
     m = re.search(r"^\s*services\s*=\s*\[(.*?)\]", _tf("apis.tf"), re.M | re.S)
     assert m, "local.services not found"

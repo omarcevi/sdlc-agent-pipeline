@@ -54,15 +54,3 @@ resource "google_service_account_iam_member" "operator_signs_sandbox_tokens" {
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = var.operator_member != "" ? var.operator_member : "user:${one(data.google_client_openid_userinfo.me[*].email)}"
 }
-
-# The Week 1 spike created these by hand. The blocks adopt them on the first
-# apply and are removed in the commit after it.
-import {
-  to = google_artifact_registry_repository.sandbox
-  id = "projects/${var.project_id}/locations/${var.region}/repositories/issue-to-pr"
-}
-
-import {
-  to = google_service_account.sandbox_caller
-  id = "projects/${var.project_id}/serviceAccounts/sandbox-caller@${var.project_id}.iam.gserviceaccount.com"
-}
