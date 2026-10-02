@@ -85,7 +85,7 @@ jobs:
   run:
     needs: guard
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: ${{ inputs.kind == 'bench' && 360 || 90 }}
     permissions:
       contents: read
       id-token: write
@@ -113,7 +113,8 @@ jobs:
           SYSTEM: ${{ needs.guard.outputs.system }}
           PRESET: ${{ needs.guard.outputs.preset }}
           REPEATS: ${{ needs.guard.outputs.repeats }}
-        run: uv run python -m bench.run --tasks "$TASKS" --system "$SYSTEM" --preset "$PRESET" --repeats "$REPEATS" --concurrency 1 --out results/ci
+          CONCURRENCY: ${{ inputs.kind == 'bench' && '2' || '1' }}
+        run: uv run python -m bench.run --tasks "$TASKS" --system "$SYSTEM" --preset "$PRESET" --repeats "$REPEATS" --concurrency "$CONCURRENCY" --out results/ci
       - name: Smoke gate
         if: inputs.kind == 'smoke'
         run: |
@@ -134,7 +135,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: paid-run-${{ github.run_id }}
+          name: paid-run-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             results/ci/**
             runs/*/record.json
