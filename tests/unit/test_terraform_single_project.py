@@ -250,6 +250,11 @@ def test_wif_provider_trusts_only_this_repository():
         "attribute.ref": "assertion.ref",
         "attribute.environment": "assertion.environment",
         "attribute.event_name": "assertion.event_name",
+        "attribute.paid_on_main": (
+            "assertion.job_workflow_ref == "
+            '\\"${var.github_repository}/.github/workflows/paid.yaml'
+            '@refs/heads/main\\" ? \\"true\\" : \\"false\\"'
+        ),
     }.items():
         assert _has(mapping, rf'"{re.escape(key)}"\s*=\s*"{re.escape(value)}"'), (
             "attribute mapping incomplete"
@@ -263,6 +268,10 @@ def test_wif_provider_trusts_only_this_repository():
     assert _has(variable, r'default\s*=\s*"1401169707"')
     assert _has(variable, r"type\s*=\s*string")
     assert _has(_block(variable, "validation"), r"\^\[0-9\]\+\$")
+    repo = _block(_tf("variables.tf"), 'variable "github_repository"')
+    assert _has(repo, r'default\s*=\s*"omarcevi/sdlc-agent-pipeline"')
+    assert _has(repo, r"type\s*=\s*string")
+    assert "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" in _block(repo, "validation")
 
 
 def test_ci_runner_roles_are_exact():
@@ -304,7 +313,7 @@ def test_deployer_roles_are_exact_and_acts_only_as_the_app():
     ]
 
 
-def test_ci_runner_binding_is_main_only():
+def test_ci_runner_binding_is_paid_workflow_on_main_only():
     body = _block(
         _tf("cicd.tf"), 'resource "google_service_account_iam_member" "ci_runner_wif"'
     )
@@ -317,7 +326,7 @@ def test_ci_runner_binding_is_main_only():
     assert member.group(1) == (
         "principalSet://iam.googleapis.com/"
         "${google_iam_workload_identity_pool.github.name}"
-        "/attribute.ref/refs/heads/main"
+        "/attribute.paid_on_main/true"
     )
 
 

@@ -70,13 +70,14 @@ def test_every_job_has_a_timeout():
         ("ci", "unit"): 20,
         ("ci", "docker"): 40,
         ("paid", "guard"): 5,
-        ("paid", "run"): 90,
+        ("paid", "run"): "${{ inputs.kind == 'bench' && 360 || 90 }}",
         ("release", "deploy"): 45,
         ("release", "release"): 5,
     }
     for path in ALL_FILES:
         for name, job in yaml.safe_load(path.read_text())["jobs"].items():
-            assert isinstance(job["timeout-minutes"], int), (path.stem, name)
+            minutes = job["timeout-minutes"]
+            assert isinstance(minutes, int) or (path.stem, name) == ("paid", "run")
     for (wf, job), minutes in expected.items():
         assert _wf(wf)["jobs"][job]["timeout-minutes"] == minutes, (wf, job)
     assert {(w, j) for w in NAMES for j in _wf(w)["jobs"]} == set(expected)
@@ -203,7 +204,10 @@ def test_paid_smoke_gate_and_artifact():
     assert "make sandbox-image" in runs
     assert "make eval" in runs
     bench = next(s for s in job["steps"] if "bench.run" in s.get("run", ""))
-    assert "--concurrency 1" in bench["run"] and "--out results/ci" in bench["run"]
+    assert (
+        '--concurrency "$CONCURRENCY"' in bench["run"]
+        and "--out results/ci" in bench["run"]
+    )
     assert bench["if"] == "inputs.kind != 'eval'"
     gate = next(s for s in job["steps"] if "resolved" in s.get("run", ""))
     assert gate["if"] == "inputs.kind == 'smoke'"
@@ -216,6 +220,42 @@ def test_paid_smoke_gate_and_artifact():
     assert "results/ci/**" in upload["with"]["path"]
     assert "runs/*/record.json" in upload["with"]["path"]
     assert _index(job, "google-github-actions/auth", "uses") < _index(job, "bench.run")
+    assert upload["with"]["name"] == (
+        "paid-run-${{ github.run_id }}-${{ github.run_attempt }}"
+    )
+
+
+def test_paid_timeout_covers_a_bench_and_smoke_stays_serial():
+    job = _wf("paid")["jobs"]["run"]
+    assert job["timeout-minutes"] == ("${{ inputs.kind == 'bench' && 360 || 90 }}")
+    smoke = next(s for s in job["steps"] if s.get("name") == "Bench run")
+    # smoke keeps one worker, bench uses two
+    assert smoke["env"]["CONCURRENCY"] == "${{ inputs.kind == 'bench' && '2' || '1' }}"
+
+
+def test_paid_bench_step_takes_its_values_from_the_guard_outputs_only():
+    job = _wf("paid")["jobs"]["run"]
+    step = next(s for s in job["steps"] if "bench.run" in s.get("run", ""))
+    assert step["env"] == {
+        "TASKS": "${{ needs.guard.outputs.tasks }}",
+        "SYSTEM": "${{ needs.guard.outputs.system }}",
+        "PRESET": "${{ needs.guard.outputs.preset }}",
+        "REPEATS": "${{ needs.guard.outputs.repeats }}",
+        "CONCURRENCY": "${{ inputs.kind == 'bench' && '2' || '1' }}",
+    }
+    assert "${{" not in step["run"]
+    for flag, var in (
+        ("--tasks", "TASKS"),
+        ("--system", "SYSTEM"),
+        ("--preset", "PRESET"),
+        ("--repeats", "REPEATS"),
+    ):
+        assert f'{flag} "${var}"' in step["run"]
+    for s in job["steps"]:
+        if "bench.run" in s.get("run", ""):
+            assert "inputs." not in s["run"]
+            for name in ("TASKS", "SYSTEM", "PRESET", "REPEATS"):
+                assert "inputs." not in s["env"][name]
 
 
 def test_release_waits_for_production_and_checks_main_before_auth():
@@ -224,14 +264,19 @@ def test_release_waits_for_production_and_checks_main_before_auth():
     assert _on(wf) == {"push": {"tags": ["v*"]}}
     deploy = wf["jobs"]["deploy"]
     assert deploy["environment"] == "production"
+    assert wf["concurrency"] == {"group": "release", "cancel-in-progress": False}
     checkout = deploy["steps"][0]
     assert checkout["uses"].startswith("actions/checkout@")
     assert checkout["with"]["fetch-depth"] == 0
+    assert checkout["with"]["persist-credentials"] is False
     check = _index(deploy, "merge-base --is-ancestor")
     auth = _index(deploy, "google-github-actions/auth", "uses")
     assert 0 < check < auth
     run = deploy["steps"][check]["run"]
-    assert "git fetch origin main" in run
+    assert (
+        'git fetch "https://github.com/$GITHUB_REPOSITORY" '
+        "+refs/heads/main:refs/remotes/origin/main"
+    ) in run
     assert 'git merge-base --is-ancestor "$GITHUB_SHA" origin/main' in run
     assert "the tag is not on main" in run
     assert deploy["steps"][auth]["with"] == {

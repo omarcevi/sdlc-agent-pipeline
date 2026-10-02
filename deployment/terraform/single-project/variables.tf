@@ -67,6 +67,17 @@ variable "github_repository_id" {
   }
 }
 
+variable "github_repository" {
+  type        = string
+  description = "owner/name of the GitHub repository whose paid.yaml workflow may use the CI runner service account."
+  default     = "omarcevi/sdlc-agent-pipeline"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
+    error_message = "github_repository must look like owner/name."
+  }
+}
+
 variable "operator_member" {
   description = "IAM member (for example user:name@example.com) allowed to sign sandbox tokens. Empty: use the email of the credentials running Terraform."
   type        = string

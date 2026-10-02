@@ -36,6 +36,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "attribute.ref"           = "assertion.ref"
     "attribute.environment"   = "assertion.environment"
     "attribute.event_name"    = "assertion.event_name"
+    "attribute.paid_on_main"  = "assertion.job_workflow_ref == \"${var.github_repository}/.github/workflows/paid.yaml@refs/heads/main\" ? \"true\" : \"false\""
   }
 
   attribute_condition = "assertion.repository_id == \"${var.github_repository_id}\""
@@ -47,7 +48,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   depends_on = [google_project_service.services]
 }
 
-# Runs the free checks and the guarded paid runs from main.
+# Runs the guarded paid runs only: the paid.yaml workflow file on main.
 resource "google_service_account" "ci_runner" {
   project      = var.project_id
   account_id   = "ci-runner"
@@ -103,7 +104,7 @@ resource "google_service_account_iam_member" "deployer_acts_as_app" {
 resource "google_service_account_iam_member" "ci_runner_wif" {
   service_account_id = google_service_account.ci_runner.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.ref/refs/heads/main"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.paid_on_main/true"
 
   depends_on = [google_project_service.services]
 }
