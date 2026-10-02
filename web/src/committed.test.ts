@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import graphsJson from "./graph/graphs.json";
 import { parseGraphs, parseIndex, parseReplay } from "./replay/parse";
@@ -53,5 +53,26 @@ describe("committed replays", () => {
       expect(e.tool_calls).toBe(replay.outcome.tool_calls);
       if (e.pair !== null) expect(index.replays.some((o) => o.run_id === e.pair)).toBe(true);
     }
+  });
+
+  it("marks exactly START and the nodes the run visited at the end (design 2, criterion 4)", () => {
+    for (const [file, replay] of replays) {
+      const s = stateAt(replay, graphs.graphs[replay.run.graph], endTime(replay));
+      const marked = Object.entries(s.nodeStates)
+        .filter(([, st]) => st !== "idle")
+        .map(([id]) => id)
+        .sort();
+      const visited = new Set<string>(["START"]);
+      for (const step of replay.steps) if (step.kind === "node") visited.add(step.node);
+      expect(marked, file).toEqual([...visited].sort());
+    }
+  });
+
+  it("web/public holds only favicon.svg and replays/, and replays/ only the index and its files", () => {
+    expect(readdirSync("public").sort()).toEqual(["favicon.svg", "replays"]);
+    expect(statSync("public/replays").isDirectory()).toBe(true);
+    const expected = ["index.json", ...index.replays.map((e) => e.file)].sort();
+    expect(readdirSync("public/replays").sort()).toEqual(expected);
+    for (const name of expected) expect(existsSync(`public/replays/${name}`), name).toBe(true);
   });
 });

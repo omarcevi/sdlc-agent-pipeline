@@ -436,6 +436,19 @@ def test_nothing_to_check_is_exit_2(tmp_path, capsys):
         check_paths([tmp_path])
 
 
+def test_a_non_json_file_is_a_problem(tmp_path, capsys):
+    (tmp_path / "ok.json").write_text(json.dumps({"k": "fine"}))
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "notes.txt").write_text("raw")
+    assert [str(h) for h in check_paths([tmp_path])] == [
+        "sub/notes.txt: $: not a replay file"
+    ]
+    assert main([str(tmp_path)]) == 1
+    assert "sub/notes.txt" in capsys.readouterr().out
+    (tmp_path / "sub" / "notes.txt").unlink()
+    assert main([str(tmp_path)]) == 0
+
+
 def test_hit_file_is_relative_to_the_scanned_root(tmp_path):
     for d in ("a", "b"):
         (tmp_path / d).mkdir()

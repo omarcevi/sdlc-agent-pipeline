@@ -604,16 +604,28 @@ def test_the_finished_files_are_checked_before_they_replace_the_output(world):
     assert world.published() == {}
 
 
+@pytest.mark.parametrize("name", ["notes.txt", "md-001.events.jsonl"])
+def test_a_foreign_file_in_the_output_refuses_the_build(world, name):
+    """Vite would publish it, so the finished-set check refuses and --out is unchanged."""
+    world.run(MULTI)
+    world.manifest([entry(MULTI)])
+    world.build()
+    (world.out / name).write_text("raw sandbox text")
+    before = world.published()
+    world.manifest([entry(MULTI, caption="another caption")])
+    assert str(world.refused()) == replay.LEAK_FOUND
+    assert world.published() == before
+
+
 def test_removing_an_entry_unpublishes_its_file(world):
     world.run(MULTI)
     world.run(SINGLE)
     world.manifest([entry(MULTI, pair=SINGLE), entry(SINGLE, pair=MULTI)])
     world.build()
     assert set(world.published()) == {"index.json", f"{MULTI}.json", f"{SINGLE}.json"}
-    (world.out / "notes.txt").write_text("not a replay")
     world.manifest([entry(MULTI)])
     world.build()
-    assert set(world.published()) == {"index.json", f"{MULTI}.json", "notes.txt"}
+    assert set(world.published()) == {"index.json", f"{MULTI}.json"}
     index = json.loads((world.out / "index.json").read_text())
     assert [e["run_id"] for e in index["replays"]] == [MULTI]
 
@@ -920,7 +932,6 @@ def _old_output(world: World) -> dict[str, bytes]:
     world.out.mkdir(parents=True)
     (world.out / "old.json").write_text('{"old": true}\n')
     (world.out / "index.json").write_text('{"schema": 1, "replays": []}\n')
-    (world.out / "notes.txt").write_text("not a replay\n")
     return world.published()
 
 
@@ -933,7 +944,7 @@ def test_a_write_that_fails_midway_leaves_the_old_files(world, monkeypatch):
     mode = world.out.stat().st_mode & 0o777
     world.build()
     after = world.published()
-    assert set(after) == {"index.json", f"{MULTI}.json", f"{SINGLE}.json", "notes.txt"}
+    assert set(after) == {"index.json", f"{MULTI}.json", f"{SINGLE}.json"}
     assert world.out.stat().st_mode & 0o777 == mode
 
     real = Path.write_bytes
@@ -1018,9 +1029,7 @@ def test_unchecked_files_never_land_next_to_the_output(world, monkeypatch, refus
         world.build()
     assert seen == [(["replays"], False)]  # nothing staged yet, checked outside
     assert [p.name for p in world.out.parent.iterdir()] == ["replays"]
-    assert ("notes.txt" in world.published()) and (
-        (f"{MULTI}.json" in world.published()) is not refused
-    )
+    assert (f"{MULTI}.json" in world.published()) is not refused
 
 
 # --- analytics -----------------------------------------------------------------------

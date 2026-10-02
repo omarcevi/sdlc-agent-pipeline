@@ -46,6 +46,7 @@ ALLOWED_EMAIL_DOMAINS = frozenset(
 EXACT_RULES_OFF = (
     "exact-value rules off: GOOGLE_CLOUD_PROJECT and REPLAY_REDACT are unset"
 )
+NOT_A_REPLAY = "not a replay file"
 DEFAULT_DIR = Path("web/public/replays")
 
 _HOST_PATH = re.compile(
@@ -314,18 +315,31 @@ def _expand(paths: Sequence[Path]) -> list[tuple[Path, str]]:
     return files
 
 
+def _foreign(paths: Sequence[Path]) -> list[Hit]:
+    """Each regular file under a scanned directory that is not ``*.json``."""
+    return [
+        Hit(f.relative_to(p).as_posix(), "$", NOT_A_REPLAY)
+        for p in paths
+        if p.is_dir()
+        for f in sorted(p.rglob("*"))
+        if f.is_file() and f.suffix != ".json"
+    ]
+
+
 def check_paths(paths: Sequence[Path], *, exact: Sequence[str] = ()) -> list[Hit]:
     """Scan every file; directories expand to every ``*.json`` under them.
 
     ``allow`` comes from the ``index.json`` beside each file, when there is one.
     Each file is decoded and every string scanned, then its raw text is scanned
     with the unclearable rules only, under path ``$``. Hits name the file
-    relative to the scanned directory. No file at all is an error.
+    relative to the scanned directory. Any other regular file under a scanned
+    directory is a problem (``not a replay file``), since Vite would publish it.
+    No ``*.json`` file at all is an error.
     """
     files = _expand(paths)
     if not files:
         raise ReplayFileError("no replay files found")
-    hits: list[Hit] = []
+    hits: list[Hit] = _foreign(paths)
     allow_by_dir: dict[Path, dict[str, frozenset[tuple[str, str]]]] = {}
     for path, shown in files:
         index = path.parent / "index.json"
