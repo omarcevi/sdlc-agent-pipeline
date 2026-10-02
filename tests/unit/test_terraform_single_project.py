@@ -248,7 +248,9 @@ def test_wif_provider_trusts_only_this_repository():
         "google.subject": "assertion.sub",
         "attribute.repository_id": "assertion.repository_id",
         "attribute.ref": "assertion.ref",
-        "attribute.environment": "assertion.environment",
+        "attribute.environment": (
+            'has(assertion.environment) ? assertion.environment : \\"none\\"'
+        ),
         "attribute.event_name": "assertion.event_name",
         "attribute.paid_on_main": (
             "assertion.job_workflow_ref == "

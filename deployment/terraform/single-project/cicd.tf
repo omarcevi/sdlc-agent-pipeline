@@ -34,7 +34,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "google.subject"          = "assertion.sub"
     "attribute.repository_id" = "assertion.repository_id"
     "attribute.ref"           = "assertion.ref"
-    "attribute.environment"   = "assertion.environment"
+    "attribute.environment"   = "has(assertion.environment) ? assertion.environment : \"none\""
     "attribute.event_name"    = "assertion.event_name"
     "attribute.paid_on_main"  = "assertion.job_workflow_ref == \"${var.github_repository}/.github/workflows/paid.yaml@refs/heads/main\" ? \"true\" : \"false\""
   }
