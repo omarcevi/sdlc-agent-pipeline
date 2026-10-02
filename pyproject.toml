@@ -30,9 +30,6 @@ dev = [
     "pytest-asyncio>=1.0.0,<2.0.0",
     "nest-asyncio>=1.6.0,<2.0.0",
 ]
-docs = [
-    "diagrams>=0.24",
-]
 
 [project.optional-dependencies]
 eval = [

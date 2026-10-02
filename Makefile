@@ -109,7 +109,7 @@ validate:
 
 # Needs Graphviz (brew install graphviz). Run it after any change to docs/architecture/overview.py.
 diagrams:
-	uv run --group docs python docs/architecture/overview.py
+	uv run --no-project --with "diagrams==0.25.1" python docs/architecture/overview.py
 	uv run python docs/architecture/agent_graph.py
 
 # terraform fmt runs per root; the cicd root is not touched.
