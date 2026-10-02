@@ -56,12 +56,40 @@ def test_no_job_has_contents_write():
 
 def test_pull_requests_never_deploy():
     wf = _wf()
-    deploy_if = wf["jobs"]["deploy"]["if"]
-    assert "github.event_name != 'pull_request'" in deploy_if
-    assert "github.ref == 'refs/heads/main'" in deploy_if
+    main_push = "github.event_name != 'pull_request' && github.ref == 'refs/heads/main'"
+    assert wf["jobs"]["deploy"]["if"] == main_push
     assert wf["jobs"]["deploy"]["needs"] == "build"
     upload = _step_using("build", "actions/upload-pages-artifact")
-    assert upload["if"] == "github.event_name != 'pull_request'"
+    assert upload["if"] == main_push
+
+
+def test_the_leak_check_runs_before_the_upload():
+    steps = _steps("build")
+    leak = next(i for i, s in enumerate(steps) if "replay_check.py" in s.get("run", ""))
+    upload = next(
+        i for i, s in enumerate(steps) if s.get("uses", "").startswith("actions/upload-pages-artifact@")
+    )
+    assert leak < upload
+
+
+def test_every_job_has_a_timeout():
+    for name, job in _wf()["jobs"].items():
+        assert job["timeout-minutes"] == 20, name
+
+
+def test_npm_ci_skips_install_scripts():
+    runs = [s["run"] for s in _steps("build") if "npm ci" in s.get("run", "")]
+    assert runs == ["npm ci --ignore-scripts"]
+
+
+def test_off_pull_requests_an_empty_redaction_secret_fails_before_the_leak_check():
+    steps = _steps("build")
+    gate = next(i for i, s in enumerate(steps) if s.get("name") == "Require the redaction secret")
+    leak = next(i for i, s in enumerate(steps) if "replay_check.py" in s.get("run", ""))
+    assert gate < leak
+    assert steps[gate]["if"] == "github.event_name != 'pull_request'"
+    assert steps[gate]["env"] == {"REPLAY_REDACT": "${{ secrets.REPLAY_REDACT }}"}
+    assert 'test -n "$REPLAY_REDACT"' in steps[gate]["run"]
 
 
 def test_every_action_is_pinned_to_a_full_sha():
