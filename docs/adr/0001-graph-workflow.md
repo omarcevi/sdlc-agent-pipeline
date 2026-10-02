@@ -11,7 +11,7 @@ A common way to build this is a group of agents that talk to each other, where a
 
 ## Decision
 
-The pipeline is an ADK 2.x graph `Workflow` with fixed edges, built in `app/pipeline.py`.
+The pipeline is a graph `Workflow` from Google's Agent Development Kit (ADK) 2.x, with fixed edges, built in `app/pipeline.py`.
 
 - **Function nodes for exact steps, `LlmAgent` nodes for judgment.** `fetch_issue`, `provision_sandbox`, `collect_diff`, `run_tests`, `deliver_patch` and `report_failure` (in live mode also `human_gate`, `route_approval` and `open_pr`) are Python functions. The planner, coder and reviewer are `LlmAgent` nodes with fixed tools; the planner and the reviewer can only read.
 - **Routers after the planner and the reviewer.** An ADK LLM node cannot emit a route, so `route_plan` and `route_review` read the agent's validated answer (`Plan`, `Review`) and pick the edge ([ADR 2](0002-deterministic-routing.md)).
