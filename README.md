@@ -12,7 +12,7 @@ A multi-agent pipeline on Google ADK 2.x that turns a GitHub issue into a tested
 
 ## How it works
 
-![Overview: the laptop, GitHub, the GCP project and local Docker, with the identity on each connection](docs/architecture/overview.svg)
+![Overview: the laptop, GitHub, the GCP project and Docker sandboxes, with the identity on each connection](docs/architecture/overview.svg)
 
 A planner, a coder and a reviewer agent run in an ADK graph with deterministic function nodes between them: whether a patch exists and whether its tests pass come from the real `git diff` and real test exit codes, never from what a model claims. Every command the agents run, and every test, runs in a hermetic sandbox (Docker on a laptop or in CI, Agent Runtime in the cloud) that has no credentials and no network. In live mode, on a GitHub issue, a human reads the patch and types `approve` before any pull request opens; benchmark runs end at the patch.
 
