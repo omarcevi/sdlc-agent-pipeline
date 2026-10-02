@@ -10,6 +10,12 @@ NAMES = ["ci", "paid", "release"]
 ALL_FILES = sorted(WORKFLOWS.glob("*.yaml"))
 
 
+_CONCURRENCY = (
+    "${{ inputs.kind == 'bench' && needs.guard.outputs.preset == 'flash' "
+    "&& '2' || '1' }}"
+)
+
+
 def _wf(name: str) -> dict:
     return yaml.safe_load((WORKFLOWS / f"{name}.yaml").read_text())
 
@@ -71,6 +77,7 @@ def test_every_job_has_a_timeout():
         ("ci", "docker"): 40,
         ("paid", "guard"): 5,
         ("paid", "run"): "${{ inputs.kind == 'bench' && 360 || 90 }}",
+        ("release", "check"): 5,
         ("release", "deploy"): 45,
         ("release", "release"): 5,
     }
@@ -106,7 +113,8 @@ def test_ci_triggers_paths_and_concurrency():
     assert wf["name"] == "CI"
     on = _on(wf)
     assert set(on) == {"pull_request", "push", "workflow_dispatch"}
-    ignore = ["docs/**", "**/*.md", "web/**"]
+    # `*.md` is the repository root only: bench/repos/*/README.md is bench input.
+    ignore = ["docs/**", "*.md", "web/**"]
     assert on["push"]["branches"] == ["main"]
     assert on["push"]["paths-ignore"] == ignore
     assert on["pull_request"]["paths-ignore"] == ignore
@@ -203,6 +211,11 @@ def test_paid_smoke_gate_and_artifact():
     runs = _runs(job)
     assert "make sandbox-image" in runs
     assert "make eval" in runs
+    # credentials go live only after every install, right before the first use
+    auth_at = _index(job, "google-github-actions/auth", "uses")
+    for installed in ("uv sync --locked", "agents-cli==1.7.0", "make sandbox-image"):
+        assert _index(job, installed) < auth_at, installed
+    assert auth_at + 1 == _index(job, "bench.run")
     bench = next(s for s in job["steps"] if "bench.run" in s.get("run", ""))
     assert (
         '--concurrency "$CONCURRENCY"' in bench["run"]
@@ -218,6 +231,8 @@ def test_paid_smoke_gate_and_artifact():
     assert upload["if"] == "always()"
     assert upload["with"]["retention-days"] == 14
     assert "results/ci/**" in upload["with"]["path"]
+    assert "artifacts/grade_results/**" in upload["with"]["path"]
+    assert "artifacts/traces" not in upload["with"]["path"]
     assert "runs/*/record.json" in upload["with"]["path"]
     assert _index(job, "google-github-actions/auth", "uses") < _index(job, "bench.run")
     assert upload["with"]["name"] == (
@@ -229,8 +244,8 @@ def test_paid_timeout_covers_a_bench_and_smoke_stays_serial():
     job = _wf("paid")["jobs"]["run"]
     assert job["timeout-minutes"] == ("${{ inputs.kind == 'bench' && 360 || 90 }}")
     smoke = next(s for s in job["steps"] if s.get("name") == "Bench run")
-    # smoke keeps one worker, bench uses two
-    assert smoke["env"]["CONCURRENCY"] == "${{ inputs.kind == 'bench' && '2' || '1' }}"
+    # smoke keeps one worker; bench uses two for flash and one for pro and mixed
+    assert smoke["env"]["CONCURRENCY"] == _CONCURRENCY
 
 
 def test_paid_bench_step_takes_its_values_from_the_guard_outputs_only():
@@ -241,7 +256,7 @@ def test_paid_bench_step_takes_its_values_from_the_guard_outputs_only():
         "SYSTEM": "${{ needs.guard.outputs.system }}",
         "PRESET": "${{ needs.guard.outputs.preset }}",
         "REPEATS": "${{ needs.guard.outputs.repeats }}",
-        "CONCURRENCY": "${{ inputs.kind == 'bench' && '2' || '1' }}",
+        "CONCURRENCY": _CONCURRENCY,
     }
     assert "${{" not in step["run"]
     for flag, var in (
@@ -258,37 +273,48 @@ def test_paid_bench_step_takes_its_values_from_the_guard_outputs_only():
                 assert "inputs." not in s["env"][name]
 
 
-def test_release_waits_for_production_and_checks_main_before_auth():
+def test_release_checks_main_before_the_approval_and_auths_after_installs():
     wf = _wf("release")
     assert wf["name"] == "Release"
     assert _on(wf) == {"push": {"tags": ["v*"]}}
-    deploy = wf["jobs"]["deploy"]
-    assert deploy["environment"] == "production"
     assert wf["concurrency"] == {"group": "release", "cancel-in-progress": False}
-    checkout = deploy["steps"][0]
-    assert checkout["uses"].startswith("actions/checkout@")
-    assert checkout["with"]["fetch-depth"] == 0
-    assert checkout["with"]["persist-credentials"] is False
-    check = _index(deploy, "merge-base --is-ancestor")
-    auth = _index(deploy, "google-github-actions/auth", "uses")
-    assert 0 < check < auth
-    run = deploy["steps"][check]["run"]
+    # The ancestry check is its own job, outside the environment, so a bad tag
+    # fails before the owner is asked to approve.
+    check = wf["jobs"]["check"]
+    assert "environment" not in check
+    assert check["permissions"] == {"contents": "read"}
+    assert check["steps"][0]["uses"].startswith("actions/checkout@")
+    assert check["steps"][0]["with"]["fetch-depth"] == 0
+    assert check["steps"][0]["with"]["persist-credentials"] is False
+    assert not any("google-github-actions" in s.get("uses", "") for s in check["steps"])
+    run = next(s["run"] for s in check["steps"] if "merge-base" in s.get("run", ""))
     assert (
         'git fetch "https://github.com/$GITHUB_REPOSITORY" '
         "+refs/heads/main:refs/remotes/origin/main"
     ) in run
     assert 'git merge-base --is-ancestor "$GITHUB_SHA" origin/main' in run
     assert "the tag is not on main" in run
+    deploy = wf["jobs"]["deploy"]
+    assert deploy["needs"] == "check"
+    assert deploy["environment"] == "production"
+    checkout = deploy["steps"][0]
+    assert checkout["uses"].startswith("actions/checkout@")
+    assert checkout["with"]["persist-credentials"] is False
+    assert not any("merge-base" in r for r in _runs(deploy))
+    auth = _index(deploy, "google-github-actions/auth", "uses")
     assert deploy["steps"][auth]["with"] == {
         "workload_identity_provider": "${{ vars.WIF_PROVIDER }}",
         "service_account": "${{ vars.DEPLOYER_SA }}",
     }
-    assert _runs(deploy)[-4:] == [
+    assert _runs(deploy) == [
         "uv sync --locked",
         "uv tool install google-agents-cli==1.7.0",
         "uv run python scripts/stage_deploy.py deploy",
         "uv run python scripts/stage_deploy.py smoke",
     ]
+    # credentials go live after the installs, right before the first deploy step
+    assert _index(deploy, "agents-cli==1.7.0") < auth
+    assert auth + 1 == _index(deploy, "stage_deploy.py deploy")
     assert deploy["env"] == {
         "GOOGLE_CLOUD_PROJECT": "${{ vars.GCP_PROJECT_ID }}",
         "ITP_TF_OUTPUTS": "${{ vars.ITP_TF_OUTPUTS }}",
