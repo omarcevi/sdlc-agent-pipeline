@@ -4,6 +4,8 @@ A multi-agent pipeline on Google ADK 2.x that turns a GitHub issue into a tested
 
 [![CI](https://github.com/omarcevi/sdlc-agent-pipeline/actions/workflows/ci.yaml/badge.svg)](https://github.com/omarcevi/sdlc-agent-pipeline/actions/workflows/ci.yaml)
 
+**Result:** on 15 benchmark tasks, three repeats each, a single agent matched the three-agent pipeline: 36 against 34 of 45 runs resolved, at $0.38 against $0.43 a run.
+
 ![Demo: an issue becomes a pull request](docs/media/demo.gif)
 
 **[Watch seven recorded runs](https://omarcevi.dev/sdlc-agent-pipeline/)**, step by step: the agent graph, every tool call, the diff, the tests, the review and the cost, failures included. A static site with no backend.
@@ -12,29 +14,29 @@ A multi-agent pipeline on Google ADK 2.x that turns a GitHub issue into a tested
 
 ![Overview: the laptop, GitHub, the GCP project and local Docker, with the identity on each connection](docs/architecture/overview.svg)
 
-A planner, a coder and a reviewer agent run in an ADK graph with deterministic function nodes between them: whether a patch exists and whether its tests pass come from the real `git diff` and real test exit codes, never from what a model claims. Every command the agents run, and every test, runs in a hermetic sandbox (Docker on a laptop or in CI, Agent Runtime in the cloud) that has no credentials and no network. A human reads the patch and types `approve` before any pull request opens.
+A planner, a coder and a reviewer agent run in an ADK graph with deterministic function nodes between them: whether a patch exists and whether its tests pass come from the real `git diff` and real test exit codes, never from what a model claims. Every command the agents run, and every test, runs in a hermetic sandbox (Docker on a laptop or in CI, Agent Runtime in the cloud) that has no credentials and no network. In live mode, on a GitHub issue, a human reads the patch and types `approve` before any pull request opens; benchmark runs end at the patch.
 
 More, with views of one run, CI/CD and identity, observability and cost, and the agent graph: [architecture](docs/architecture.md).
 
 ## What I measured
 
-A hidden-test benchmark: 15 dev tasks (bugs, features, refactors and traps that should be declined) on three small Python repositories, three repeats each, Gemini 3.8 Flash. The three-agent pipeline ran against a single agent with the same tools, sandbox, guardrails, test-fix loop and per-run caps ($1.00 and 75 tool calls). Hidden tests that the agents never see decide whether an issue is resolved.
+A hidden-test benchmark: 15 dev tasks (bugs, features, refactors and traps that should be declined) on three small Python repositories written for this project, three repeats each, Gemini 3.8 Flash. The three-agent pipeline ran against a single agent with the same tools, sandbox, guardrails and test-fix loop, and the same per-run caps for both ($1.00 and 75 tool calls, the limits at the time; the default is now 100 tool calls). Hidden tests that the agents never see decide whether an issue is resolved.
 
 | System | Resolved | Cost per run | Cost per resolved | Median time |
 |---|---|---|---|---|
 | Single agent | 36 of 45 | $0.38 | $0.47 | 171 s |
 | Three agents (planner, coder, reviewer) | 34 of 45 | $0.43 | $0.57 | 319 s |
 
-The single agent matched the three-agent pipeline on this task set. Both failed the same three multi-file features, nine runs each, all at the $1.00 cost cap. The other two multi-agent failures were runs on easy tasks stopped by a provider stall, not by the agents.
+The single agent matched the three-agent pipeline on this task set. Both failed the same three multi-file features, nine runs per system, all at the $1.00 cost cap. The other two multi-agent failures were runs on easy tasks where the model provider stalled; they ended at the 3,000 s wall-clock limit set for this run.
 
 What it teaches:
 
-- **The reviewer never changed an outcome.** It approved all 28 patches it saw, on the first round, and all 28 pass the hidden tests ([review audit](docs/results/2026-10-01-2b-review-audit.md)). A reviewer earns its cost only on tasks where a first patch is sometimes wrong.
+- **The reviewer never changed an outcome.** It approved all 28 patches it saw, on the first round, and all 28 pass the hidden tests ([review audit](docs/results/2026-10-01-2b-review-audit.md)). A reviewer can earn its cost only on tasks where a first patch is sometimes wrong.
 - **The extra agents cost more.** On the resolved tasks that need a patch, the three agents made 42 tool calls per run against 23, and cost $0.35 against $0.26.
-- **The cap and the context size decided the hard tasks, not the architecture.** The multi-file feature runs reached about a million input tokens and then the $1.00 cap, with either design.
+- **The $1.00 cap, not the architecture, decided the hard tasks.** The multi-file feature runs had used about a million input tokens when the cap stopped them, with either design. They show that such a feature costs more than $1.00 to finish here, not that either design could not solve it.
 - **Fifteen tasks is a small sample.** One task is 6.7 points of resolve rate.
 
-On Agent Runtime sandboxes the pipeline gave the same outcome as on Docker on all three tasks of a parity run (one run each), and all 12 reviewer probes were `ok` on both backends ([cloud parity](docs/results/2026-10-02-3a-cloud-parity.md)).
+On Agent Runtime sandboxes the pipeline gave the same outcome as on Docker on each of the three tasks of a parity run, one run each: 2 of 3 resolved on both backends, and `md-001` stopped at the tool-call cap on both. All 12 reviewer probes were `ok` on both backends ([cloud parity](docs/results/2026-10-02-3a-cloud-parity.md)).
 
 Full report, with every failed run and what was checked by hand: [15-task comparison](docs/results/2026-10-01-2b-comparison.md).
 
@@ -42,9 +44,9 @@ Full report, with every failed run and what was checked by hand: [15-task compar
 
 - **Two sandbox backends, one interface.** Docker and Agent Runtime implement the same [`Environment`](app/environment/base.py), and one [contract suite](tests/integration/test_environment_contract.py) of 13 tests passes on both ([Week 3A run log](docs/results/2026-10-02-3a-run-log.md)).
 - **Deterministic routing.** Function nodes take the diff and run the tests themselves; a model saying the tests pass routes nothing ([ADR 2](docs/adr/0002-deterministic-routing.md)).
-- **A sealed held-out split.** Five more tasks were written sealed (by one agent, checked by another, never opened by the main session) and have never been run: the owner dropped the held-out run for now, and they are published as they are ([ADR 5](docs/adr/0005-hidden-test-benchmark.md)).
-- **A $500 spend limit with a hard stop.** A project budget (24,000 TRY, about $489) notifies a Cloud Run function that disables billing at 100%; a dry run showed it is wired. Per-run caps on cost, tool calls and wall clock apply to both systems ([ADR 6](docs/adr/0006-runner-wide-budget.md)).
-- **Keyless CI/CD with an approval gate.** Lint, unit and Docker tests on every pull request and push to `main` (about 3 minutes, $0); paid runs only by manual dispatch behind a guard; deploys on a `v*` tag after the owner approves; GitHub signs in to GCP through Workload Identity Federation, with no keys ([CI/CD view](docs/architecture.md)).
+- **A sealed held-out split.** Five more tasks were written sealed (by one agent, checked by another) and never run: the owner dropped the held-out run for now, and they are published as they are. Two seal breaches while the set was written were disclosed and the affected tasks replaced (design spec §19, [ADR 5](docs/adr/0005-hidden-test-benchmark.md)).
+- **A $500 spend limit with a hard stop.** At 100% of the project budget (24,000 TRY, about $489) a function disables billing; a dry run showed it is wired. Both systems run under the same per-run caps ([ADR 6](docs/adr/0006-runner-wide-budget.md)).
+- **Keyless CI/CD with an approval gate.** Lint and tests on pull requests and pushes to `main`, except docs-only changes (about 3 minutes, $0); paid runs only by manual dispatch; deploys on a `v*` tag after the owner approves; Workload Identity Federation, no keys ([CI/CD view](docs/architecture.md)).
 - **Traces without message content.** The deployed agent's spans keep token counts and references to the messages, not their text; checked on a 212-span trace ([Week 3A run log](docs/results/2026-10-02-3a-run-log.md)).
 - **Code reviews that caught real bugs** ([Week 2A run log](docs/results/2026-09-30-week2a-run-log.md), [Week 3A run log](docs/results/2026-10-02-3a-run-log.md)):
   - the old scorer counted three patches that fixed nothing as resolved; the hidden tests now run in a second, fresh sandbox;
