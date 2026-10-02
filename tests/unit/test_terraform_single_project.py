@@ -194,3 +194,16 @@ def test_no_tf_file_names_the_project():
     offenders = [p.name for p in ROOT.rglob("*.tf") if project in p.read_text()]
     if offenders:
         pytest.fail("a .tf file names the project id", pytrace=False)
+
+
+def test_engine_output_is_the_full_resource_name_with_the_project_number():
+    # The provider's `name` is the bare engine id (seen on the first apply,
+    # 2026-10-02). SANDBOX_ENGINE, teardown and template matching need the full
+    # name, in the projects/<number>/... form the API returns for templates.
+    body = _block(_tf("service_outputs.tf"), 'output "agent_runtime_resource_name"')
+    value = re.search(r"value\s*=\s*\"([^\"]+)\"", body)
+    assert value, "the output must build the full name as a string"
+    assert value.group(1) == (
+        "projects/${data.google_project.project.number}/locations/${var.region}"
+        "/reasoningEngines/${google_vertex_ai_reasoning_engine.app.name}"
+    )

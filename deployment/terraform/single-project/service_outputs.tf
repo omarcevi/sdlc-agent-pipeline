@@ -13,6 +13,8 @@
 # limitations under the License.
 
 output "agent_runtime_resource_name" {
+  # The provider's `name` is the bare engine id. Callers need the full name, in the
+  # projects/<number>/... form the API returns for sandbox templates.
   description = "Agent Runtime resource name"
-  value       = google_vertex_ai_reasoning_engine.app.name
+  value       = "projects/${data.google_project.project.number}/locations/${var.region}/reasoningEngines/${google_vertex_ai_reasoning_engine.app.name}"
 }

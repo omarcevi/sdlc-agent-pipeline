@@ -349,10 +349,15 @@ def _make(env, *args):
         (["teardown-budget", "GOOGLE_CLOUD_PROJECT=p"], "rerun with CONFIRM=yes"),
     ],
 )
-def test_guards_exit_2_before_any_cloud_tool_runs(stub_env, args, message):
+def test_guards_exit_2_before_any_cloud_tool_runs(stub_env, tmp_path, args, message):
     env = dict(stub_env)
     env.pop("GOOGLE_CLOUD_PROJECT", None)
-    result = _make(env, *args)
+    # Empty roots, so real state or a saved plan in this checkout cannot change
+    # which guard answers.
+    roots = [f"TF_SP_DIR={tmp_path / 'sp'}", f"TF_BUDGET_DIR={tmp_path / 'budget'}"]
+    for d in ("sp", "budget"):
+        (tmp_path / d).mkdir()
+    result = _make(env, *args, *roots)
     assert result.returncode == 2, result.stdout + result.stderr
     assert message in result.stderr
     assert "will: " not in result.stdout
