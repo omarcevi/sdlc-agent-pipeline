@@ -212,6 +212,12 @@ export function handlesFor(from: { x: number; y: number }, to: { x: number; y: n
   return { sourceHandle: "r", targetHandle: "l" };
 }
 
+/**
+ * Lowest zoom `fitView` may use. React Flow's default (0.5) cannot fit the
+ * multi-agent graph into the run page's panel on a laptop screen.
+ */
+export const MIN_ZOOM = 0.2;
+
 export function GraphView({ graph, graphId, state, models, onNodeClick }: GraphViewProps) {
   const layout = LAYOUT[graphId];
   const nodes = useMemo<FlowNode[]>(
@@ -267,6 +273,8 @@ export function GraphView({ graph, graphId, state, models, onNodeClick }: GraphV
         edgeTypes={edgeTypes}
         nodeOrigin={[0.5, 0.5]}
         fitView
+        fitViewOptions={{ padding: 0.05 }}
+        minZoom={MIN_ZOOM}
         colorMode="system"
         nodesDraggable={false}
         nodesConnectable={false}
