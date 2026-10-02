@@ -113,7 +113,18 @@ class FakeGitHubRest:
 def _git(cwd: Path, *args: str) -> str:
     env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
     return subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        [
+            "git",
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
+            *args,
+        ],
         cwd=cwd,
         env=env,
         check=True,

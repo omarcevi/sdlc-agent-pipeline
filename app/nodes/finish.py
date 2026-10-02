@@ -152,9 +152,15 @@ def _git(args: list[str], cwd: Path, home: Path, stdin: bytes | None = None):
         "GIT_CONFIG_GLOBAL": "/dev/null",
         # An archive can look like a bare repository (HEAD, config, objects/,
         # refs/) whose config names filter commands; never discover one.
-        "GIT_CONFIG_COUNT": "1",
+        # No automatic maintenance: newer git runs it in the background after a
+        # commit, racing the removal of the temporary repository.
+        "GIT_CONFIG_COUNT": "3",
         "GIT_CONFIG_KEY_0": "safe.bareRepository",
         "GIT_CONFIG_VALUE_0": "explicit",
+        "GIT_CONFIG_KEY_1": "maintenance.auto",
+        "GIT_CONFIG_VALUE_1": "false",
+        "GIT_CONFIG_KEY_2": "gc.auto",
+        "GIT_CONFIG_VALUE_2": "0",
         "GIT_CEILING_DIRECTORIES": str(home),
         "LC_ALL": "C",
     }

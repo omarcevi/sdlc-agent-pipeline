@@ -86,7 +86,16 @@ def _git(
     check: bool = True,
 ) -> str:
     result = subprocess.run(
-        ["git", "-c", "core.autocrlf=false", *args],
+        [
+            "git",
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
+            *args,
+        ],
         cwd=cwd,
         env={**os.environ, **(env or {})},
         capture_output=True,

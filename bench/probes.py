@@ -185,7 +185,16 @@ def validate_probe(probe: ProbeSpec) -> list[str]:
 
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", "-c", "core.autocrlf=false", *args],
+        [
+            "git",
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
+            *args,
+        ],
         cwd=repo,
         check=True,
         capture_output=True,
