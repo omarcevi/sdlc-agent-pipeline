@@ -32,6 +32,36 @@ test("plays the trap replay to the end", async ({ page }) => {
   expect(problems).toEqual([]);
 });
 
+const MD1 = "md-001-multi-flash-r1-20261001T062611Z";
+const SR3 = "sr-003-multi-flash-r1-20261001T062611Z";
+
+/** The last step's time, which is where the replay ends. */
+function endOf(runId: string): number {
+  const replay = JSON.parse(readFileSync(`public/replays/${runId}.json`, "utf8")) as { steps: { t: number }[] };
+  return Math.max(...replay.steps.map((s) => s.t));
+}
+
+test("every tab renders at the end of a resolved run, and a cap stop marks its node", async ({ page }) => {
+  const problems: string[] = [];
+  page.on("console", (m) => {
+    if (m.type() === "error") problems.push(`console: ${m.text()}`);
+  });
+  page.on("pageerror", (e) => problems.push(`pageerror: ${e.message}`));
+
+  await page.goto(`/#/run/${MD1}?t=${endOf(MD1)}`);
+  await expect(page.getByTestId("outcome")).toBeVisible();
+  for (const name of ["Issue", "Plan", "Agent summary", "Diff", "Tests", "Review"]) {
+    await page.getByRole("tab", { name }).click();
+    await expect(page.getByRole("tab", { name })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tabpanel")).toBeVisible();
+  }
+
+  await page.goto(`/#/run/${SR3}?t=${endOf(SR3)}`);
+  await expect(page.getByTestId("node-coder")).toHaveAttribute("data-state", "stopped");
+
+  expect(problems).toEqual([]);
+});
+
 test("the build uses only relative asset paths", () => {
   const html = readFileSync("dist/index.html", "utf8");
   const refs = [...html.matchAll(/\b(?:src|href)="([^"]*)"/g)].map((m) => m[1]);
