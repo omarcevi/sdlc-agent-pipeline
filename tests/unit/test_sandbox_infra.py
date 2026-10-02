@@ -620,17 +620,28 @@ def sdk_sandbox(name, state=SdkState.STATE_RUNNING, age_s=0):
     )
 
 
+class NotFound(Exception):
+    """Shaped like the SDK's ClientError for a 404."""
+
+    code = 404
+    status = "NOT_FOUND"
+
+
 class FakeClient:
-    def __init__(self, templates=(), sandboxes=()):
+    def __init__(self, templates=(), sandboxes=(), gone=()):
+        """`gone`: templates the list still returns but a get answers with 404, as the
+        API does for a template deleted shortly before."""
         self.calls = []
         client = self
 
         class Templates:
             def list(self, *, name):
                 client.calls.append(("templates.list", name))
-                return [SimpleNamespace(name=t.name) for t in templates]
+                return [SimpleNamespace(name=t.name) for t in (*templates, *gone)]
 
             def get(self, *, name):
+                if any(t.name == name for t in gone):
+                    raise NotFound(name)
                 return next(t for t in templates if t.name == name)
 
             def create(self, **kw):
@@ -679,6 +690,23 @@ def test_sdk_platform_maps_sdk_shaped_templates():
     )
     assert b.state == "DELETED" and b.ports is None
     assert infra.matching_template([a, b], IMAGE) == a.name
+
+
+def test_sdk_platform_skips_a_listed_template_that_is_already_gone():
+    # Seen on 2026-10-02: after the cloud tests deleted their test template, the list
+    # still returned it (state DELETED) and a get answered 404, which broke
+    # prune-templates and would break template --find-only, env and the deploy.
+    client = FakeClient(
+        [sdk_template("a")], gone=[sdk_template("old", state="DELETED")]
+    )
+    platform = infra.SdkPlatform("p", "l", client=client)
+    assert [t.name for t in platform.list_templates(ENGINE)] == [
+        f"{ENGINE}/sandboxEnvironmentTemplates/a"
+    ]
+    code, lines, _ = invoke(
+        ["prune-templates", "--all", "--dry-run"], platform=platform
+    )
+    assert code == 0, lines
 
 
 def test_sdk_platform_normalises_enum_sandbox_states_and_skips_dead_ones():

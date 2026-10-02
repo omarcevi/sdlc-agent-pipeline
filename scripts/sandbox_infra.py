@@ -255,10 +255,16 @@ class SdkPlatform:
         )
 
     def list_templates(self, engine: str) -> list[Template]:
-        return [
-            self.get_template(str(stub.name))
-            for stub in self._sandboxes.templates.list(name=engine)
-        ]
+        # The list can still return a template deleted shortly before, and a get of it
+        # answers 404: it is gone, so it is left out.
+        templates = []
+        for stub in self._sandboxes.templates.list(name=engine):
+            try:
+                templates.append(self.get_template(str(stub.name)))
+            except Exception as error:
+                if not is_not_found(error):
+                    raise
+        return templates
 
     def get_template(self, name: str) -> Template:
         return self._template(self._sandboxes.templates.get(name=name))
