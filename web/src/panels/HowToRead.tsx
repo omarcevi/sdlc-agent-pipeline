@@ -12,7 +12,7 @@ export function HowToRead() {
           "Resolved" is the benchmark's score: hidden tests, run after the run in fresh sandboxes. The agents never
           saw them.
         </li>
-        <li>Each replay is one run. The manifest's note says how many runs these were chosen from.</li>
+        <li>Each replay is one run. The note on the run list says how many runs these were chosen from.</li>
       </ul>
     </section>
   );
