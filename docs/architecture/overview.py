@@ -14,6 +14,10 @@ hand.
 
 Everything drawn exists in deployment/terraform, .github/workflows and the code;
 the names are the real ones (a test looks each one up in the Terraform files).
+The layout runs top to bottom, the laptop and GitHub above the GCP project, and
+edge labels are short, so the picture reads at README width; the Mermaid views in
+docs/architecture.md carry the details. Node ids are fixed, so re-rendering an
+unchanged file gives the same SVG.
 """
 
 import base64
@@ -25,10 +29,11 @@ from pathlib import Path
 from diagrams import Cluster, Diagram, Edge
 from diagrams.gcp.analytics import BigQuery, PubSub
 from diagrams.gcp.compute import Functions, Run
-from diagrams.gcp.devtools import Build, ContainerRegistry, Tasks
+from diagrams.gcp.devtools import Build, ContainerRegistry
+from diagrams.gcp.management import Billing, Project
 from diagrams.gcp.ml import AIPlatform, VertexAI
 from diagrams.gcp.operations import Logging, Monitoring
-from diagrams.gcp.security import IAP, Iam, ResourceManager
+from diagrams.gcp.security import IAP, Iam
 from diagrams.gcp.storage import GCS
 from diagrams.onprem.ci import GithubActions
 from diagrams.onprem.client import Client
@@ -42,23 +47,30 @@ SOURCE = HERE / "overview.py"
 SIDECAR = HERE / "overview.sha256"
 
 GRAPH = {
-    "rankdir": "LR",
-    "fontsize": "30",
+    "rankdir": "TB",
+    "fontsize": "44",
     "fontname": "Helvetica-Bold",
     "pad": "0.4",
-    "nodesep": "0.45",
-    "ranksep": "1.1",
+    "nodesep": "1.1",
+    "ranksep": "1.0",
     "splines": "spline",
     "labelloc": "t",
 }
-NODE = {"fontsize": "17", "fontname": "Helvetica", "imagescale": "true"}
+NODE = {"fontsize": "26", "fontname": "Helvetica", "imagescale": "true"}
 EDGE = {
-    "fontsize": "16",
+    "fontsize": "24",
     "fontname": "Helvetica",
     "color": "#5f6368",
     "fontcolor": "#202124",
+    "penwidth": "1.6",
 }
 RED = {"color": "#d93025", "fontcolor": "#d93025"}
+SAME = {"minlen": "0"}
+
+
+def link(label: str = "", **attrs) -> Edge:
+    """An edge with readable text: diagrams' Edge sets 13 pt on every edge."""
+    return Edge(label=label, fontsize="24", fontname="Helvetica", **attrs)
 
 
 def cluster(label: str, fill: str, border: str = "#9aa0a6") -> dict:
@@ -67,11 +79,20 @@ def cluster(label: str, fill: str, border: str = "#9aa0a6") -> dict:
         "style": "rounded,filled",
         "fillcolor": fill,
         "color": border,
-        "fontsize": "22",
+        "fontsize": "30",
         "fontname": "Helvetica-Bold",
         "labeljust": "l",
-        "margin": "20",
+        "margin": "22",
     }
+
+
+def node(kind, label: str, nodeid: str):
+    """An icon node tall enough for its label, the icon on top, with a stable id
+    (diagrams sizes nodes for 13 pt labels and gives them random ids)."""
+    lines = label.count("\n") + 1
+    return kind(
+        label, nodeid=nodeid, height=str(1.5 + 0.45 * lines), imagepos="tc"
+    )
 
 
 def draw() -> None:
@@ -80,113 +101,102 @@ def draw() -> None:
         filename=str(STEM),
         outformat=["svg", "png"],
         show=False,
-        direction="LR",
+        direction="TB",
         graph_attr=GRAPH,
         node_attr=NODE,
         edge_attr=EDGE,
     ):
-        with Cluster(
-            "GitHub",
-            graph_attr=cluster(
-                "GitHub: the repository, its four workflows and the demo organisation",
-                "#f6f8fa",
-                "#57606a",
-            ),
-        ):
-            with Cluster("Actions", graph_attr=cluster("Actions workflows", "#ffffff")):
-                ci = GithubActions("ci")
-                paid = GithubActions("paid\n(dispatch, guard)")
-                release = GithubActions("release\n(tag v*, production\napproval)")
-                pages = GithubActions("pages")
-            runner_docker = Docker("Docker sandboxes\n(GitHub runners)")
-            site = Internet("Pages site\n(replay)")
-            demo = Github("demo organisation\n(issues, pull requests)")
+        with Cluster("Laptop", graph_attr=cluster("Laptop (owner)", "#f8f9fa")):
+            laptop = node(Client, "bench, app.live,\nmake targets", "laptop")
+            local_docker = node(Docker, "Docker sandboxes", "local_docker")
 
         with Cluster(
-            "Laptop",
-            graph_attr={**cluster("Laptop (owner)", "#f8f9fa"), "labeljust": "r"},
+            "GitHub", graph_attr=cluster("GitHub", "#f6f8fa", "#57606a")
         ):
-            laptop = Client("bench, app.live,\nmake targets")
-            local_docker = Docker("Docker sandboxes\n(laptop)")
+            demo = node(Github, "demo\nrepositories", "demo")
+            ci = node(GithubActions, "ci", "ci")
+            paid = node(GithubActions, "paid\n(dispatch)", "paid")
+            release = node(GithubActions, "release\n(approval)", "release")
+            pages = node(GithubActions, "pages", "pages")
+            runner_docker = node(Docker, "Docker sandboxes\n(runner)", "runner_docker")
+            site = node(Internet, "replay site", "site")
 
         with Cluster("GCP", graph_attr=cluster("GCP project", "#e8f0fe", "#1a73e8")):
-            with Cluster("Identity", graph_attr=cluster("Identity", "#ffffff")):
-                wif = IAP(
-                    "Workload Identity\nFederation\n(github-actions,\ngithub-oidc)"
-                )
-                ci_runner = Iam("ci-runner")
-                deployer = Iam("deployer")
-                app_sa = Iam("issue-to-pr-app")
-                caller = Iam("sandbox-caller")
+            with Cluster("Identity", graph_attr=cluster("Identity (WIF: github-actions / github-oidc)", "#ffffff")):
+                wif = node(IAP, "Workload\nIdentity\nFederation", "wif")
+                ci_runner = node(Iam, "ci-runner", "ci_runner")
+                deployer = node(Iam, "deployer", "deployer")
+                app_sa = node(Iam, "issue-to-pr-app", "app_sa")
+                caller = node(Iam, "sandbox-caller", "caller")
 
             with Cluster("Run", graph_attr=cluster("Agent Runtime", "#ffffff")):
-                engine = AIPlatform("engine\nissue-to-pr")
-                sandbox = Run("sandbox template\nand per-run\nsandboxes")
+                engine = node(AIPlatform, "engine\nissue-to-pr", "engine")
+                sandbox = node(Run, "sandboxes", "sandbox")
 
-            gemini = VertexAI("Vertex AI\nGemini")
+            gemini = node(VertexAI, "Vertex AI\nGemini", "gemini")
 
             with Cluster("Image", graph_attr=cluster("Sandbox image", "#ffffff")):
-                build = Build("Cloud Build")
-                registry = ContainerRegistry("Artifact Registry")
+                build = node(Build, "Cloud Build", "build")
+                registry = node(ContainerRegistry, "Artifact\nRegistry", "registry")
 
-            with Cluster("Obs", graph_attr=cluster("Observability", "#ffffff")):
-                trace = Monitoring("Cloud Trace\n(spans)")
-                bucket = GCS("logs bucket")
-                sink = Logging("log sink")
-                bq = BigQuery("BigQuery\nissue_to_pr_telemetry")
+            with Cluster("Obs", graph_attr=cluster("Observability (dataset issue_to_pr_telemetry)", "#ffffff")):
+                trace = node(Monitoring, "Cloud Trace", "trace")
+                bucket = node(GCS, "logs bucket", "bucket")
+                sink = node(Logging, "log sink", "sink")
+                bq = node(BigQuery, "BigQuery", "bq")
 
             with Cluster(
-                "Cost", graph_attr=cluster("Cost hard stop", "#fef7e0", "#f9ab00")
+                "Cost", graph_attr=cluster("Cost hard stop (budget issue-to-pr-budget)", "#fef7e0", "#f9ab00")
             ):
-                budget = Tasks("Billing budget\nissue-to-pr-budget")
-                topic = PubSub("Pub/Sub topic\nissue-to-pr-budget")
-                guard = Functions("budget-guard")
-                billing = ResourceManager("project billing\n(billing, not identity)")
+                budget = node(Billing, "budget", "budget")
+                topic = node(PubSub, "Pub/Sub", "topic")
+                guard = node(Functions, "budget-guard", "guard")
+                billing = node(Project, "project billing", "billing")
 
         # Laptop: local runs
-        laptop >> Edge(label="commands in,\noutput out") >> local_docker
-        (
-            laptop
-            >> Edge(constraint="false", label="issue read, pull request\n(token file)")
-            >> demo
-        )
-        (laptop >> Edge(label="model calls\n(owner credentials)") >> gemini)
-        (laptop >> Edge(label="cloud sandboxes,\ntoken signed\nby the owner") >> caller)
-        (laptop >> Edge(label="make deploy\n(owner approval)") >> engine)
-        laptop >> Edge(label="make sandbox-cloud") >> build
+        laptop >> link("commands") >> local_docker
+        laptop >> link("token file", constraint="false") >> demo
+        laptop >> link("model calls") >> gemini
+        laptop >> link("signed token") >> caller
+        laptop >> link("make deploy") >> engine
+        laptop >> link() >> build
 
         # GitHub workflows
-        ci >> Edge(label="docker job,\nno cloud credentials") >> runner_docker
-        paid >> Edge(label="sandboxes on\nthe runner") >> runner_docker
-        pages >> Edge(label="web/ build") >> site
-        paid >> Edge(label="OIDC token,\npaid.yaml on main") >> wif
-        release >> Edge(label="OIDC token,\nproduction environment") >> wif
-        wif >> Edge(label="WIF to ci-runner") >> ci_runner
-        wif >> Edge(label="deployer,\nafter approval") >> deployer
-        ci_runner >> Edge(label="model calls") >> gemini
-        deployer >> Edge(label="deploy, acts as\nissue-to-pr-app") >> engine
+        ci >> link() >> runner_docker
+        paid >> link() >> runner_docker
+        pages >> link() >> site
+        paid >> link("OIDC") >> wif
+        release >> link("OIDC") >> wif
+        wif >> link() >> ci_runner
+        wif >> link() >> deployer
+        ci_runner >> link("model calls") >> gemini
+        deployer >> link("deploy") >> engine
 
         # A deployed run
-        engine >> Edge(label="runs as", style="dashed") >> app_sa
-        app_sa >> Edge(label="signs sandbox-caller\ntoken") >> caller
-        caller >> Edge(label="commands in,\noutput out") >> sandbox
-        engine >> Edge(label="model calls\n(issue-to-pr-app)") >> gemini
-        engine >> Edge(label="spans\n(no message text)") >> trace
-        engine >> Edge(label="prompts as files") >> bucket
-        engine >> Edge(label="analytics plugin\nevents") >> bq
-        engine >> Edge(label="GenAI logs") >> sink
-        bucket >> Edge(label="completions\n(external table)") >> bq
-        sink >> Edge(label="filtered logs") >> bq
+        engine >> link("runs as", style="dashed", **SAME) >> app_sa
+        app_sa >> link("signs", **SAME) >> caller
+        caller >> link("commands") >> sandbox
+        engine >> link("model calls") >> gemini
+        engine >> link("spans, no text") >> trace
+        engine >> link("prompts") >> bucket
+        engine >> link("events") >> bq
+        engine >> link("logs") >> sink
+        bucket >> link(**SAME) >> bq
+        sink >> link(**SAME) >> bq
 
         # Sandbox image
-        build >> Edge(label="sandbox image") >> registry
-        registry >> Edge(label="image") >> sandbox
+        build >> link(**SAME) >> registry
+        registry >> link("image") >> sandbox
 
-        # Cost (kept to the right of the engine)
+        # Rows: Laptop and GitHub on top, the whole GCP project below them
+        local_docker >> Edge(style="invis") >> build
+        runner_docker >> Edge(style="invis") >> wif
+
+        # Cost, on the bottom row
         engine >> Edge(style="invis") >> budget
-        budget >> Edge(label="50, 80, 100 %") >> topic
-        topic >> Edge(label="message") >> guard
-        guard >> Edge(label="over budget:\ndisable billing", **RED) >> billing
+        budget >> link("50, 80, 100 %", **SAME) >> topic
+        topic >> link(**SAME) >> guard
+        guard >> link("disable billing", **RED, **SAME) >> billing
 
 
 def sha256(path: Path) -> str:
