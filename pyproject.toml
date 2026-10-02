@@ -30,6 +30,9 @@ dev = [
     "pytest-asyncio>=1.0.0,<2.0.0",
     "nest-asyncio>=1.6.0,<2.0.0",
 ]
+docs = [
+    "diagrams>=0.24",
+]
 
 [project.optional-dependencies]
 eval = [
@@ -90,8 +93,8 @@ pydantic-discarded-extra-argument = "ignore"
 [tool.codespell]
 ignore-words-list = "rouge"
 # runs/ and results/ hold model output from real runs, not prose we wrote;
-# so do the replays under web/public/replays.
-skip = "./locust_env/*,uv.lock,.venv,./frontend,**/package-lock.json,./runs/*,./results/*,./web/node_modules/*,./web/dist/*,./web/public/replays/*,./web/test-results/*,./web/playwright-report/*"
+# so do the replays under web/public/replays. The overview SVG embeds its icons as base64.
+skip = "./docs/architecture/overview.svg,./locust_env/*,uv.lock,.venv,./frontend,**/package-lock.json,./runs/*,./results/*,./web/node_modules/*,./web/dist/*,./web/public/replays/*,./web/test-results/*,./web/playwright-report/*"
 
 
 [build-system]
